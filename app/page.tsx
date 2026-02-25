@@ -1,65 +1,234 @@
-import Image from "next/image";
+'use client'
+
+import { useState, useEffect } from 'react'
+import { usePipeline } from '@/hooks/usePipeline'
+import Header from '@/components/Header'
+import MarketCard from '@/components/MarketCard'
+import PriceChart from '@/components/PriceChart'
+import AgentPipeline from '@/components/AgentPipeline'
+import SignalPanel from '@/components/SignalPanel'
+import TradeLog from '@/components/TradeLog'
+import PerformancePanel from '@/components/PerformancePanel'
+import PositionsPanel from '@/components/PositionsPanel'
+import FloatingBackground from '@/components/FloatingBackground'
 
 export default function Home() {
+  const [liveMode, setLiveMode] = useState(false)  // always false on SSR
+  const [showLiveWarning, setShowLiveWarning] = useState(false)
+
+  // Sync from localStorage after hydration (client-only)
+  useEffect(() => {
+    if (localStorage.getItem('sentient-live-mode') === 'true') {
+      setLiveMode(true)
+    }
+  }, [])
+
+  const { pipeline, trades, isRunning, nextCycleIn, error, stats, runCycle } = usePipeline(liveMode)
+
+  const md   = pipeline?.agents.marketDiscovery.output
+  const pf   = pipeline?.agents.priceFeed.output
+  const prob = pipeline?.agents.probability.output ?? null
+  const sent = pipeline?.agents.sentiment.output ?? null
+  const exec = pipeline?.agents.execution.output
+
+  function handleToggleLive() {
+    if (!liveMode) {
+      setShowLiveWarning(true)
+    } else {
+      setLiveMode(false)
+      localStorage.setItem('sentient-live-mode', 'false')
+    }
+  }
+
+  function confirmLive() {
+    setShowLiveWarning(false)
+    setLiveMode(true)
+    localStorage.setItem('sentient-live-mode', 'true')
+  }
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <div style={{ minHeight: '100vh', background: 'var(--bg-primary)', position: 'relative' }}>
+      <div className="noise-overlay" />
+      <FloatingBackground />
+      <Header
+        cycleId={pipeline?.cycleId ?? 0}
+        isRunning={isRunning}
+        nextCycleIn={nextCycleIn}
+        liveMode={liveMode}
+        onToggleLive={handleToggleLive}
+      />
+
+      {/* Live mode warning modal */}
+      {showLiveWarning && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 1000,
+          background: 'rgba(61,46,30,0.45)', backdropFilter: 'blur(6px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <div className="card animate-fade-in" style={{ maxWidth: 420, width: '90%', padding: '28px 28px' }}>
+            <div style={{ fontSize: 22, marginBottom: 10 }}>⚠️</div>
+            <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-primary)', marginBottom: 8 }}>
+              Enable Live Trading?
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 20 }}>
+              In live mode the pipeline will place <strong>real orders on Kalshi</strong> using your API key. Real money will be at risk on each trade the execution agent approves.
+              <br /><br />
+              Risk parameters (3% min edge, $150 daily loss cap, 15% drawdown limit) are enforced by the agent, but no system is foolproof.
+            </div>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button
+                onClick={() => setShowLiveWarning(false)}
+                style={{
+                  flex: 1, padding: '10px 0', borderRadius: 9, cursor: 'pointer',
+                  border: '1px solid var(--border-bright)', background: 'var(--cream)',
+                  fontSize: 13, fontWeight: 700, color: 'var(--text-secondary)',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmLive}
+                style={{
+                  flex: 1, padding: '10px 0', borderRadius: 9, cursor: 'pointer',
+                  border: '1px solid var(--green-dark)',
+                  background: 'linear-gradient(135deg, var(--green-dark) 0%, var(--green) 100%)',
+                  fontSize: 13, fontWeight: 700, color: '#fff',
+                  boxShadow: '0 2px 10px rgba(78,138,94,0.35)',
+                }}
+              >
+                Enable Live Trading
+              </button>
+            </div>
+          </div>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
+      )}
+
+      <main style={{ padding: '20px 24px', maxWidth: 1560, margin: '0 auto', position: 'relative', zIndex: 1 }}>
+
+        {error && (
+          <div style={{
+            marginBottom: 14, padding: '10px 16px', borderRadius: 12,
+            background: 'var(--red-pale)', border: '1px solid #e0b0b0',
+            fontSize: 12, color: 'var(--red)',
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          }}>
+            <span>Pipeline error: {error}</span>
+            <button onClick={runCycle} style={{
+              background: 'transparent', border: '1px solid var(--red)',
+              borderRadius: 6, padding: '3px 10px', color: 'var(--red)',
+              cursor: 'pointer', fontSize: 11, fontWeight: 600,
+            }}>Retry</button>
+          </div>
+        )}
+
+        {/* Live mode banner */}
+        {liveMode && (
+          <div className="animate-fade-in" style={{
+            marginBottom: 14, padding: '10px 16px', borderRadius: 12,
+            background: 'var(--green-pale)', border: '1px solid #a8d8b5',
+            fontSize: 12, color: 'var(--green-dark)',
+            display: 'flex', alignItems: 'center', gap: 8,
+          }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--green)', display: 'inline-block', boxShadow: '0 0 6px var(--green)', animation: 'pulse-live 1.5s ease-in-out infinite', flexShrink: 0 }} />
+            <span><strong>Live trading active</strong> — real Kalshi orders will be placed when the pipeline approves a trade. Risk controls: 3% min edge · $150 daily cap · 15% max drawdown.</span>
+          </div>
+        )}
+
+        <div style={{ display: 'grid', gridTemplateColumns: '310px 1fr 290px', gap: 14, alignItems: 'start' }}>
+
+          {/* ─── LEFT ─── */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <MarketCard
+              market={md?.activeMarket ?? null}
+              strikePrice={md?.strikePrice ?? 0}
+              currentBTCPrice={pf?.currentPrice ?? 0}
+              secondsUntilExpiry={md?.secondsUntilExpiry ?? 0}
+              liveMode={liveMode}
             />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+            <SignalPanel probability={prob} sentiment={sent} />
+
+            {exec && exec.action !== 'PASS' && (
+              <div className="card bracket-card animate-fade-in" style={{
+                borderColor: exec.action === 'BUY_YES' ? '#aed5b8' : '#e0b0bf',
+                background: exec.action === 'BUY_YES' ? 'var(--green-pale)' : 'var(--pink-pale)',
+              }}>
+                <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6,
+                  color: exec.action === 'BUY_YES' ? 'var(--green-dark)' : 'var(--pink-dark)' }}>
+                  <span style={{ fontSize: 16 }}>{exec.action === 'BUY_YES' ? '↑' : '↓'}</span>
+                  {exec.action === 'BUY_YES' ? 'BUY YES' : 'BUY NO'} — Latest Signal
+                  {liveMode && <span style={{ marginLeft: 'auto', fontSize: 9, fontWeight: 700, color: 'var(--green-dark)', background: 'var(--green-pale)', border: '1px solid #a8d8b5', borderRadius: 4, padding: '1px 5px' }}>LIVE</span>}
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 7 }}>
+                  {[
+                    ['Contracts', String(exec.contracts)],
+                    ['Limit',     `${exec.limitPrice}¢`],
+                    ['Cost',      `$${exec.estimatedCost.toFixed(2)}`],
+                    ['Max profit',`$${(exec.estimatedPayout - exec.estimatedCost).toFixed(2)}`],
+                  ].map(([k, v]) => (
+                    <div key={k} style={{ padding: '8px', background: 'rgba(255,255,255,0.65)', borderRadius: 8, border: '1px solid var(--border)' }}>
+                      <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>{k}</div>
+                      <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>{v}</div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ marginTop: 8, fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.5 }}>{exec.rationale}</div>
+              </div>
+            )}
+          </div>
+
+          {/* ─── CENTER ─── */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                5-min cycles · 3 signals per 15-min window · CF Benchmarks settlement
+              </div>
+              <button
+                onClick={runCycle}
+                disabled={isRunning}
+                style={{
+                  padding: '7px 18px', borderRadius: 9,
+                  background: isRunning
+                    ? 'var(--cream-dark)'
+                    : 'linear-gradient(135deg, var(--brown) 0%, var(--brown-light) 100%)',
+                  border: isRunning ? '1px solid var(--border)' : 'none',
+                  color: isRunning ? 'var(--text-muted)' : '#fff',
+                  cursor: isRunning ? 'not-allowed' : 'pointer',
+                  fontSize: 12, fontWeight: 700,
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  boxShadow: isRunning ? 'none' : '0 2px 10px rgba(155,118,83,0.35)',
+                  transition: 'all 0.2s',
+                  letterSpacing: '0.02em',
+                }}
+              >
+                {isRunning
+                  ? <><span style={{ animation: 'spin-slow 1s linear infinite', display: 'inline-block' }}>◌</span> Running...</>
+                  : '▶ Run Cycle'}
+              </button>
+            </div>
+
+            <PriceChart priceHistory={pf?.priceHistory ?? []} strikePrice={md?.strikePrice ?? 0} currentPrice={pf?.currentPrice ?? 0} />
+            <AgentPipeline pipeline={pipeline} isRunning={isRunning} />
+
+            {/* Architecture note */}
+            <div className="card" style={{ padding: '11px 15px', background: 'rgba(255,255,255,0.6)', backdropFilter: 'blur(8px)' }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--brown)', marginBottom: 5, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+                ROMA DAG — Sentient GRID
+              </div>
+              <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 9, color: 'var(--text-muted)', lineHeight: 1.9 }}>
+                MarketDiscovery → PriceFeed ──┬──▶ Sentiment → ProbabilityModel → RiskManager → Execution<br />
+                &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└──▶ Orderbook&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;↑ KXBTC15M · CF Benchmarks
+              </div>
+            </div>
+          </div>
+
+          {/* ─── RIGHT ─── */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <PositionsPanel liveMode={liveMode} />
+            <PerformancePanel stats={stats} trades={trades} />
+            <TradeLog trades={trades} />
+          </div>
         </div>
       </main>
     </div>
-  );
+  )
 }
