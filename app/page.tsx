@@ -15,7 +15,6 @@ import FloatingBackground from '@/components/FloatingBackground'
 export default function Home() {
   const [liveMode, setLiveMode] = useState(false)  // always false on SSR
   const [showLiveWarning, setShowLiveWarning] = useState(false)
-
   // Sync from localStorage after hydration (client-only)
   useEffect(() => {
     if (localStorage.getItem('sentient-live-mode') === 'true') {
