@@ -132,12 +132,7 @@ export function usePipeline(liveMode: boolean) {
     }
   }, [liveMode])
 
-  // Initial run + interval
-  useEffect(() => {
-    runCycle()
-    const intervalId = setInterval(runCycle, CYCLE_INTERVAL_MS)
-    return () => clearInterval(intervalId)
-  }, [runCycle])
+  // No auto-run on mount — user triggers manually via runCycle
 
   // Countdown timer
   useEffect(() => {
