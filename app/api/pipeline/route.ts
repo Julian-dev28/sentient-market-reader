@@ -1,7 +1,8 @@
-import { NextResponse } from 'next/server'
+import { NextResponse, type NextRequest } from 'next/server'
 import { runAgentPipeline } from '@/lib/agents'
 import { buildKalshiHeaders } from '@/lib/kalshi-auth'
 import type { KalshiMarket, KalshiOrderbook, BTCQuote } from '@/lib/types'
+import type { AIProvider } from '@/lib/llm-client'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -30,7 +31,9 @@ function getCurrentEventTicker(): string {
   return `KXBTC15M-${yy}${mon}${dd}${hh}${mm}`
 }
 
-export async function GET() {
+export async function GET(_req: NextRequest) {
+  const p = process.env.AI_PROVIDER ?? 'grok'
+  const provider: AIProvider = (p === 'grok' || p === 'openai') ? p : 'anthropic'
   try {
     // Try to fetch the currently active market using computed event_ticker
     let markets: KalshiMarket[] = []
@@ -109,7 +112,7 @@ export async function GET() {
       }
     }
 
-    const pipeline = await runAgentPipeline(markets, quote, orderbook)
+    const pipeline = await runAgentPipeline(markets, quote, orderbook, provider)
     return NextResponse.json(pipeline)
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 })

@@ -2,18 +2,32 @@
  * ROMA Pipeline Orchestrator
  * ───────────────────────────
  * Runs all 6 Sentient GRID agents in dependency order.
- * Each agent receives the output of upstream agents as input.
+ * Every LLM step uses the provider set in AI_PROVIDER env var.
  *
  * Pipeline DAG:
  *   MarketDiscovery ──┐
- *   PriceFeed ─────────┼──► Sentiment ──► ProbabilityModel ──► RiskManager ──► Execution
+ *   PriceFeed ─────────┼──► SentimentAgent ──► ProbabilityModelAgent (ROMA) ──► RiskManager ──► Execution
  *   (Orderbook) ───────┘
  */
 
-import type { PipelineState, KalshiMarket, KalshiOrderbook, BTCQuote, AgentResult, MarketDiscoveryOutput, PriceFeedOutput, SentimentOutput, ProbabilityOutput, RiskOutput, ExecutionOutput } from '../types'
+import type {
+  PipelineState,
+  KalshiMarket,
+  KalshiOrderbook,
+  BTCQuote,
+  AgentResult,
+  MarketDiscoveryOutput,
+  PriceFeedOutput,
+  SentimentOutput,
+  ProbabilityOutput,
+  RiskOutput,
+  ExecutionOutput,
+} from '../types'
+import type { AIProvider } from '../llm-client'
 import { runMarketDiscovery } from './market-discovery'
 import { runPriceFeed } from './price-feed'
-import { runRomaTradeAnalysis } from '../roma'
+import { runSentiment } from './sentiment'
+import { runProbabilityModel } from './probability-model'
 import { runRiskManager } from './risk-manager'
 import { runExecution } from './execution'
 
@@ -22,7 +36,8 @@ let cycleCounter = 0
 export async function runAgentPipeline(
   markets: KalshiMarket[],
   quote: BTCQuote,
-  orderbook: KalshiOrderbook | null
+  orderbook: KalshiOrderbook | null,
+  provider: AIProvider = 'grok',
 ): Promise<PipelineState> {
   const cycleId = ++cycleCounter
   const cycleStartedAt = new Date().toISOString()
@@ -33,17 +48,26 @@ export async function runAgentPipeline(
   // ── Stage 2: Price Feed ────────────────────────────────────────────────
   const pfResult = runPriceFeed(quote, mdResult.output.strikePrice)
 
-  // ── Stages 3 + 4: ROMA Multi-Agent Analysis ───────────────────────────
-  // Atomizer → Planner → parallel Executors → Aggregator → structured extract
-  const { sentimentResult: sentResult, probabilityResult: probResult } =
-    await runRomaTradeAnalysis(
-      quote,
-      mdResult.output.strikePrice,
-      pfResult.output.distanceFromStrikePct,
-      mdResult.output.minutesUntilExpiry,
-      mdResult.output.activeMarket,
-      orderbook
-    )
+  // ── Stage 3: Sentiment Agent ───────────────────────────────────────────
+  const sentResult = await runSentiment(
+    quote,
+    mdResult.output.strikePrice,
+    pfResult.output.distanceFromStrikePct,
+    mdResult.output.minutesUntilExpiry,
+    mdResult.output.activeMarket,
+    orderbook,
+    provider,
+  )
+
+  // ── Stage 4: Probability Model (ROMA recursive solve) ──────────────────
+  const probResult = await runProbabilityModel(
+    sentResult.output.score,
+    sentResult.output.signals,
+    pfResult.output.distanceFromStrikePct,
+    mdResult.output.minutesUntilExpiry,
+    mdResult.output.activeMarket,
+    provider,
+  )
 
   // ── Stage 5: Risk Manager ──────────────────────────────────────────────
   const side = probResult.output.recommendation === 'YES' ? 'yes' : 'no'
@@ -57,7 +81,7 @@ export async function runAgentPipeline(
     probResult.output.edgePct,
     probResult.output.pModel,
     probResult.output.recommendation,
-    limitPrice
+    limitPrice,
   )
 
   // ── Stage 6: Execution ─────────────────────────────────────────────────
@@ -65,7 +89,7 @@ export async function runAgentPipeline(
     probResult.output.recommendation,
     riskResult.output.positionSize,
     mdResult.output.activeMarket,
-    riskResult.output.approved
+    riskResult.output.approved,
   )
 
   return {
@@ -75,11 +99,11 @@ export async function runAgentPipeline(
     status: 'completed',
     agents: {
       marketDiscovery: mdResult as AgentResult<MarketDiscoveryOutput>,
-      priceFeed: pfResult as AgentResult<PriceFeedOutput>,
-      sentiment: sentResult as AgentResult<SentimentOutput>,
-      probability: probResult as AgentResult<ProbabilityOutput>,
-      risk: riskResult as AgentResult<RiskOutput>,
-      execution: execResult as AgentResult<ExecutionOutput>,
+      priceFeed:       pfResult as AgentResult<PriceFeedOutput>,
+      sentiment:       sentResult as AgentResult<SentimentOutput>,
+      probability:     probResult as AgentResult<ProbabilityOutput>,
+      risk:            riskResult as AgentResult<RiskOutput>,
+      execution:       execResult as AgentResult<ExecutionOutput>,
     },
   }
 }
