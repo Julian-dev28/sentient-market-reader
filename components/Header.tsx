@@ -69,6 +69,7 @@ export default function Header({ cycleId, isRunning, nextCycleIn, liveMode, onTo
 
       {/* Right */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
+
         {/* Live / Paper toggle */}
         <button
           onClick={onToggleLive}
