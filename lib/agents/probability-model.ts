@@ -1,119 +1,97 @@
 import type { AgentResult, ProbabilityOutput, KalshiMarket } from '../types'
-import { getClaudeClient } from '../claude-client'
-
-function sigmoid(x: number): number {
-  return 1 / (1 + Math.exp(-x))
-}
+import { llmToolCall, type AIProvider } from '../llm-client'
+import { solve } from '../roma/solve'
 
 export async function runProbabilityModel(
   sentimentScore: number,
+  sentimentSignals: string[],
   distanceFromStrikePct: number,
   minutesUntilExpiry: number,
-  market: KalshiMarket | null
+  market: KalshiMarket | null,
+  provider: AIProvider,
 ): Promise<AgentResult<ProbabilityOutput>> {
   const start = Date.now()
 
   const pMarket = market ? market.yes_ask / 100 : 0.5
   const spread  = market ? (market.yes_ask - market.yes_bid) / 100 : 0.05
+  const distSign = distanceFromStrikePct >= 0 ? '+' : ''
 
-  const prompt = `You are ProbabilityModelAgent — part of a Sentient GRID ROMA multi-agent pipeline trading Kalshi KXBTC15M 15-minute BTC prediction markets.
+  const context = [
+    `SentimentAgent score: ${sentimentScore.toFixed(4)} (range -1 = strongly bearish → +1 = strongly bullish)`,
+    `Key sentiment signals: ${sentimentSignals.join(' | ')}`,
+    `BTC vs strike: ${distSign}${distanceFromStrikePct.toFixed(4)}% — currently ${distanceFromStrikePct >= 0 ? 'ABOVE' : 'BELOW'} strike`,
+    `Minutes until expiry: ${minutesUntilExpiry.toFixed(2)}`,
+    `Market-implied P(YES): ${(pMarket * 100).toFixed(1)}¢ — crowd's probability BTC ends above strike`,
+    `Bid-ask spread: ${(spread * 100).toFixed(1)}¢`,
+    `Minimum edge to trade: spread + 2¢ = ${((spread + 0.02) * 100).toFixed(1)}¢`,
+  ].join('\n')
 
-Upstream agent outputs fed to you:
-- SentimentAgent score: ${sentimentScore.toFixed(4)}  (range -1 = strongly bearish → +1 = strongly bullish)
-- BTC distance from Kalshi strike: ${distanceFromStrikePct >= 0 ? '+' : ''}${distanceFromStrikePct.toFixed(4)}%  (positive = BTC is ABOVE strike right now)
-- Minutes until market expiry: ${minutesUntilExpiry.toFixed(2)} min
-- Kalshi market-implied P(YES): ${(pMarket * 100).toFixed(1)}¢  (the crowd's probability)
-- Bid-ask spread: ${(spread * 100).toFixed(1)}¢
-
-Your job: Estimate the true probability that BTC will be ABOVE the strike price when this 15-minute window closes.
-
-Reason through:
-1. What the sentiment score implies about short-term direction
-2. How the current price position (above/below strike) factors in — closer to expiry it matters more
-3. Time decay: with ${minutesUntilExpiry.toFixed(1)} minutes left, how much can price move?
-4. Whether there is a meaningful edge vs the Kalshi market-implied probability of ${(pMarket * 100).toFixed(1)}%
-5. Whether to trade YES (BTC ends above strike), NO (BTC ends below), or stand aside
-
-An edge must exceed the spread (${(spread * 100).toFixed(1)}¢) + 2¢ minimum to justify a trade.`
+  const goal =
+    `Estimate the true probability that BTC ends ABOVE the Kalshi strike at window close. ` +
+    `Factor in: (1) sentiment + momentum signals, (2) current price position vs strike, ` +
+    `(3) time decay with ${minutesUntilExpiry.toFixed(1)} min left, (4) whether model edge vs ` +
+    `market-implied ${(pMarket * 100).toFixed(1)}% justifies trading YES, NO, or standing aside.`
 
   try {
-    const claude = getClaudeClient()
-    const response = await claude.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 1024,
-      tools: [
-        {
-          name: 'output_probability',
-          description: 'Output the structured probability estimate and trade recommendation',
-          input_schema: {
-            type: 'object' as const,
-            properties: {
-              pModel:         { type: 'number', description: 'Your estimated P(YES) from 0.0 to 1.0' },
-              recommendation: { type: 'string', enum: ['YES', 'NO', 'NO_TRADE'], description: 'Trade recommendation' },
-              confidence:     { type: 'string', enum: ['high', 'medium', 'low'], description: 'Confidence in the recommendation' },
-              reasoning:      { type: 'string', description: 'Step-by-step probability reasoning' },
-            },
-            required: ['pModel', 'recommendation', 'confidence', 'reasoning'],
-          },
-        },
-      ],
-      tool_choice: { type: 'tool', name: 'output_probability' },
-      messages: [{ role: 'user', content: prompt }],
-    })
+    // ROMA recursive solve: Atomizer → Planner → parallel Executors → Aggregator
+    const romaResult = await solve(goal, context, provider)
 
-    const toolBlock = response.content.find(b => b.type === 'tool_use')
-    if (!toolBlock || toolBlock.type !== 'tool_use') throw new Error('No tool_use block in Claude response')
-
-    const r = toolBlock.input as {
+    // Structured extraction from ROMA's qualitative reasoning
+    const extracted = await llmToolCall<{
       pModel: number
       recommendation: ProbabilityOutput['recommendation']
       confidence: ProbabilityOutput['confidence']
-      reasoning: string
-    }
+    }>({
+      provider,
+      tier: 'smart',
+      maxTokens: 512,
+      toolName: 'extract_probability',
+      toolDescription: 'Extract probability estimate and trade recommendation from ROMA analysis',
+      schema: {
+        properties: {
+          pModel:         { type: 'number', description: 'Estimated P(YES) 0.0–1.0 that BTC ends above strike' },
+          recommendation: { type: 'string', enum: ['YES', 'NO', 'NO_TRADE'], description: `YES = buy YES contracts. NO = buy NO contracts. NO_TRADE = edge < ${((spread + 0.02) * 100).toFixed(1)}¢` },
+          confidence:     { type: 'string', enum: ['high', 'medium', 'low'] },
+        },
+        required: ['pModel', 'recommendation', 'confidence'],
+      },
+      prompt: `Extract the probability estimate and trade recommendation from this ROMA analysis:\n\n${romaResult.answer}\n\nMarket-implied P(YES): ${(pMarket * 100).toFixed(1)}%`,
+    })
 
-    const pModel  = Math.max(0, Math.min(1, r.pModel))
+    const pModel  = Math.max(0, Math.min(1, extracted.pModel))
     const edge    = pModel - pMarket
     const edgePct = edge * 100
 
-    const output: ProbabilityOutput = {
-      pModel,
-      pMarket,
-      edge,
-      edgePct,
-      recommendation: r.recommendation,
-      confidence:     r.confidence,
-    }
-
-    const edgeStr = `${edge >= 0 ? '+' : ''}${edgePct.toFixed(1)}%`
     return {
-      agentName: 'ProbabilityModelAgent',
+      agentName: 'ProbabilityModelAgent (ROMA)',
       status: 'done',
-      output,
-      reasoning: `${r.reasoning}\n\nP(model)=${(pModel * 100).toFixed(1)}% vs P(market)=${(pMarket * 100).toFixed(1)}% — edge: ${edgeStr}. Recommendation: ${r.recommendation} (${r.confidence} confidence).`,
+      output: { pModel, pMarket, edge, edgePct, recommendation: extracted.recommendation, confidence: extracted.confidence },
+      reasoning:
+        romaResult.wasAtomic
+          ? `[ROMA atomic] ${romaResult.answer}`
+          : `[ROMA: ${romaResult.subtasks.length} subtasks]\n` +
+            romaResult.subtasks.map(t => `• ${t.id}: ${t.goal}\n  → ${t.result}`).join('\n') +
+            `\n\n[Answer] ${romaResult.answer}` +
+            `\n\nP(model)=${(pModel * 100).toFixed(1)}% vs P(market)=${(pMarket * 100).toFixed(1)}% — edge: ${edgePct >= 0 ? '+' : ''}${edgePct.toFixed(1)}%. Rec: ${extracted.recommendation} (${extracted.confidence})`,
       durationMs: Date.now() - start,
       timestamp: new Date().toISOString(),
     }
   } catch (err) {
-    // Fallback: rule-based sigmoid if Claude unavailable
+    // Rule-based fallback using sigmoid
     const timeWeight = Math.max(0, 1 - minutesUntilExpiry / 15)
-    const logit  = sentimentScore * 3.0 + (distanceFromStrikePct / 0.5) * timeWeight * 2.0
-    const pModel  = sigmoid(logit)
-    const edge    = pModel - pMarket
+    const logit = sentimentScore * 3.0 + (distanceFromStrikePct / 0.5) * timeWeight * 2.0
+    const pModel = 1 / (1 + Math.exp(-logit))
+    const edge = pModel - pMarket
     const edgePct = edge * 100
-
-    let recommendation: ProbabilityOutput['recommendation'] = 'NO_TRADE'
-    if (edge > spread + 0.02)       recommendation = 'YES'
-    else if (edge < -(spread + 0.02)) recommendation = 'NO'
-
+    const recommendation: ProbabilityOutput['recommendation'] =
+      edge > spread + 0.02 ? 'YES' : edge < -(spread + 0.02) ? 'NO' : 'NO_TRADE'
     const confidence: ProbabilityOutput['confidence'] =
       Math.abs(edge) > 0.1 ? 'high' : Math.abs(edge) > 0.04 ? 'medium' : 'low'
-
-    const errMsg = err instanceof Error ? err.message : String(err)
     return {
-      agentName: 'ProbabilityModelAgent',
+      agentName: 'ProbabilityModelAgent (ROMA)',
       status: 'done',
       output: { pModel, pMarket, edge, edgePct, recommendation, confidence },
-      reasoning: `[rule-based fallback — Claude unavailable: ${errMsg}] P(model)=${(pModel * 100).toFixed(1)}% vs P(market)=${(pMarket * 100).toFixed(1)}% — edge: ${edgePct >= 0 ? '+' : ''}${edgePct.toFixed(1)}%.`,
+      reasoning: `[rule-based fallback: ${String(err)}] P(model)=${(pModel * 100).toFixed(1)}% vs P(market)=${(pMarket * 100).toFixed(1)}%`,
       durationMs: Date.now() - start,
       timestamp: new Date().toISOString(),
     }

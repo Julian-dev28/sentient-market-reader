@@ -11,7 +11,7 @@
  */
 
 import { solve } from './solve'
-import { getClaudeClient } from '../claude-client'
+import { llmToolCall, PROVIDER_MODELS, type AIProvider } from '../llm-client'
 import type {
   AgentResult,
   SentimentOutput,
@@ -78,81 +78,38 @@ interface ExtractedAnalysis {
 
 async function extractStructured(
   romaAnswer: string,
-  pMarket: number
+  pMarket: number,
+  provider: AIProvider,
 ): Promise<ExtractedAnalysis> {
-  const client = getClaudeClient()
-
-  const response = await client.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 1024,
-    tools: [
-      {
-        name: 'extract_trading_analysis',
-        description: 'Extract structured trading signals from ROMA qualitative analysis',
-        input_schema: {
-          type: 'object' as const,
-          properties: {
-            sentimentScore: {
-              type: 'number',
-              description: 'Overall directional sentiment score from -1.0 (strongly bearish) to +1.0 (strongly bullish)',
-            },
-            sentimentLabel: {
-              type: 'string',
-              enum: ['strongly_bullish', 'bullish', 'neutral', 'bearish', 'strongly_bearish'],
-            },
-            momentum: {
-              type: 'number',
-              description: 'Price momentum component, -1 to 1',
-            },
-            orderbookSkew: {
-              type: 'number',
-              description: 'Orderbook/crowd sentiment skew, -1 to 1',
-            },
-            signals: {
-              type: 'array',
-              items: { type: 'string' },
-              description: 'Key signals that drove the analysis (3-5 bullet points)',
-            },
-            pModel: {
-              type: 'number',
-              description: 'Estimated probability (0.0 to 1.0) that BTC ends above strike at expiry',
-            },
-            recommendation: {
-              type: 'string',
-              enum: ['YES', 'NO', 'NO_TRADE'],
-              description: `YES = buy YES contracts (BTC above strike). NO = buy NO contracts. NO_TRADE = edge insufficient vs market-implied ${(pMarket * 100).toFixed(1)}%`,
-            },
-            confidence: {
-              type: 'string',
-              enum: ['high', 'medium', 'low'],
-            },
-          },
-          required: [
-            'sentimentScore', 'sentimentLabel', 'momentum', 'orderbookSkew',
-            'signals', 'pModel', 'recommendation', 'confidence',
-          ],
+  try {
+    return await llmToolCall<ExtractedAnalysis>({
+      provider,
+      tier: 'smart',
+      maxTokens: 1024,
+      toolName: 'extract_trading_analysis',
+      toolDescription: 'Extract structured trading signals from ROMA qualitative analysis',
+      schema: {
+        properties: {
+          sentimentScore:  { type: 'number', description: 'Overall directional sentiment score from -1.0 (strongly bearish) to +1.0 (strongly bullish)' },
+          sentimentLabel:  { type: 'string', enum: ['strongly_bullish', 'bullish', 'neutral', 'bearish', 'strongly_bearish'] },
+          momentum:        { type: 'number', description: 'Price momentum component, -1 to 1' },
+          orderbookSkew:   { type: 'number', description: 'Orderbook/crowd sentiment skew, -1 to 1' },
+          signals:         { type: 'array', items: { type: 'string' }, description: 'Key signals that drove the analysis (3-5 bullet points)' },
+          pModel:          { type: 'number', description: 'Estimated probability (0.0 to 1.0) that BTC ends above strike at expiry' },
+          recommendation:  { type: 'string', enum: ['YES', 'NO', 'NO_TRADE'], description: `YES = buy YES. NO = buy NO. NO_TRADE = insufficient edge vs market-implied ${(pMarket * 100).toFixed(1)}%` },
+          confidence:      { type: 'string', enum: ['high', 'medium', 'low'] },
         },
+        required: ['sentimentScore', 'sentimentLabel', 'momentum', 'orderbookSkew', 'signals', 'pModel', 'recommendation', 'confidence'],
       },
-    ],
-    tool_choice: { type: 'tool', name: 'extract_trading_analysis' },
-    messages: [
-      {
-        role: 'user',
-        content: `Extract structured trading signals from this ROMA multi-agent analysis:\n\n${romaAnswer}\n\nMarket-implied P(YES): ${(pMarket * 100).toFixed(1)}%`,
-      },
-    ],
-  })
-
-  const tool = response.content.find(b => b.type === 'tool_use')
-  if (!tool || tool.type !== 'tool_use') {
-    // Fallback neutral values
+      prompt: `Extract structured trading signals from this ROMA multi-agent analysis:\n\n${romaAnswer}\n\nMarket-implied P(YES): ${(pMarket * 100).toFixed(1)}%`,
+    })
+  } catch {
     return {
       sentimentScore: 0, sentimentLabel: 'neutral', momentum: 0, orderbookSkew: 0,
       signals: ['[extraction failed — neutral defaults applied]'],
       pModel: pMarket, recommendation: 'NO_TRADE', confidence: 'low',
     }
   }
-  return tool.input as ExtractedAnalysis
 }
 
 // ── Main export ────────────────────────────────────────────────────────────
@@ -169,7 +126,8 @@ export async function runRomaTradeAnalysis(
   distanceFromStrikePct: number,
   minutesUntilExpiry: number,
   market: KalshiMarket | null,
-  orderbook: KalshiOrderbook | null
+  orderbook: KalshiOrderbook | null,
+  provider: AIProvider = 'anthropic',
 ): Promise<RomaTradeAnalysis> {
   const start = Date.now()
 
@@ -182,11 +140,11 @@ export async function runRomaTradeAnalysis(
     `and (3) whether there is a profitable edge to trade YES, NO, or stand aside.`
 
   // ── Run ROMA recursive solve loop ───────────────────────────────────────
-  const romaResult = await solve(goal, context)
+  const romaResult = await solve(goal, context, provider)
 
   // ── Extract structured numbers from ROMA's qualitative answer ───────────
   const pMarket = market ? market.yes_ask / 100 : 0.5
-  const extracted = await extractStructured(romaResult.answer, pMarket)
+  const extracted = await extractStructured(romaResult.answer, pMarket, provider)
 
   const romaDurationMs = Date.now() - start
   const spread  = market ? (market.yes_ask - market.yes_bid) / 100 : 0.05
@@ -209,8 +167,10 @@ export async function runRomaTradeAnalysis(
         `\n\n[ROMA Aggregated Answer]\n${romaResult.answer}`
 
   // ── Return typed agent results ──────────────────────────────────────────
+  const { label: providerLabel } = PROVIDER_MODELS[provider]
+
   const sentimentResult: AgentResult<SentimentOutput> = {
-    agentName: 'SentimentAgent (ROMA)',
+    agentName: `SentimentAgent (ROMA · ${providerLabel})`,
     status: 'done',
     output: {
       score:         Math.max(-1, Math.min(1, extracted.sentimentScore)),
@@ -225,7 +185,7 @@ export async function runRomaTradeAnalysis(
   }
 
   const probabilityResult: AgentResult<ProbabilityOutput> = {
-    agentName: 'ProbabilityModelAgent (ROMA)',
+    agentName: `ProbabilityModelAgent (ROMA · ${providerLabel})`,
     status: 'done',
     output: {
       pModel:         Math.max(0, Math.min(1, extracted.pModel)),
