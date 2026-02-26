@@ -188,6 +188,84 @@ const AGENTS = [
   { key: 'execution'       as const, label: 'Execution',        short: 'EXEC',     icon: '▶', desc: 'Paper order',       color: 'var(--green)',  rgb: '74,148,112',  bg: 'var(--green-pale)', border: '#9ecfb8' },
 ]
 
+function Bullet({ label, value, color }: { label: string; value: string; color?: string }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 4 }}>
+      <span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', flexShrink: 0 }}>
+        · {label}
+      </span>
+      <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 11, fontWeight: 700, color: color ?? 'var(--text-primary)', letterSpacing: '-0.01em' }}>
+        {value}
+      </span>
+    </div>
+  )
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function AgentBullets({ agentKey, output, color }: { agentKey: string; output: any; color: string }) {
+  if (!output) return null
+
+  if (agentKey === 'marketDiscovery') return (
+    <>
+      <Bullet label="Market"  value={output.activeMarket?.ticker ?? '—'} color={color} />
+      <Bullet label="Strike"  value={output.strikePrice ? `$${output.strikePrice.toLocaleString('en-US', { maximumFractionDigits: 2 })}` : '—'} />
+      <Bullet label="Expiry"  value={output.minutesUntilExpiry != null ? `${output.minutesUntilExpiry.toFixed(1)} min` : '—'} />
+    </>
+  )
+
+  if (agentKey === 'priceFeed') return (
+    <>
+      <Bullet label="BTC"      value={output.currentPrice ? `$${output.currentPrice.toLocaleString('en-US', { maximumFractionDigits: 2 })}` : '—'} color={color} />
+      <Bullet label="vs Strike" value={output.distanceFromStrikePct != null ? `${output.distanceFromStrikePct >= 0 ? '+' : ''}${output.distanceFromStrikePct.toFixed(3)}%` : '—'} />
+      <Bullet label="1h"       value={output.change1h != null ? `${output.change1h >= 0 ? '+' : ''}${output.change1h.toFixed(3)}%` : '—'} />
+    </>
+  )
+
+  if (agentKey === 'sentiment') return (
+    <>
+      <Bullet label="Score"   value={output.score != null ? output.score.toFixed(3) : '—'} color={color} />
+      <Bullet label="Label"   value={output.label?.replace(/_/g, ' ') ?? '—'} />
+      <Bullet label="Model"   value={output.provider ?? '—'} />
+      {(output.signals ?? []).slice(0, 3).map((s: string, i: number) => (
+        <div key={i} style={{ fontSize: 10, color: 'var(--text-secondary)', lineHeight: 1.5, paddingLeft: 10, marginBottom: 2 }}>
+          · {s.length > 55 ? s.slice(0, 55) + '…' : s}
+        </div>
+      ))}
+    </>
+  )
+
+  if (agentKey === 'probability') return (
+    <>
+      <Bullet label="P(Model)"  value={output.pModel != null ? `${(output.pModel * 100).toFixed(1)}%` : '—'} color={color} />
+      <Bullet label="P(Market)" value={output.pMarket != null ? `${(output.pMarket * 100).toFixed(1)}%` : '—'} />
+      <Bullet label="Edge"      value={output.edgePct != null ? `${output.edgePct >= 0 ? '+' : ''}${output.edgePct.toFixed(1)}%` : '—'} color={output.edgePct >= 0 ? 'var(--green)' : 'var(--pink)'} />
+      <Bullet label="Rec"       value={output.recommendation ?? '—'} color={output.recommendation === 'YES' ? 'var(--green)' : output.recommendation === 'NO' ? 'var(--pink)' : 'var(--text-muted)'} />
+      <Bullet label="Conf"      value={output.confidence ?? '—'} />
+    </>
+  )
+
+  if (agentKey === 'risk') return (
+    <>
+      <Bullet label="Approved"  value={output.approved ? 'YES' : 'NO'} color={output.approved ? 'var(--green)' : 'var(--pink)'} />
+      <Bullet label="Size"      value={output.positionSize != null ? `${output.positionSize} contracts` : '—'} color={color} />
+      <Bullet label="Max Loss"  value={output.maxLoss != null ? `$${output.maxLoss.toFixed(2)}` : '—'} />
+      {output.rejectionReason && <div style={{ fontSize: 10, color: 'var(--pink)', marginTop: 2 }}>· {output.rejectionReason}</div>}
+    </>
+  )
+
+  if (agentKey === 'execution') return (
+    <>
+      <Bullet label="Action"   value={output.action ?? '—'} color={color} />
+      <Bullet label="Price"    value={output.limitPrice != null ? `${output.limitPrice}¢` : '—'} />
+      <Bullet label="Size"     value={output.contracts != null ? `${output.contracts} contracts` : '—'} />
+      <Bullet label="Cost"     value={output.estimatedCost != null ? `$${output.estimatedCost.toFixed(2)}` : '—'} />
+      <Bullet label="Payout"   value={output.estimatedPayout != null ? `$${output.estimatedPayout.toFixed(2)}` : '—'} />
+    </>
+  )
+
+  return null
+}
+
 function AgentCard({
   agent,
   result,
@@ -262,24 +340,16 @@ function AgentCard({
         {skipped && <span style={{ fontSize: 12, color: 'var(--amber)', flexShrink: 0, marginRight: 20 }}>—</span>}
       </div>
 
-      {/* Reasoning */}
-      {result ? (
-        <div style={{
-          fontSize: 12, fontWeight: 500, color: 'var(--text-secondary)', lineHeight: 1.65,
-          borderTop: `1px solid rgba(${agent.rgb},0.15)`,
-          paddingTop: 10,
-        }}>
-          {result.reasoning.length > 200 ? result.reasoning.slice(0, 200) + '…' : result.reasoning}
-        </div>
-      ) : (
-        <div style={{
-          fontSize: 12, color: 'var(--text-light)', lineHeight: 1.5,
-          borderTop: '1px solid var(--border)', paddingTop: 10,
-          fontStyle: 'italic',
-        }}>
-          Waiting for pipeline run...
-        </div>
-      )}
+      {/* Output bullets */}
+      <div style={{ borderTop: `1px solid rgba(${agent.rgb},0.15)`, paddingTop: 10 }}>
+        {result ? (
+          <AgentBullets agentKey={agent.key} output={result.output} color={agent.color} />
+        ) : (
+          <div style={{ fontSize: 11, color: 'var(--text-light)', fontStyle: 'italic' }}>
+            Waiting for pipeline run…
+          </div>
+        )}
+      </div>
 
       {/* Duration */}
       {result?.durationMs != null && (
