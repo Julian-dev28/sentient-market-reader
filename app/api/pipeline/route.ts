@@ -56,12 +56,15 @@ export async function GET(req: NextRequest) {
       { headers: { ...buildKalshiHeaders('GET', eventPath), Accept: 'application/json' }, cache: 'no-store' }
     ).catch(() => null)
 
-    // Only accept markets that are genuinely open for trading:
-    // close_time must be in the future, and prices must be live (not 0 or 100 = settled extremes)
+    // Accept markets that Kalshi considers 'active' and have live bid/ask pricing.
+    // Avoid yes_ask price range filtering — it rejects valid markets at the start
+    // (yes_ask=0 while initialized) and near close (yes_ask=98/99 in final seconds).
+    // Kalshi's own `status` field is the authoritative signal.
     const now = Date.now()
     const isTradeable = (m: KalshiMarket) =>
-      (m.close_time ? new Date(m.close_time).getTime() > now : true) &&
-      m.yes_ask > 1 && m.yes_ask < 99
+      m.status === 'active' &&
+      m.yes_ask > 0 &&   // must have live pricing (0 = not yet priced)
+      (m.close_time ? new Date(m.close_time).getTime() > now : true)
 
     if (eventRes?.ok) {
       const data = await eventRes.json()
