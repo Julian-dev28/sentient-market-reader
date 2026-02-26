@@ -14,23 +14,19 @@ import Anthropic from '@anthropic-ai/sdk'
 import OpenAI from 'openai'
 
 export type AIProvider = 'anthropic' | 'openai' | 'grok' | 'openrouter'
-export type RomaMode = 'sharp' | 'keen' | 'smart'
+export type RomaMode = 'blitz' | 'sharp' | 'keen' | 'smart'
 
 // ── ROMA Mode ────────────────────────────────────────────────────────────────
 // ROMA_MODE controls which model tier every agent uses across the pipeline:
 //
-//   sharp — all agents use the fast model (~10–20s pipeline)
-//            grok-3-mini; absolute fastest, lowest cost
-//
-//   keen  — all agents use the mid model (~20–40s pipeline)
-//            grok-3-fast; balanced speed, good quality
-//
-//   smart — all agents use the smart model (~40–70s pipeline)
-//            grok-3 full; best quality within Grok 3 family
+//   blitz — grok-3-mini-fast; same weights as mini but on faster infra (~5–15s)
+//   sharp — grok-3-mini;      fastest non-premium model               (~10–20s)
+//   keen  — grok-3-fast;      balanced speed and quality              (~20–40s)
+//   smart — grok-3;           best quality within Grok 3 family       (~40–70s)
 //
 export const ROMA_MODE: RomaMode = (() => {
   const m = process.env.ROMA_MODE ?? 'keen'
-  if (m === 'sharp' || m === 'keen' || m === 'smart') return m
+  if (m === 'blitz' || m === 'sharp' || m === 'keen' || m === 'smart') return m
   console.warn(`[llm-client] Unknown ROMA_MODE "${m}", falling back to "keen"`)
   return 'keen'
 })()
@@ -41,54 +37,62 @@ export const ROMA_MODE: RomaMode = (() => {
 // Speed reference per provider (single call, p50):
 //
 // ANTHROPIC
+//   blitz: claude-haiku-4-5-20251001  ~2–5s   — blitz tier (haiku is already fastest)
 //   fast:  claude-haiku-4-5-20251001  ~2–5s   — sharp tier
-//   mid:   claude-haiku-4-5-20251001  ~2–5s   — keen tier (same, haiku is already the fast option)
+//   mid:   claude-haiku-4-5-20251001  ~2–5s   — keen tier
 //   smart: claude-sonnet-4-6          ~10–20s  — smart tier
 //
 // OPENAI
+//   blitz: gpt-4o-mini                ~3–8s   — blitz tier (mini is already fastest)
 //   fast:  gpt-4o-mini                ~3–8s   — sharp tier
 //   mid:   gpt-4o-mini                ~3–8s   — keen tier
 //   smart: gpt-4o                     ~10–20s  — smart tier
 //
 // GROK (xAI)
+//   blitz: grok-3-mini-fast           ~3–8s   — same weights as mini, faster inference infra
 //   fast:  grok-3-mini                ~5–10s  — sharp tier
 //   mid:   grok-3-fast                ~10–20s  — keen tier
 //   smart: grok-3                     ~30–50s  — smart tier
 //
-// For openrouter: set OPENROUTER_MODEL (smart), OPENROUTER_MID_MODEL (keen), OPENROUTER_FAST_MODEL (sharp).
-export const PROVIDER_MODELS: Record<AIProvider, { fast: string; mid: string; smart: string; label: string }> = {
+// For openrouter: set OPENROUTER_MODEL (smart), OPENROUTER_MID_MODEL (keen), OPENROUTER_FAST_MODEL (sharp/blitz).
+export const PROVIDER_MODELS: Record<AIProvider, { blitz: string; fast: string; mid: string; smart: string; label: string }> = {
   anthropic: {
+    blitz: process.env.ANTHROPIC_BLITZ_MODEL ?? 'claude-haiku-4-5-20251001',
     fast:  process.env.ANTHROPIC_FAST_MODEL  ?? 'claude-haiku-4-5-20251001',
     mid:   process.env.ANTHROPIC_MID_MODEL   ?? 'claude-haiku-4-5-20251001',
     smart: process.env.ANTHROPIC_SMART_MODEL ?? 'claude-sonnet-4-6',
     label: 'Claude',
   },
   openai: {
+    blitz: process.env.OPENAI_BLITZ_MODEL ?? 'gpt-4o-mini',
     fast:  process.env.OPENAI_FAST_MODEL  ?? 'gpt-4o-mini',
     mid:   process.env.OPENAI_MID_MODEL   ?? 'gpt-4o-mini',
     smart: process.env.OPENAI_SMART_MODEL ?? 'gpt-4o',
     label: 'GPT-4o',
   },
   grok: {
+    blitz: process.env.GROK_BLITZ_MODEL ?? 'grok-3-mini-fast',
     fast:  process.env.GROK_FAST_MODEL  ?? 'grok-3-mini',
     mid:   process.env.GROK_MID_MODEL   ?? 'grok-3-fast',
     smart: process.env.GROK_SMART_MODEL ?? 'grok-3',
     label: 'Grok',
   },
   openrouter: {
-    fast:  process.env.OPENROUTER_FAST_MODEL ?? process.env.OPENROUTER_MODEL ?? 'anthropic/claude-haiku-4-5-20251001',
-    mid:   process.env.OPENROUTER_MID_MODEL  ?? process.env.OPENROUTER_MODEL ?? 'anthropic/claude-haiku-4-5-20251001',
-    smart: process.env.OPENROUTER_MODEL      ?? 'anthropic/claude-sonnet-4-6',
+    blitz: process.env.OPENROUTER_BLITZ_MODEL ?? process.env.OPENROUTER_FAST_MODEL ?? process.env.OPENROUTER_MODEL ?? 'anthropic/claude-haiku-4-5-20251001',
+    fast:  process.env.OPENROUTER_FAST_MODEL  ?? process.env.OPENROUTER_MODEL ?? 'anthropic/claude-haiku-4-5-20251001',
+    mid:   process.env.OPENROUTER_MID_MODEL   ?? process.env.OPENROUTER_MODEL ?? 'anthropic/claude-haiku-4-5-20251001',
+    smart: process.env.OPENROUTER_MODEL       ?? 'anthropic/claude-sonnet-4-6',
     label: 'OpenRouter',
   },
 }
 
 // Remaps to the correct tier based on ROMA_MODE:
+//   blitz → blitz (grok-3-mini-fast — same weights as mini, faster infra)
 //   sharp → fast  (grok-3-mini)
 //   keen  → mid   (grok-3-fast)
 //   smart → smart (grok-3)
 export function resolveModel(tier: 'fast' | 'smart', provider: AIProvider): string {
-  const effectiveTier = ROMA_MODE === 'sharp' ? 'fast' : ROMA_MODE === 'keen' ? 'mid' : 'smart'
+  const effectiveTier = ROMA_MODE === 'blitz' ? 'blitz' : ROMA_MODE === 'sharp' ? 'fast' : ROMA_MODE === 'keen' ? 'mid' : 'smart'
   return PROVIDER_MODELS[provider][effectiveTier]
 }
 

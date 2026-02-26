@@ -16,15 +16,15 @@ import FloatingBackground from '@/components/FloatingBackground'
 export default function Home() {
   const [liveMode, setLiveMode] = useState(false)  // always false on SSR
   const [showLiveWarning, setShowLiveWarning] = useState(false)
-  const [romaMode, setRomaMode] = useState<'sharp' | 'keen' | 'smart'>('keen')
+  const [romaMode, setRomaMode] = useState<'blitz' | 'sharp' | 'keen' | 'smart'>('keen')
   // Sync from localStorage after hydration (client-only)
   useEffect(() => {
     if (localStorage.getItem('sentient-live-mode') === 'true') setLiveMode(true)
     const m = localStorage.getItem('sentient-roma-mode')
-    if (m === 'sharp' || m === 'keen' || m === 'smart') setRomaMode(m)
+    if (m === 'blitz' || m === 'sharp' || m === 'keen' || m === 'smart') setRomaMode(m)
   }, [])
 
-  function handleModeChange(m: 'sharp' | 'keen' | 'smart') {
+  function handleModeChange(m: 'blitz' | 'sharp' | 'keen' | 'smart') {
     setRomaMode(m)
     localStorage.setItem('sentient-roma-mode', m)
   }
@@ -219,9 +219,9 @@ export default function Home() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 {/* ROMA mode selector */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 3, background: 'var(--bg-secondary)', borderRadius: 8, padding: '3px 4px', border: '1px solid var(--border)' }}>
-                  {(['sharp', 'keen', 'smart'] as const).map(m => (
+                  {(['blitz', 'sharp', 'keen', 'smart'] as const).map(m => (
                     <button key={m} onClick={() => handleModeChange(m)}
-                      title={m === 'sharp' ? 'Fastest model everywhere — grok-3-mini (~10–20s)' : m === 'keen' ? 'Mid model everywhere — grok-3-fast (~20–40s)' : 'Smart model everywhere — grok-3 (~40–70s)'}
+                      title={m === 'blitz' ? 'grok-3-mini-fast — faster inference infra (~5–15s)' : m === 'sharp' ? 'grok-3-mini (~10–20s)' : m === 'keen' ? 'grok-3-fast (~20–40s)' : 'grok-3 (~40–70s)'}
                       style={{
                         padding: '3px 10px', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer',
                         border: romaMode === m ? '1px solid var(--brown)' : '1px solid transparent',
