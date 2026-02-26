@@ -47,8 +47,11 @@ export default function Home() {
     ?? activeMarket?.floor_strike
     ?? (activeMarket?.yes_sub_title ? parseFloat(activeMarket.yes_sub_title.replace(/[^0-9.]/g, '')) : 0)
     ?? 0
-  const secondsUntilExpiry = md?.secondsUntilExpiry
-    ?? (activeMarket?.close_time ? Math.max(0, Math.floor((new Date(activeMarket.close_time).getTime() - Date.now()) / 1000)) : 0)
+  // Always compute from live close_time so the countdown stays accurate between pipeline cycles.
+  // Fall back to pipeline value only when no market is loaded yet.
+  const secondsUntilExpiry = activeMarket?.close_time
+    ? Math.max(0, Math.floor((new Date(activeMarket.close_time).getTime() - Date.now()) / 1000))
+    : (md?.secondsUntilExpiry ?? 0)
 
   function handleToggleLive() {
     if (!liveMode) {
