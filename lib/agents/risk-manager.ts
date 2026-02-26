@@ -23,7 +23,7 @@ const RISK_PARAMS = {
   maxDrawdownPct: 15,      // % from peak
   maxTradesPerDay: 48,     // caps at one per 15-min window
   minEdgePct: 3,           // % minimum edge to trade
-  baseContractSize: 5,     // base # of contracts
+  baseContractSize: 500,   // minimum # of contracts per paper trade
   maxContractSize: 500,    // ceiling
 }
 
@@ -73,7 +73,7 @@ export function runRiskManager(
   const b = limitPrice > 0 ? (100 - limitPrice) / limitPrice : 1
   const kellyFraction = Math.max(0, (b * pModel - (1 - pModel)) / b)
   const rawContracts = Math.round(kellyFraction * RISK_PARAMS.maxContractSize * 0.5)  // half-Kelly
-  const positionSize = Math.max(1, Math.min(rawContracts, RISK_PARAMS.maxContractSize))
+  const positionSize = Math.max(RISK_PARAMS.baseContractSize, Math.min(rawContracts, RISK_PARAMS.maxContractSize))
 
   const maxLoss = approved ? (limitPrice / 100) * positionSize : 0
 
