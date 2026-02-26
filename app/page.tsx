@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { usePipeline } from '@/hooks/usePipeline'
 import { useMarketTick } from '@/hooks/useMarketTick'
 import Header from '@/components/Header'
@@ -30,6 +30,39 @@ export default function Home() {
   }
 
   const { pipeline, trades, isRunning, nextCycleIn, error, stats, runCycle } = usePipeline(liveMode, romaMode)
+
+  // ── Trade alert pop-up ─────────────────────────────────────────────────────
+  type TradeAlert = { action: string; side: 'yes' | 'no'; limitPrice: number; ticker: string; edge: number; pModel: number }
+  const [tradeAlert, setTradeAlert]       = useState<TradeAlert | null>(null)
+  const [alertStatus, setAlertStatus]     = useState<'idle' | 'placing' | 'ok' | 'err'>('idle')
+  const lastAlertCycleRef                 = useRef<number>(0)
+
+  useEffect(() => {
+    if (!pipeline) return
+    const { cycleId } = pipeline
+    const ex   = pipeline.agents.execution.output
+    const prob = pipeline.agents.probability.output
+    if (ex.action !== 'PASS' && ex.side && ex.limitPrice != null && cycleId > lastAlertCycleRef.current) {
+      lastAlertCycleRef.current = cycleId
+      setTradeAlert({ action: ex.action, side: ex.side as 'yes' | 'no', limitPrice: ex.limitPrice, ticker: ex.marketTicker, edge: prob.edge, pModel: prob.pModel })
+      setAlertStatus('idle')
+    }
+  }, [pipeline])
+
+  async function executeAlertTrade() {
+    if (!tradeAlert || !liveMode) return
+    setAlertStatus('placing')
+    const contracts = Math.max(1, Math.floor(40 / (tradeAlert.limitPrice / 100)))
+    try {
+      const body = { ticker: tradeAlert.ticker, side: tradeAlert.side, count: contracts,
+        ...(tradeAlert.side === 'yes' ? { yesPrice: tradeAlert.limitPrice } : { noPrice: tradeAlert.limitPrice }),
+        clientOrderId: `alert-${Date.now()}` }
+      const res  = await fetch('/api/place-order', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      const data = await res.json()
+      if (!res.ok || !data.ok) { setAlertStatus('err') }
+      else { setAlertStatus('ok'); setTimeout(() => setTradeAlert(null), 2000) }
+    } catch { setAlertStatus('err') }
+  }
 
   const md   = pipeline?.agents.marketDiscovery.output
   const pf   = pipeline?.agents.priceFeed.output
@@ -131,6 +164,98 @@ export default function Home() {
                 Enable Live Trading
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Trade alert pop-up ─────────────────────────────────────────────── */}
+      {tradeAlert && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 1100,
+          background: 'rgba(30,20,10,0.5)', backdropFilter: 'blur(8px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <div className="card animate-fade-in" style={{
+            maxWidth: 360, width: '90%', padding: '26px 24px',
+            border: tradeAlert.side === 'yes' ? '1.5px solid #9ecfb8' : '1.5px solid #e0b0bf',
+            boxShadow: '0 12px 48px rgba(0,0,0,0.22)',
+          }}>
+            {/* Header */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+              <div style={{
+                width: 42, height: 42, borderRadius: '50%', flexShrink: 0,
+                background: tradeAlert.side === 'yes' ? 'var(--green-pale)' : 'var(--pink-pale)',
+                border: tradeAlert.side === 'yes' ? '1.5px solid #9ecfb8' : '1.5px solid #e0b0bf',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 22, color: tradeAlert.side === 'yes' ? 'var(--green)' : 'var(--pink)',
+                animation: 'iconBeat 2s ease infinite',
+              }}>
+                {tradeAlert.side === 'yes' ? '↑' : '↓'}
+              </div>
+              <div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 2 }}>
+                  Agent Signal
+                </div>
+                <div style={{ fontSize: 18, fontWeight: 800, color: tradeAlert.side === 'yes' ? 'var(--green-dark)' : 'var(--pink)', lineHeight: 1 }}>
+                  BUY {tradeAlert.side.toUpperCase()} @ {tradeAlert.limitPrice}¢
+                </div>
+              </div>
+            </div>
+
+            {/* Stats row */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 16 }}>
+              {[
+                ['Edge',     `+${tradeAlert.edge.toFixed(1)}%`],
+                ['P(model)', `${(tradeAlert.pModel * 100).toFixed(0)}%`],
+              ].map(([k, v]) => (
+                <div key={k} style={{ padding: '8px 10px', borderRadius: 9, background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
+                  <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>{k}</div>
+                  <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 16, fontWeight: 800, color: 'var(--text-primary)' }}>{v}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Action buttons */}
+            {alertStatus === 'idle' && (
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => setTradeAlert(null)} style={{
+                  flex: 1, padding: '10px 0', borderRadius: 9, cursor: 'pointer',
+                  border: '1px solid var(--border)', background: 'var(--cream)',
+                  fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)',
+                }}>
+                  Dismiss
+                </button>
+                <button onClick={liveMode ? executeAlertTrade : () => setTradeAlert(null)} style={{
+                  flex: 2, padding: '10px 0', borderRadius: 9, cursor: 'pointer',
+                  border: tradeAlert.side === 'yes' ? '1px solid var(--green-dark)' : '1px solid var(--pink)',
+                  background: tradeAlert.side === 'yes'
+                    ? 'linear-gradient(135deg, var(--green-dark) 0%, var(--green) 100%)'
+                    : 'linear-gradient(135deg, #c24f78 0%, var(--pink) 100%)',
+                  fontSize: 14, fontWeight: 800, color: '#fff',
+                  boxShadow: tradeAlert.side === 'yes' ? '0 2px 12px rgba(74,148,112,0.35)' : '0 2px 12px rgba(212,85,130,0.35)',
+                  letterSpacing: '0.01em',
+                }}>
+                  {liveMode ? 'Buy $40' : 'Got it (paper)'}
+                </button>
+              </div>
+            )}
+            {alertStatus === 'placing' && (
+              <div style={{ textAlign: 'center', padding: '10px 0', fontSize: 12, color: 'var(--text-muted)' }}>
+                <span style={{ animation: 'spin-slow 1s linear infinite', display: 'inline-block', marginRight: 6 }}>◌</span>
+                Placing order...
+              </div>
+            )}
+            {alertStatus === 'ok' && (
+              <div style={{ textAlign: 'center', padding: '10px 0', fontSize: 13, fontWeight: 700, color: 'var(--green-dark)' }}>
+                ✓ Order placed!
+              </div>
+            )}
+            {alertStatus === 'err' && (
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: 12, color: 'var(--red)', marginBottom: 8 }}>Order failed</div>
+                <button onClick={() => setAlertStatus('idle')} style={{ fontSize: 11, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>Try again</button>
+              </div>
+            )}
           </div>
         </div>
       )}
