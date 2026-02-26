@@ -31,8 +31,9 @@ export async function callPythonRoma(
   context: string,
   maxDepth = 1,
   maxRetries = 2,
+  modeOverride?: string,
 ): Promise<PythonRomaResponse> {
-  const romaMode = process.env.ROMA_MODE ?? 'normal'
+  const romaMode = modeOverride ?? process.env.ROMA_MODE ?? 'smart'
   let lastErr: unknown
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {

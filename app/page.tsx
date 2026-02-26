@@ -16,14 +16,20 @@ import FloatingBackground from '@/components/FloatingBackground'
 export default function Home() {
   const [liveMode, setLiveMode] = useState(false)  // always false on SSR
   const [showLiveWarning, setShowLiveWarning] = useState(false)
+  const [romaMode, setRomaMode] = useState<'keen' | 'smart' | 'deep'>('smart')
   // Sync from localStorage after hydration (client-only)
   useEffect(() => {
-    if (localStorage.getItem('sentient-live-mode') === 'true') {
-      setLiveMode(true)
-    }
+    if (localStorage.getItem('sentient-live-mode') === 'true') setLiveMode(true)
+    const m = localStorage.getItem('sentient-roma-mode')
+    if (m === 'keen' || m === 'smart' || m === 'deep') setRomaMode(m)
   }, [])
 
-  const { pipeline, trades, isRunning, nextCycleIn, error, stats, runCycle } = usePipeline(liveMode)
+  function handleModeChange(m: 'keen' | 'smart' | 'deep') {
+    setRomaMode(m)
+    localStorage.setItem('sentient-roma-mode', m)
+  }
+
+  const { pipeline, trades, isRunning, nextCycleIn, error, stats, runCycle } = usePipeline(liveMode, romaMode)
 
   const md   = pipeline?.agents.marketDiscovery.output
   const pf   = pipeline?.agents.priceFeed.output
@@ -211,6 +217,22 @@ export default function Home() {
                 5-min cycles · 3 signals per 15-min window · CF Benchmarks settlement
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                {/* ROMA mode selector */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 3, background: 'var(--bg-secondary)', borderRadius: 8, padding: '3px 4px', border: '1px solid var(--border)' }}>
+                  {(['keen', 'smart', 'deep'] as const).map(m => (
+                    <button key={m} onClick={() => handleModeChange(m)}
+                      title={m === 'keen' ? 'Fast model everywhere (~15–25s)' : m === 'smart' ? 'Balanced fast/smart split (~30–60s)' : 'Frontier model everywhere (~60–120s)'}
+                      style={{
+                        padding: '3px 10px', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                        border: romaMode === m ? '1px solid var(--brown)' : '1px solid transparent',
+                        background: romaMode === m ? 'var(--brown)' : 'transparent',
+                        color: romaMode === m ? '#fff' : 'var(--text-muted)',
+                        transition: 'all 0.15s', textTransform: 'capitalize',
+                      }}>
+                      {m}
+                    </button>
+                  ))}
+                </div>
                 <button
                   onClick={runCycle}
                   disabled={isRunning}
