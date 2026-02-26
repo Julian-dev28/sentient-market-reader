@@ -46,7 +46,7 @@ export interface BTCQuote {
   last_updated: string
 }
 
-// ─── Sentient GRID Agent Types ─────────────────────────────────────────────
+// ─── ROMA Agent Types ──────────────────────────────────────────────────────
 
 export type AgentStatus = 'idle' | 'running' | 'done' | 'error' | 'skipped'
 

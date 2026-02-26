@@ -16,7 +16,7 @@ export async function runSentiment(
   const obYes = orderbook?.yes?.slice(0, 5).map(l => `${l.price}¢×${Math.abs(l.delta)}`).join(', ') ?? 'n/a'
   const obNo  = orderbook?.no?.slice(0, 5).map(l => `${l.price}¢×${Math.abs(l.delta)}`).join(', ') ?? 'n/a'
 
-  const prompt = `You are SentimentAgent in the Sentient GRID ROMA multi-agent trading pipeline.
+  const prompt = `You are SentimentAgent in the ROMA multi-agent trading pipeline.
 
 Market snapshot:
 - BTC price: $${quote.price.toLocaleString('en-US', { maximumFractionDigits: 2 })}

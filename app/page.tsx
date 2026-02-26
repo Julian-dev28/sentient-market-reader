@@ -211,7 +211,7 @@ export default function Home() {
             {/* Architecture note */}
             <div className="card" style={{ padding: '11px 15px', background: 'rgba(255,255,255,0.6)', backdropFilter: 'blur(8px)' }}>
               <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--brown)', marginBottom: 5, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
-                ROMA DAG — Sentient GRID
+                ROMA DAG — Multi-Agent Pipeline
               </div>
               <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 9, color: 'var(--text-muted)', lineHeight: 1.9 }}>
                 MarketDiscovery → PriceFeed ──┬──▶ Sentiment → ProbabilityModel → RiskManager → Execution<br />

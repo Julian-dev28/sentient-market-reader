@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 })
 
 export const metadata: Metadata = {
-  title: 'Sentient GRID × Kalshi — BTC 15-Min Algotrader',
-  description: 'Real-time Sentient GRID multi-agent pipeline for Kalshi KXBTC15M prediction markets',
+  title: 'Sentient Market Reader — ROMA Algotrader',
+  description: 'ROMA multi-agent pipeline for Kalshi KXBTC15M BTC prediction markets',
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

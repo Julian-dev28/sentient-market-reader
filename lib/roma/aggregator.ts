@@ -15,7 +15,7 @@ export async function aggregate(
     provider,
     tier: 'smart',
     maxTokens: 1024,
-    system: 'You are the ROMA Aggregator in a Sentient GRID multi-agent trading system. Synthesize the subtask results into a comprehensive, coherent answer to the parent goal. Do not just summarize — integrate the findings and draw a unified conclusion.',
+    system: 'You are the ROMA Aggregator in a ROMA multi-agent trading system. Synthesize the subtask results into a comprehensive, coherent answer to the parent goal. Do not just summarize — integrate the findings and draw a unified conclusion.',
     prompt: `Parent goal: "${parentGoal}"
 
 Market context:
