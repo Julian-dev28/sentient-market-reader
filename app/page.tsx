@@ -21,21 +21,12 @@ export default function Home() {
   const [botActive, setBotActive]         = useState(false)
   const [showBotWarning, setShowBotWarning] = useState(false)
   const [aiRisk, setAiRisk]               = useState(false)
-  // Provider split config
-  type ProviderKey = 'grok' | 'anthropic' | 'openai' | 'huggingface' | 'openrouter'
-  const ALL_PROVIDERS: ProviderKey[] = ['grok', 'anthropic', 'openai', 'huggingface', 'openrouter']
-  const [sentProviders, setSentProviders] = useState<ProviderKey[]>(['grok'])  // grok-only default
-  const [probProvider2, setProbProvider2] = useState<ProviderKey | ''>('')    // no split default
 
   // Sync from localStorage after hydration (client-only)
   useEffect(() => {
     if (localStorage.getItem('sentient-live-mode') === 'true') setLiveMode(true)
     const m = localStorage.getItem('sentient-roma-mode')
     if (m === 'blitz' || m === 'sharp' || m === 'keen' || m === 'smart') setRomaMode(m)
-    const sp = localStorage.getItem('sentient-sent-providers')
-    if (sp) { try { setSentProviders(JSON.parse(sp)) } catch { localStorage.removeItem('sentient-sent-providers') } }
-    const pp = localStorage.getItem('sentient-prob-provider2')
-    if (pp !== null) setProbProvider2(pp as ProviderKey | '')
   }, [])
 
   function handleModeChange(m: 'blitz' | 'sharp' | 'keen' | 'smart') {
@@ -45,8 +36,6 @@ export default function Home() {
 
   const { pipeline, trades, isRunning, nextCycleIn, error, stats, runCycle } = usePipeline(
     liveMode, romaMode, botActive, aiRisk,
-    probProvider2 || undefined,
-    sentProviders.length > 1 ? sentProviders : undefined,
   )
 
   // ── Trade alert pop-up ─────────────────────────────────────────────────────
@@ -390,7 +379,7 @@ export default function Home() {
             {exec && exec.action !== 'PASS' && (
               <div className="card bracket-card animate-fade-in" style={{
                 borderColor: exec.action === 'BUY_YES' ? '#9ecfb8' : '#a8cce0',
-                background: exec.action === 'BUY_YES' ? 'var(--green-pale)' : 'var(--blue-pale)',
+                background: 'white',
               }}>
                 <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6,
                   color: exec.action === 'BUY_YES' ? 'var(--green-dark)' : 'var(--blue-dark)' }}>
@@ -418,68 +407,6 @@ export default function Home() {
 
           {/* ─── CENTER ─── */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-
-            {/* Provider config */}
-            <div className="card" style={{ padding: '16px 20px', background: 'rgba(255,255,255,0.6)', backdropFilter: 'blur(8px)' }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--blue)', marginBottom: 12, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
-                Provider Split Config
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-                {/* Sentiment: multi-provider ensemble */}
-                <div>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8, fontWeight: 600 }}>Sentiment (ensemble)</div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                    {ALL_PROVIDERS.map(p => {
-                      const active = sentProviders.includes(p)
-                      return (
-                        <button key={p} onClick={() => {
-                          const next = active
-                            ? sentProviders.filter(x => x !== p).length > 0 ? sentProviders.filter(x => x !== p) : sentProviders
-                            : [...sentProviders, p]
-                          setSentProviders(next)
-                          localStorage.setItem('sentient-sent-providers', JSON.stringify(next))
-                        }} style={{
-                          padding: '5px 13px', borderRadius: 7, fontSize: 12, fontWeight: 700, cursor: 'pointer',
-                          border: active ? '1px solid var(--blue)' : '1px solid var(--border)',
-                          background: active ? 'rgba(74,127,165,0.12)' : 'transparent',
-                          color: active ? 'var(--blue)' : 'var(--text-muted)',
-                          transition: 'all 0.12s', textTransform: 'capitalize',
-                        }}>
-                          {p === 'huggingface' ? 'hf' : p}
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-                {/* Probability: split provider */}
-                <div>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8, fontWeight: 600 }}>Probability (split)</div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                    <button onClick={() => { setProbProvider2(''); localStorage.setItem('sentient-prob-provider2', '') }}
-                      style={{ padding: '5px 13px', borderRadius: 7, fontSize: 12, fontWeight: 700, cursor: 'pointer',
-                        border: !probProvider2 ? '1px solid var(--blue)' : '1px solid var(--border)',
-                        background: !probProvider2 ? 'rgba(74,127,165,0.12)' : 'transparent',
-                        color: !probProvider2 ? 'var(--blue)' : 'var(--text-muted)', transition: 'all 0.12s' }}>
-                      same
-                    </button>
-                    {ALL_PROVIDERS.map(p => (
-                      <button key={p} onClick={() => { setProbProvider2(p); localStorage.setItem('sentient-prob-provider2', p) }}
-                        style={{ padding: '5px 13px', borderRadius: 7, fontSize: 12, fontWeight: 700, cursor: 'pointer',
-                          border: probProvider2 === p ? '1px solid var(--amber)' : '1px solid var(--border)',
-                          background: probProvider2 === p ? 'rgba(212,135,44,0.12)' : 'transparent',
-                          color: probProvider2 === p ? 'var(--amber)' : 'var(--text-muted)', transition: 'all 0.12s',
-                          textTransform: 'capitalize' }}>
-                        {p === 'huggingface' ? 'hf' : p}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-              <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 11, color: 'var(--text-muted)', marginTop: 12, lineHeight: 1.9 }}>
-                Sent: {sentProviders.join('+')} ({sentProviders.length > 1 ? 'parallel ensemble' : 'single'}) · Prob: {probProvider2 || 'same provider'}
-                {(!probProvider2 && sentProviders.length === 1) ? ' · no pause' : ' · no pause'}
-              </div>
-            </div>
 
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
