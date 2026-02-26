@@ -165,27 +165,21 @@ function TradeBox({ yesBid, yesAsk, noBid, noAsk, ticker, liveMode }: {
         <AnimatedBar value={ask / 2} color={col} />
 
         {/* Qty input */}
-        <div style={{ marginTop: 10 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-            <span style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', flexShrink: 0 }}>Qty</span>
-            <button onClick={() => setCountStr(String(Math.max(1, count - 1)))}
-              style={{ width: 22, height: 22, borderRadius: 5, border: '1px solid var(--border)', background: 'var(--bg-secondary)', cursor: 'pointer', fontSize: 13, fontWeight: 700, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>−</button>
-            <input
-              type="text" inputMode="numeric" value={countStr}
-              onChange={e => handleCount(e.target.value)}
-              onBlur={handleCountBlur}
-              onFocus={e => e.target.select()}
-              style={{
-                flex: 1, textAlign: 'center', fontFamily: 'var(--font-geist-mono)',
-                fontSize: 13, fontWeight: 800, color: 'var(--text-primary)',
-                border: '1px solid var(--border)', borderRadius: 6, padding: '3px 4px',
-                background: 'white', outline: 'none',
-              }}
-            />
-            <button onClick={() => setCountStr(String(Math.min(500, count + 1)))}
-              style={{ width: 22, height: 22, borderRadius: 5, border: '1px solid var(--border)', background: 'var(--bg-secondary)', cursor: 'pointer', fontSize: 13, fontWeight: 700, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>+</button>
-            <span style={{ fontSize: 9, color: 'var(--text-muted)', marginLeft: 2 }}>${cost}</span>
-          </div>
+        <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', flexShrink: 0 }}>Qty</span>
+          <input
+            type="text" inputMode="numeric" value={countStr}
+            onChange={e => handleCount(e.target.value)}
+            onBlur={handleCountBlur}
+            onFocus={e => e.target.select()}
+            style={{
+              flex: 1, textAlign: 'center', fontFamily: 'var(--font-geist-mono)',
+              fontSize: 13, fontWeight: 800, color: 'var(--text-primary)',
+              border: '1px solid var(--border)', borderRadius: 6, padding: '3px 6px',
+              background: 'white', outline: 'none',
+            }}
+          />
+          <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', fontFamily: 'var(--font-geist-mono)', flexShrink: 0 }}>${cost}</span>
         </div>
 
         {/* Action states */}
