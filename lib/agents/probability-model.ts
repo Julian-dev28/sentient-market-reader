@@ -34,7 +34,7 @@ export async function runProbabilityModel(
     `market-implied ${(pMarket * 100).toFixed(1)}% justifies trading YES, NO, or standing aside.`
 
   // blitz: maxDepth=0 forces atomic (1 executor, no planning) — ~3 LLM calls instead of ~6
-  const pythonResult = await callPythonRoma(goal, context, romaMode === 'blitz' ? 0 : 1, 2, romaMode)
+  const pythonResult = await callPythonRoma(goal, context, romaMode === 'blitz' ? 0 : 1, 2, romaMode, provider)
   const romaAnswer = pythonResult.answer
   const agentLabel = `ProbabilityModelAgent (roma-dspy · ${pythonResult.provider})`
   const romaTrace  = formatRomaTrace(pythonResult)

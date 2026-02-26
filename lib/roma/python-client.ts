@@ -32,15 +32,18 @@ export async function callPythonRoma(
   maxDepth = 1,
   maxRetries = 2,
   modeOverride?: string,
+  provider?: string,  // overrides AI_PROVIDER in the Python service for this request
 ): Promise<PythonRomaResponse> {
   const romaMode = modeOverride ?? process.env.ROMA_MODE ?? 'smart'
   let lastErr: unknown
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
+      const body: Record<string, unknown> = { goal, context, max_depth: maxDepth, roma_mode: romaMode }
+      if (provider) body.provider = provider
       const res = await fetch(`${PYTHON_ROMA_URL}/analyze`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ goal, context, max_depth: maxDepth, roma_mode: romaMode }),
+        body: JSON.stringify(body),
         signal: AbortSignal.timeout(120_000),  // 120s — depth=1 on Grok typically completes in ~30-60s
       })
       if (!res.ok) {
