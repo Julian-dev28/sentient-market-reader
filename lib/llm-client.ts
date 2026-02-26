@@ -13,7 +13,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import OpenAI from 'openai'
 
-export type AIProvider = 'anthropic' | 'openai' | 'grok' | 'openrouter'
+export type AIProvider = 'anthropic' | 'openai' | 'grok' | 'openrouter' | 'huggingface'
 export type RomaMode = 'blitz' | 'sharp' | 'keen' | 'smart'
 
 // ── ROMA Mode ────────────────────────────────────────────────────────────────
@@ -55,6 +55,11 @@ export const ROMA_MODE: RomaMode = (() => {
 //   smart: grok-3                     ~30–50s  — smart tier
 //
 // For openrouter: set OPENROUTER_MODEL (smart), OPENROUTER_MID_MODEL (keen), OPENROUTER_FAST_MODEL (sharp/blitz).
+// For huggingface: set HF_API_KEY + optionally HF_BASE_URL (default: serverless inference API).
+//   blitz: Llama-3.2-3B-Instruct  ~3–8s   — smallest, fastest
+//   fast:  Llama-3.1-8B-Instruct  ~5–15s  — sharp tier
+//   mid:   Llama-3.3-70B-Instruct ~15–40s — keen tier
+//   smart: Llama-3.3-70B-Instruct ~15–40s — smart tier (same GPU, just more context)
 export const PROVIDER_MODELS: Record<AIProvider, { blitz: string; fast: string; mid: string; smart: string; label: string }> = {
   anthropic: {
     blitz: process.env.ANTHROPIC_BLITZ_MODEL ?? 'claude-haiku-4-5-20251001',
@@ -84,6 +89,13 @@ export const PROVIDER_MODELS: Record<AIProvider, { blitz: string; fast: string; 
     smart: process.env.OPENROUTER_MODEL       ?? 'anthropic/claude-sonnet-4-6',
     label: 'OpenRouter',
   },
+  huggingface: {
+    blitz: process.env.HF_BLITZ_MODEL ?? 'meta-llama/Llama-3.2-3B-Instruct',
+    fast:  process.env.HF_FAST_MODEL  ?? 'meta-llama/Llama-3.1-8B-Instruct',
+    mid:   process.env.HF_MID_MODEL   ?? 'meta-llama/Llama-3.3-70B-Instruct',
+    smart: process.env.HF_SMART_MODEL ?? 'meta-llama/Llama-3.3-70B-Instruct',
+    label: 'HuggingFace',
+  },
 }
 
 // Remaps to the correct tier based on ROMA_MODE:
@@ -97,10 +109,11 @@ export function resolveModel(tier: 'fast' | 'smart', provider: AIProvider): stri
 }
 
 // ── Singleton clients ────────────────────────────────────────────────────────
-let _anthropic:   Anthropic | null = null
-let _openai:      OpenAI | null = null
-let _grok:        OpenAI | null = null
-let _openrouter:  OpenAI | null = null
+let _anthropic:     Anthropic | null = null
+let _openai:        OpenAI | null = null
+let _grok:          OpenAI | null = null
+let _openrouter:    OpenAI | null = null
+let _huggingface:   OpenAI | null = null
 
 function anthropicClient(): Anthropic {
   if (!_anthropic) _anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
@@ -121,10 +134,18 @@ function openrouterClient(): OpenAI {
   })
   return _openrouter
 }
+function huggingfaceClient(): OpenAI {
+  if (!_huggingface) _huggingface = new OpenAI({
+    apiKey: process.env.HUGGINGFACE_API_KEY ?? process.env.HF_API_KEY,
+    baseURL: process.env.HF_BASE_URL ?? 'https://api-inference.huggingface.co/v1',
+  })
+  return _huggingface
+}
 
-function oaiCompatClient(provider: 'openai' | 'grok' | 'openrouter'): OpenAI {
-  if (provider === 'grok')        return grokClient()
-  if (provider === 'openrouter')  return openrouterClient()
+function oaiCompatClient(provider: 'openai' | 'grok' | 'openrouter' | 'huggingface'): OpenAI {
+  if (provider === 'grok')         return grokClient()
+  if (provider === 'openrouter')   return openrouterClient()
+  if (provider === 'huggingface')  return huggingfaceClient()
   return openaiClient()
 }
 
@@ -161,7 +182,7 @@ export async function llmChat(opts: {
   if (system) messages.push({ role: 'system', content: system })
   messages.push({ role: 'user', content: prompt })
 
-  const res = await oaiCompatClient(provider).chat.completions.create({ model, max_tokens: maxTokens, messages })
+  const res = await oaiCompatClient(provider as 'openai' | 'grok' | 'openrouter' | 'huggingface').chat.completions.create({ model, max_tokens: maxTokens, messages })
   return res.choices[0]?.message?.content ?? ''
 }
 
@@ -198,7 +219,31 @@ export async function llmToolCall<T>(opts: {
     return block.input as T
   }
 
-  const res = await oaiCompatClient(provider).chat.completions.create(
+  // HuggingFace: attempt tool_choice first; fall back to JSON-in-content for models
+  // that don't support function calling (e.g. smaller Llama variants).
+  if (provider === 'huggingface') {
+    const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [{ role: 'user', content: prompt }]
+    try {
+      const res = await huggingfaceClient().chat.completions.create(
+        { model, max_tokens: maxTokens, tools: [{ type: 'function', function: { name: toolName, description: toolDescription, parameters: fullSchema } }], tool_choice: { type: 'function', function: { name: toolName } }, messages },
+        { signal: AbortSignal.timeout(timeout) },
+      )
+      const tc = res.choices[0]?.message?.tool_calls?.[0] as { function: { arguments: string } } | undefined
+      if (tc) return JSON.parse(tc.function.arguments) as T
+    } catch { /* fall through to JSON extraction */ }
+    // Fallback: ask for raw JSON in content
+    const jsonPrompt = `${prompt}\n\nRespond ONLY with valid JSON matching this schema: ${JSON.stringify(fullSchema)}. No markdown, no explanation.`
+    const fallback = await huggingfaceClient().chat.completions.create(
+      { model, max_tokens: maxTokens, messages: [{ role: 'user', content: jsonPrompt }] },
+      { signal: AbortSignal.timeout(timeout) },
+    )
+    const raw = fallback.choices[0]?.message?.content ?? ''
+    const jsonMatch = raw.match(/\{[\s\S]*\}/)
+    if (!jsonMatch) throw new Error(`HuggingFace: no JSON found in response`)
+    return JSON.parse(jsonMatch[0]) as T
+  }
+
+  const res = await oaiCompatClient(provider as 'openai' | 'grok' | 'openrouter').chat.completions.create(
     {
       model,
       max_tokens: maxTokens,

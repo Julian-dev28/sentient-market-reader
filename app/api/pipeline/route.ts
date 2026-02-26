@@ -43,7 +43,7 @@ function getCurrentEventTicker(): string {
 
 export async function GET(req: NextRequest) {
   const p = process.env.AI_PROVIDER ?? 'grok'
-  const validProviders = ['anthropic', 'openai', 'grok', 'openrouter'] as const
+  const validProviders = ['anthropic', 'openai', 'grok', 'openrouter', 'huggingface'] as const
   const provider: AIProvider = (validProviders as readonly string[]).includes(p) ? p as AIProvider : 'grok'
   try {
     // Try to fetch the currently active market using computed event_ticker

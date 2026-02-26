@@ -50,10 +50,11 @@ def build_llm_config(roma_mode: str = "keen") -> tuple[LLMConfig, str]:
     """
     Build an LLMConfig from environment variables.
     Mirrors the TypeScript llm-client providers exactly:
-      anthropic  → ANTHROPIC_API_KEY
-      openai     → OPENAI_API_KEY
-      grok       → XAI_API_KEY → api.x.ai/v1
-      openrouter → OPENROUTER_API_KEY + OPENROUTER_MODEL
+      anthropic    → ANTHROPIC_API_KEY
+      openai       → OPENAI_API_KEY
+      grok         → XAI_API_KEY → api.x.ai/v1
+      openrouter   → OPENROUTER_API_KEY + OPENROUTER_MODEL
+      huggingface  → HF_API_KEY → api-inference.huggingface.co/v1 (or HF_BASE_URL)
 
     roma_mode is passed from the Next.js request body (not read from env),
     so only the root .env.local needs to be edited.
@@ -134,7 +135,29 @@ def build_llm_config(roma_mode: str = "keen") -> tuple[LLMConfig, str]:
             f"openrouter/{model}",
         )
 
-    raise ValueError(f"Unknown AI_PROVIDER '{provider}' — use: anthropic | openai | grok | openrouter")
+    if provider == "huggingface":
+        api_key = os.getenv("HUGGINGFACE_API_KEY") or os.getenv("HF_API_KEY")
+        if not api_key:
+            raise ValueError("HUGGINGFACE_API_KEY not set")
+        base_url = os.getenv("HF_BASE_URL", "https://api-inference.huggingface.co/v1")
+        if roma_mode == "blitz":
+            model = os.getenv("HF_BLITZ_MODEL", "meta-llama/Llama-3.2-3B-Instruct")
+        elif roma_mode == "sharp":
+            model = os.getenv("HF_FAST_MODEL", "meta-llama/Llama-3.1-8B-Instruct")
+        elif roma_mode == "keen":
+            model = os.getenv("HF_MID_MODEL", "meta-llama/Llama-3.3-70B-Instruct")
+        else:  # smart
+            model = os.getenv("HF_SMART_MODEL", "meta-llama/Llama-3.3-70B-Instruct")
+        return (
+            LLMConfig(
+                model=f"openai/{model}",
+                api_key=api_key,
+                base_url=base_url,
+            ),
+            f"huggingface/{model}",
+        )
+
+    raise ValueError(f"Unknown AI_PROVIDER '{provider}' — use: anthropic | openai | grok | openrouter | huggingface")
 
 
 def build_roma_config(llm: LLMConfig) -> ROMAConfig:
