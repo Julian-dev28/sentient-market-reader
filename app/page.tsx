@@ -17,15 +17,15 @@ import FloatingBackground from '@/components/FloatingBackground'
 export default function Home() {
   const [liveMode, setLiveMode]           = useState(false)  // always false on SSR
   const [showLiveWarning, setShowLiveWarning] = useState(false)
-  const [romaMode, setRomaMode]           = useState<'blitz' | 'sharp' | 'keen' | 'smart'>('keen')
+  const [romaMode, setRomaMode]           = useState<'blitz' | 'sharp' | 'keen' | 'smart'>('blitz')
   const [botActive, setBotActive]         = useState(false)
   const [showBotWarning, setShowBotWarning] = useState(false)
   const [aiRisk, setAiRisk]               = useState(false)
   // Provider split config
   type ProviderKey = 'grok' | 'anthropic' | 'openai' | 'huggingface' | 'openrouter'
   const ALL_PROVIDERS: ProviderKey[] = ['grok', 'anthropic', 'openai', 'huggingface', 'openrouter']
-  const [sentProviders, setSentProviders] = useState<ProviderKey[]>(['grok'])  // Sentiment: multi-provider ensemble
-  const [probProvider2, setProbProvider2] = useState<ProviderKey | ''>('')     // Probability: split provider (empty = same as primary)
+  const [sentProviders, setSentProviders] = useState<ProviderKey[]>(['grok', 'huggingface'])  // blitz ensemble default
+  const [probProvider2, setProbProvider2] = useState<ProviderKey | ''>('huggingface')          // hf split default
 
   // Sync from localStorage after hydration (client-only)
   useEffect(() => {
@@ -35,7 +35,7 @@ export default function Home() {
     const sp = localStorage.getItem('sentient-sent-providers')
     if (sp) { try { setSentProviders(JSON.parse(sp)) } catch { /* ignore */ } }
     const pp = localStorage.getItem('sentient-prob-provider2')
-    if (pp) setProbProvider2(pp as ProviderKey | '')
+    if (pp !== null) setProbProvider2(pp as ProviderKey | '')
   }, [])
 
   function handleModeChange(m: 'blitz' | 'sharp' | 'keen' | 'smart') {
