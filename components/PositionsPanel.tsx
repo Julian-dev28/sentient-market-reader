@@ -31,6 +31,8 @@ export default function PositionsPanel({ liveMode }: { liveMode: boolean }) {
   const [data, setData] = useState<PortfolioData>({ balance: null, positions: [], orders: [], fills: [] })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [sellingAll, setSellingAll] = useState(false)
+  const [sellError, setSellError] = useState<string | null>(null)
 
   const fetchPortfolio = useCallback(async () => {
     if (!liveMode) return
@@ -76,6 +78,33 @@ export default function PositionsPanel({ liveMode }: { liveMode: boolean }) {
     }
   }, [liveMode])
 
+  async function sellAll() {
+    const { positions } = data
+    if (positions.length === 0) return
+    setSellingAll(true)
+    setSellError(null)
+    try {
+      const results = await Promise.all(
+        positions.map(pos => {
+          const side = pos.position > 0 ? 'yes' : 'no'
+          const count = Math.abs(pos.position)
+          return fetch('/api/sell-order', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ticker: pos.ticker, side, count }),
+          }).then(r => r.json())
+        })
+      )
+      const failed = results.filter((r) => !r.ok)
+      if (failed.length > 0) {
+        setSellError(`${failed.length} order(s) failed: ${failed[0].error}`)
+      }
+      await fetchPortfolio()
+    } finally {
+      setSellingAll(false)
+    }
+  }
+
   useEffect(() => {
     if (!liveMode) return
     fetchPortfolio()
@@ -112,12 +141,35 @@ export default function PositionsPanel({ liveMode }: { liveMode: boolean }) {
           <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--green)', display: 'inline-block', boxShadow: '0 0 6px var(--green)' }} />
           <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>Kalshi Account</span>
         </div>
-        <button onClick={fetchPortfolio} disabled={loading}
-          style={{ background: 'none', border: 'none', cursor: loading ? 'wait' : 'pointer', fontSize: 14, color: 'var(--text-muted)', padding: '2px 4px' }}
-          title="Refresh">
-          {loading ? '⟳' : '↻'}
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {data.positions.length > 0 && (
+            <button
+              onClick={sellAll}
+              disabled={sellingAll}
+              style={{
+                padding: '4px 10px', borderRadius: 7, fontSize: 10, fontWeight: 700, cursor: sellingAll ? 'not-allowed' : 'pointer',
+                border: '1px solid #b5687a', background: sellingAll ? 'rgba(181,104,122,0.05)' : 'rgba(181,104,122,0.08)',
+                color: '#b5687a', letterSpacing: '0.02em', transition: 'all 0.15s',
+              }}
+              onMouseEnter={e => { if (!sellingAll) { e.currentTarget.style.background = '#b5687a'; e.currentTarget.style.color = '#fff' } }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'rgba(181,104,122,0.08)'; e.currentTarget.style.color = '#b5687a' }}
+            >
+              {sellingAll ? '…' : '■ Sell All'}
+            </button>
+          )}
+          <button onClick={fetchPortfolio} disabled={loading}
+            style={{ background: 'none', border: 'none', cursor: loading ? 'wait' : 'pointer', fontSize: 14, color: 'var(--text-muted)', padding: '2px 4px' }}
+            title="Refresh">
+            {loading ? '⟳' : '↻'}
+          </button>
+        </div>
       </div>
+
+      {sellError && (
+        <div style={{ fontSize: 10, color: 'var(--red)', background: 'var(--red-pale)', borderRadius: 6, padding: '7px 10px', marginBottom: 12, lineHeight: 1.5 }}>
+          {sellError}
+        </div>
+      )}
 
       {error && (
         <div style={{ fontSize: 10, color: 'var(--red)', background: 'var(--red-pale)', borderRadius: 6, padding: '7px 10px', marginBottom: 12, lineHeight: 1.5 }}>
