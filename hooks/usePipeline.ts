@@ -127,7 +127,15 @@ export function usePipeline(liveMode: boolean) {
       }))
 
     } catch (err) {
-      setError(String(err))
+      const msg = String(err)
+      setError(msg)
+      // Auto-retry once after 15s for non-market-window errors (e.g. transient service failure)
+      if (!msg.includes('waiting for next 15-min window')) {
+        setTimeout(() => {
+          setError(null)
+          runCycle()
+        }, 15_000)
+      }
     } finally {
       setIsRunning(false)
       lastCycleRef.current = Date.now()

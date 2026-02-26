@@ -17,24 +17,38 @@ export interface PythonRomaResponse {
 
 /**
  * Call the official Sentient roma-dspy service.
- * Throws on network error or non-2xx response — callers decide the fallback.
+ * Retries up to `maxRetries` times with exponential backoff before throwing.
+ * Callers decide the fallback after all retries are exhausted.
  */
 export async function callPythonRoma(
   goal: string,
   context: string,
   maxDepth = 2,
+  maxRetries = 3,
 ): Promise<PythonRomaResponse> {
-  const res = await fetch(`${PYTHON_ROMA_URL}/analyze`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ goal, context, max_depth: maxDepth }),
-    signal: AbortSignal.timeout(90_000),
-  })
-  if (!res.ok) {
-    const text = await res.text().catch(() => '')
-    throw new Error(`roma-dspy service ${res.status}: ${text}`)
+  let lastErr: unknown
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const res = await fetch(`${PYTHON_ROMA_URL}/analyze`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ goal, context, max_depth: maxDepth }),
+        signal: AbortSignal.timeout(90_000),
+      })
+      if (!res.ok) {
+        const text = await res.text().catch(() => '')
+        throw new Error(`roma-dspy service ${res.status}: ${text}`)
+      }
+      return await res.json()
+    } catch (err) {
+      lastErr = err
+      if (attempt < maxRetries) {
+        // Exponential backoff: 2s, 4s between retries
+        await new Promise(r => setTimeout(r, 2_000 * attempt))
+      }
+    }
   }
-  return res.json()
+  throw lastErr
 }
 
 /** Format a roma-dspy response as a human-readable trace string */
