@@ -98,12 +98,14 @@ function TradeBox({ yesBid, yesAsk, noBid, noAsk, ticker, liveMode }: {
     setAmtStr(isNaN(v) || v <= 0 ? '1' : String(v))
   }
 
-  async function placeIt() {
+  async function placeIt(overrideAmt?: number) {
     if (!liveMode) return
     setOrder({ status: 'placing' })
+    const dollars = overrideAmt ?? amt
+    const cnt = Math.max(1, Math.floor(dollars / (ask / 100)))
     try {
       const body = {
-        ticker, side, count: contracts,
+        ticker, side, count: cnt,
         ...(side === 'yes' ? { yesPrice: ask } : { noPrice: ask }),
         clientOrderId: `manual-${side}-${Date.now()}`,
       }
@@ -167,19 +169,29 @@ function TradeBox({ yesBid, yesAsk, noBid, noAsk, ticker, liveMode }: {
         </div>
         <AnimatedBar value={ask / 2} color={col} />
 
-        {/* Quick-buy buttons */}
+        {/* Quick-buy buttons — click to trade instantly */}
         <div style={{ marginTop: 10, display: 'flex', gap: 5 }}>
           {QUICK_AMTS.map(q => (
-            <button key={q} onClick={() => { setAmtStr(String(q)); setOrder({ status: 'idle' }) }}
+            <button key={q}
+              disabled={order.status === 'placing'}
+              onClick={() => {
+                setAmtStr(String(q))
+                if (liveMode) placeIt(q)
+              }}
+              title={liveMode ? `Buy ${side.toUpperCase()} for $${q}` : `Set amount to $${q}`}
               style={{
-                flex: 1, padding: '5px 0', borderRadius: 7,
-                border: amtStr === String(q) ? `1.5px solid ${col}` : '1px solid var(--border)',
-                background: amtStr === String(q) ? colBg : 'var(--bg-secondary)',
-                fontSize: 11, fontWeight: 700,
-                color: amtStr === String(q) ? col : 'var(--text-muted)',
-                cursor: 'pointer', transition: 'all 0.15s',
+                flex: 1, padding: '7px 0', borderRadius: 7,
+                border: liveMode ? `1.5px solid ${col}` : '1px solid var(--border)',
+                background: liveMode ? colBg : 'var(--bg-secondary)',
+                fontSize: 11, fontWeight: 800,
+                color: liveMode ? col : 'var(--text-muted)',
+                cursor: order.status === 'placing' ? 'not-allowed' : 'pointer',
+                transition: 'all 0.15s',
                 fontFamily: 'var(--font-geist-mono)',
-              }}>
+              }}
+              onMouseEnter={e => { if (liveMode && order.status !== 'placing') { e.currentTarget.style.background = col; e.currentTarget.style.color = '#fff' } }}
+              onMouseLeave={e => { if (liveMode) { e.currentTarget.style.background = colBg; e.currentTarget.style.color = col } }}
+            >
               ${q}
             </button>
           ))}
