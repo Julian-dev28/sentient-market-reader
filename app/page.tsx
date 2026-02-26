@@ -420,15 +420,15 @@ export default function Home() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
 
             {/* Provider config */}
-            <div className="card" style={{ padding: '11px 15px', background: 'rgba(255,255,255,0.6)', backdropFilter: 'blur(8px)' }}>
-              <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--blue)', marginBottom: 8, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+            <div className="card" style={{ padding: '16px 20px', background: 'rgba(255,255,255,0.6)', backdropFilter: 'blur(8px)' }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--blue)', marginBottom: 12, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
                 Provider Split Config
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
                 {/* Sentiment: multi-provider ensemble */}
                 <div>
-                  <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 5, fontWeight: 600 }}>Sentiment (ensemble)</div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8, fontWeight: 600 }}>Sentiment (ensemble)</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                     {ALL_PROVIDERS.map(p => {
                       const active = sentProviders.includes(p)
                       return (
@@ -439,7 +439,7 @@ export default function Home() {
                           setSentProviders(next)
                           localStorage.setItem('sentient-sent-providers', JSON.stringify(next))
                         }} style={{
-                          padding: '2px 7px', borderRadius: 5, fontSize: 9, fontWeight: 700, cursor: 'pointer',
+                          padding: '5px 13px', borderRadius: 7, fontSize: 12, fontWeight: 700, cursor: 'pointer',
                           border: active ? '1px solid var(--blue)' : '1px solid var(--border)',
                           background: active ? 'rgba(74,127,165,0.12)' : 'transparent',
                           color: active ? 'var(--blue)' : 'var(--text-muted)',
@@ -453,10 +453,10 @@ export default function Home() {
                 </div>
                 {/* Probability: split provider */}
                 <div>
-                  <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 5, fontWeight: 600 }}>Probability (split)</div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8, fontWeight: 600 }}>Probability (split)</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                     <button onClick={() => { setProbProvider2(''); localStorage.setItem('sentient-prob-provider2', '') }}
-                      style={{ padding: '2px 7px', borderRadius: 5, fontSize: 9, fontWeight: 700, cursor: 'pointer',
+                      style={{ padding: '5px 13px', borderRadius: 7, fontSize: 12, fontWeight: 700, cursor: 'pointer',
                         border: !probProvider2 ? '1px solid var(--blue)' : '1px solid var(--border)',
                         background: !probProvider2 ? 'rgba(74,127,165,0.12)' : 'transparent',
                         color: !probProvider2 ? 'var(--blue)' : 'var(--text-muted)', transition: 'all 0.12s' }}>
@@ -464,7 +464,7 @@ export default function Home() {
                     </button>
                     {ALL_PROVIDERS.map(p => (
                       <button key={p} onClick={() => { setProbProvider2(p); localStorage.setItem('sentient-prob-provider2', p) }}
-                        style={{ padding: '2px 7px', borderRadius: 5, fontSize: 9, fontWeight: 700, cursor: 'pointer',
+                        style={{ padding: '5px 13px', borderRadius: 7, fontSize: 12, fontWeight: 700, cursor: 'pointer',
                           border: probProvider2 === p ? '1px solid var(--amber)' : '1px solid var(--border)',
                           background: probProvider2 === p ? 'rgba(212,135,44,0.12)' : 'transparent',
                           color: probProvider2 === p ? 'var(--amber)' : 'var(--text-muted)', transition: 'all 0.12s',
@@ -475,9 +475,9 @@ export default function Home() {
                   </div>
                 </div>
               </div>
-              <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 9, color: 'var(--text-muted)', marginTop: 8, lineHeight: 1.9 }}>
+              <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 11, color: 'var(--text-muted)', marginTop: 12, lineHeight: 1.9 }}>
                 Sent: {sentProviders.join('+')} ({sentProviders.length > 1 ? 'parallel ensemble' : 'single'}) · Prob: {probProvider2 || 'same provider'}
-                {(!probProvider2 && sentProviders.length === 1) ? ' · 4s pause' : ' · no pause'}
+                {(!probProvider2 && sentProviders.length === 1) ? ' · no pause' : ' · no pause'}
               </div>
             </div>
 
@@ -499,12 +499,12 @@ export default function Home() {
                 </label>
 
                 {/* ROMA mode selector */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 3, background: 'var(--bg-secondary)', borderRadius: 8, padding: '3px 4px', border: '1px solid var(--border)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'var(--bg-secondary)', borderRadius: 10, padding: '4px 5px', border: '1px solid var(--border)' }}>
                   {(['blitz', 'sharp', 'keen', 'smart'] as const).map(m => (
                     <button key={m} onClick={() => handleModeChange(m)}
                       title={m === 'blitz' ? 'grok-3-mini-fast — faster inference infra (~5–15s)' : m === 'sharp' ? 'grok-3-mini (~10–20s)' : m === 'keen' ? 'grok-3-fast (~20–40s)' : 'grok-3 (~40–70s)'}
                       style={{
-                        padding: '3px 10px', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                        padding: '6px 16px', borderRadius: 7, fontSize: 13, fontWeight: 700, cursor: 'pointer',
                         border: romaMode === m ? '1px solid var(--brown)' : '1px solid transparent',
                         background: romaMode === m ? 'var(--brown)' : 'transparent',
                         color: romaMode === m ? '#fff' : 'var(--text-muted)',
