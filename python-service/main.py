@@ -48,9 +48,14 @@ app.add_middleware(
 def build_llm_config() -> tuple[LLMConfig, str]:
     """
     Build an LLMConfig from environment variables.
+    Mirrors the TypeScript llm-client providers exactly:
+      anthropic  → ANTHROPIC_API_KEY
+      openai     → OPENAI_API_KEY
+      grok       → XAI_API_KEY → api.x.ai/v1
+      openrouter → OPENROUTER_API_KEY + OPENROUTER_MODEL
     Returns (llm_config, provider_label).
     """
-    provider = os.getenv("AI_PROVIDER", "openrouter")
+    provider = os.getenv("AI_PROVIDER", "grok")
 
     if provider == "anthropic":
         api_key = os.getenv("ANTHROPIC_API_KEY")
@@ -71,41 +76,33 @@ def build_llm_config() -> tuple[LLMConfig, str]:
         )
 
     if provider == "grok":
-        xai_key = os.getenv("XAI_API_KEY")
-        or_key = os.getenv("OPENROUTER_API_KEY")
-        if xai_key:
-            # Direct xAI API (OpenAI-compatible)
-            return (
-                LLMConfig(
-                    model="openai/grok-3",
-                    api_key=xai_key,
-                    base_url="https://api.x.ai/v1",
-                ),
-                "grok",
-            )
-        if or_key:
-            return (
-                LLMConfig(
-                    model="openrouter/x-ai/grok-3",
-                    api_key=or_key,
-                    base_url="https://openrouter.ai/api/v1",
-                ),
-                "grok-openrouter",
-            )
-        raise ValueError("XAI_API_KEY or OPENROUTER_API_KEY required for Grok")
+        api_key = os.getenv("XAI_API_KEY")
+        if not api_key:
+            raise ValueError("XAI_API_KEY not set")
+        return (
+            LLMConfig(
+                model="openai/grok-3",
+                api_key=api_key,
+                base_url="https://api.x.ai/v1",
+            ),
+            "grok",
+        )
 
-    # Default: OpenRouter
-    api_key = os.getenv("OPENROUTER_API_KEY")
-    if not api_key:
-        raise ValueError("OPENROUTER_API_KEY not set")
-    return (
-        LLMConfig(
-            model="openrouter/anthropic/claude-sonnet-4-5",
-            api_key=api_key,
-            base_url="https://openrouter.ai/api/v1",
-        ),
-        "openrouter",
-    )
+    if provider == "openrouter":
+        api_key = os.getenv("OPENROUTER_API_KEY")
+        if not api_key:
+            raise ValueError("OPENROUTER_API_KEY not set")
+        model = os.getenv("OPENROUTER_MODEL", "anthropic/claude-sonnet-4-6")
+        return (
+            LLMConfig(
+                model=f"openrouter/{model}",
+                api_key=api_key,
+                base_url="https://openrouter.ai/api/v1",
+            ),
+            f"openrouter/{model}",
+        )
+
+    raise ValueError(f"Unknown AI_PROVIDER '{provider}' — use: anthropic | openai | grok | openrouter")
 
 
 def build_roma_config(llm: LLMConfig) -> ROMAConfig:
