@@ -38,7 +38,7 @@ export async function runProbabilityModel(
   let romaTrace  = ''
 
   try {
-    const pythonResult = await callPythonRoma(goal, context)
+    const pythonResult = await callPythonRoma(goal, context, 1)
     romaAnswer = pythonResult.answer
     agentLabel = `ProbabilityModelAgent (roma-dspy · ${pythonResult.provider})`
     romaTrace  = formatRomaTrace(pythonResult)
