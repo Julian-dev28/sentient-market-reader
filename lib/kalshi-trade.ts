@@ -10,6 +10,22 @@ import type { KalshiBalance, KalshiPosition, KalshiOrder, KalshiFill } from './t
 
 const KALSHI_BASE = 'https://api.elections.kalshi.com/trade-api/v2'
 
+/** Safely extract a string error message from a Kalshi API response body.
+ *  Kalshi sometimes returns error as an object: {code, message, details}.
+ */
+function extractError(body: unknown, status: number): string {
+  if (!body || typeof body !== 'object') return `HTTP ${status}`
+  const b = body as Record<string, unknown>
+  const err = b.error
+  if (typeof err === 'string') return err
+  if (err && typeof err === 'object') {
+    const e = err as Record<string, unknown>
+    return String(e.message ?? e.code ?? JSON.stringify(err))
+  }
+  if (typeof b.message === 'string') return b.message
+  return `HTTP ${status}`
+}
+
 export interface PlaceOrderParams {
   ticker: string
   side: 'yes' | 'no'
@@ -52,7 +68,7 @@ export async function placeOrder(params: PlaceOrderParams): Promise<PlaceOrderRe
 
     const data = await res.json()
     if (!res.ok) {
-      return { ok: false, error: data?.error ?? data?.message ?? `HTTP ${res.status}` }
+      return { ok: false, error: extractError(data, res.status) }
     }
     return { ok: true, order: data.order as KalshiOrder }
   } catch (err) {
@@ -70,7 +86,7 @@ export async function cancelOrder(orderId: string): Promise<{ ok: boolean; error
     })
     if (!res.ok) {
       const data = await res.json().catch(() => ({}))
-      return { ok: false, error: data?.error ?? data?.message ?? `HTTP ${res.status}` }
+      return { ok: false, error: extractError(data, res.status) }
     }
     return { ok: true }
   } catch (err) {
@@ -95,7 +111,7 @@ export async function getBalance(): Promise<BalanceResult> {
     const res = await fetch(`${KALSHI_BASE}/portfolio/balance`, { headers, cache: 'no-store' })
     const body = await res.json().catch(() => null)
     if (!res.ok) {
-      return { ok: false, error: body?.error ?? body?.message ?? `Kalshi returned HTTP ${res.status}`, status: res.status }
+      return { ok: false, error: extractError(body, res.status), status: res.status }
     }
     return { ok: true, data: body as KalshiBalance }
   } catch (err) {
@@ -122,7 +138,7 @@ export async function getPositions(): Promise<PositionsResult> {
     const res = await fetch(`${KALSHI_BASE}/portfolio/positions?limit=50&count_filter=position`, { headers, cache: 'no-store' })
     const body = await res.json().catch(() => null)
     if (!res.ok) {
-      return { ok: false, error: body?.error ?? body?.message ?? `Kalshi returned HTTP ${res.status}`, status: res.status, positions: [], orders: [] }
+      return { ok: false, error: extractError(body, res.status), status: res.status, positions: [], orders: [] }
     }
     return { ok: true, positions: (body.market_positions ?? []) as KalshiPosition[], orders: [] }
   } catch (err) {
@@ -137,7 +153,7 @@ export async function getFills(limit = 20): Promise<{ ok: boolean; fills: Kalshi
     if (!headers['KALSHI-ACCESS-KEY']) return { ok: false, fills: [], error: 'Missing credentials' }
     const res = await fetch(`${KALSHI_BASE}/portfolio/fills?limit=${limit}`, { headers, cache: 'no-store' })
     const body = await res.json().catch(() => null)
-    if (!res.ok) return { ok: false, fills: [], error: body?.message ?? `HTTP ${res.status}` }
+    if (!res.ok) return { ok: false, fills: [], error: extractError(body, res.status) }
     return { ok: true, fills: (body.fills ?? []) as KalshiFill[] }
   } catch (err) {
     return { ok: false, fills: [], error: String(err) }
@@ -153,7 +169,7 @@ export async function getOrders(status?: string): Promise<{ ok: boolean; orders:
     const res = await fetch(`${KALSHI_BASE}/portfolio/orders${query}`, { headers, cache: 'no-store' })
     const body = await res.json().catch(() => null)
     if (!res.ok) {
-      return { ok: false, orders: [], error: body?.error ?? body?.message ?? `HTTP ${res.status}` }
+      return { ok: false, orders: [], error: extractError(body, res.status) }
     }
     return { ok: true, orders: (body.orders ?? []) as KalshiOrder[] }
   } catch (err) {
