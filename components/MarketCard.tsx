@@ -9,6 +9,7 @@ interface MarketCardProps {
   currentBTCPrice: number
   secondsUntilExpiry: number
   liveMode: boolean
+  onRefresh?: () => void
 }
 
 const fmt  = (p: number) => p.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })
@@ -176,8 +177,16 @@ function BuyBox({
   )
 }
 
-export default function MarketCard({ market, strikePrice, currentBTCPrice, secondsUntilExpiry, liveMode }: MarketCardProps) {
+export default function MarketCard({ market, strikePrice, currentBTCPrice, secondsUntilExpiry, liveMode, onRefresh }: MarketCardProps) {
   const [countdown, setCountdown] = useState(secondsUntilExpiry)
+  const [spinning, setSpinning] = useState(false)
+
+  function handleRefresh() {
+    if (spinning) return
+    setSpinning(true)
+    onRefresh?.()
+    setTimeout(() => setSpinning(false), 800)
+  }
 
   useEffect(() => { setCountdown(secondsUntilExpiry) }, [secondsUntilExpiry])
   useEffect(() => {
@@ -212,13 +221,30 @@ export default function MarketCard({ market, strikePrice, currentBTCPrice, secon
             <span className="status-dot live" />
             <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.07em', textTransform: 'uppercase' }}>Active Market</span>
           </div>
-          {market && (
-            <span style={{
-              fontFamily: 'var(--font-geist-mono)', fontSize: 9, color: 'var(--text-muted)',
-              padding: '2px 7px', borderRadius: 5,
-              background: 'var(--cream-dark)', border: '1px solid var(--border)',
-            }}>{market.ticker}</span>
-          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            {market && (
+              <span style={{
+                fontFamily: 'var(--font-geist-mono)', fontSize: 9, color: 'var(--text-muted)',
+                padding: '2px 7px', borderRadius: 5,
+                background: 'var(--cream-dark)', border: '1px solid var(--border)',
+              }}>{market.ticker}</span>
+            )}
+            <button
+              onClick={handleRefresh}
+              title="Refresh market data"
+              style={{
+                width: 22, height: 22, borderRadius: 6, border: '1px solid var(--border)',
+                background: 'var(--cream-dark)', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 11, color: 'var(--text-muted)',
+                transition: 'border-color 0.15s, color 0.15s',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--blue)'; e.currentTarget.style.color = 'var(--blue)' }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-muted)' }}
+            >
+              <span style={{ display: 'inline-block', animation: spinning ? 'spin-slow 0.8s linear infinite' : 'none' }}>↻</span>
+            </button>
+          </div>
         </div>
 
         {market ? (

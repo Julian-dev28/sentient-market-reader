@@ -32,7 +32,7 @@ export default function Home() {
   const exec = pipeline?.agents.execution.output
 
   // Live 5-second tick — keeps bid/ask and BTC price fresh between pipeline cycles
-  const { liveMarket, liveBTCPrice, livePriceHistory } = useMarketTick(
+  const { liveMarket, liveBTCPrice, livePriceHistory, refresh: refreshMarket } = useMarketTick(
     md?.activeMarket?.ticker ?? null,
     pf?.priceHistory ?? [],
   )
@@ -166,6 +166,7 @@ export default function Home() {
               currentBTCPrice={currentBTCPrice}
               secondsUntilExpiry={secondsUntilExpiry}
               liveMode={liveMode}
+              onRefresh={refreshMarket}
             />
             <SignalPanel probability={prob} sentiment={sent} />
 

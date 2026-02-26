@@ -43,3 +43,6 @@ next-env.d.ts
 
 python-service/.checkpoints
 python-service/.cache
+python-service/__pycache__/
+**/__pycache__/
+*.pyc

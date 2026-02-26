@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import type { KalshiMarket, PricePoint } from '@/lib/types'
 
 const TICK_MS = 2_000  // 2-second refresh
@@ -9,6 +9,7 @@ interface MarketTick {
   liveMarket: KalshiMarket | null   // fresh bid/ask/volume
   liveBTCPrice: number | null       // fresh BTC price
   livePriceHistory: PricePoint[]    // grows every 5 s
+  refresh: () => void               // trigger an immediate tick
 }
 
 /**
@@ -45,6 +46,10 @@ export function useMarketTick(
       setLiveMarket(null)
     }
   }, [ticker])
+
+  const tickRef = useRef<(() => void) | null>(null)
+
+  const refresh = useCallback(() => { tickRef.current?.() }, [])
 
   useEffect(() => {
     let mounted = true
@@ -91,10 +96,11 @@ export function useMarketTick(
       } catch { /* keep previous value */ }
     }
 
+    tickRef.current = tick
     tick()  // fire immediately
     const id = setInterval(tick, TICK_MS)
-    return () => { mounted = false; clearInterval(id) }
+    return () => { mounted = false; clearInterval(id); tickRef.current = null }
   }, [ticker])
 
-  return { liveMarket, liveBTCPrice, livePriceHistory }
+  return { liveMarket, liveBTCPrice, livePriceHistory, refresh }
 }
