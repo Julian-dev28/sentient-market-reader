@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { usePipeline } from '@/hooks/usePipeline'
+import { useMarketTick } from '@/hooks/useMarketTick'
 import Header from '@/components/Header'
 import MarketCard from '@/components/MarketCard'
 import PriceChart from '@/components/PriceChart'
@@ -29,6 +30,25 @@ export default function Home() {
   const prob = pipeline?.agents.probability.output ?? null
   const sent = pipeline?.agents.sentiment.output ?? null
   const exec = pipeline?.agents.execution.output
+
+  // Live 5-second tick — keeps bid/ask and BTC price fresh between pipeline cycles
+  const { liveMarket, liveBTCPrice, livePriceHistory } = useMarketTick(
+    md?.activeMarket?.ticker ?? null,
+    pf?.priceHistory ?? [],
+  )
+
+  // Merge: live tick overrides stale pipeline values
+  const activeMarket    = liveMarket   ?? md?.activeMarket   ?? null
+  const currentBTCPrice = liveBTCPrice ?? pf?.currentPrice   ?? 0
+  const priceHistory    = livePriceHistory.length > 0 ? livePriceHistory : (pf?.priceHistory ?? [])
+
+  // Derive strike + expiry directly from live market so they show before pipeline runs
+  const strikePrice = md?.strikePrice
+    ?? activeMarket?.floor_strike
+    ?? (activeMarket?.yes_sub_title ? parseFloat(activeMarket.yes_sub_title.replace(/[^0-9.]/g, '')) : 0)
+    ?? 0
+  const secondsUntilExpiry = md?.secondsUntilExpiry
+    ?? (activeMarket?.close_time ? Math.max(0, Math.floor((new Date(activeMarket.close_time).getTime() - Date.now()) / 1000)) : 0)
 
   function handleToggleLive() {
     if (!liveMode) {
@@ -138,21 +158,21 @@ export default function Home() {
           {/* ─── LEFT ─── */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <MarketCard
-              market={md?.activeMarket ?? null}
-              strikePrice={md?.strikePrice ?? 0}
-              currentBTCPrice={pf?.currentPrice ?? 0}
-              secondsUntilExpiry={md?.secondsUntilExpiry ?? 0}
+              market={activeMarket}
+              strikePrice={strikePrice}
+              currentBTCPrice={currentBTCPrice}
+              secondsUntilExpiry={secondsUntilExpiry}
               liveMode={liveMode}
             />
             <SignalPanel probability={prob} sentiment={sent} />
 
             {exec && exec.action !== 'PASS' && (
               <div className="card bracket-card animate-fade-in" style={{
-                borderColor: exec.action === 'BUY_YES' ? '#aed5b8' : '#e0b0bf',
-                background: exec.action === 'BUY_YES' ? 'var(--green-pale)' : 'var(--pink-pale)',
+                borderColor: exec.action === 'BUY_YES' ? '#9ecfb8' : '#a8cce0',
+                background: exec.action === 'BUY_YES' ? 'var(--green-pale)' : 'var(--blue-pale)',
               }}>
                 <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6,
-                  color: exec.action === 'BUY_YES' ? 'var(--green-dark)' : 'var(--pink-dark)' }}>
+                  color: exec.action === 'BUY_YES' ? 'var(--green-dark)' : 'var(--blue-dark)' }}>
                   <span style={{ fontSize: 16 }}>{exec.action === 'BUY_YES' ? '↑' : '↓'}</span>
                   {exec.action === 'BUY_YES' ? 'BUY YES' : 'BUY NO'} — Latest Signal
                   {liveMode && <span style={{ marginLeft: 'auto', fontSize: 9, fontWeight: 700, color: 'var(--green-dark)', background: 'var(--green-pale)', border: '1px solid #a8d8b5', borderRadius: 4, padding: '1px 5px' }}>LIVE</span>}
@@ -188,13 +208,13 @@ export default function Home() {
                   padding: '7px 18px', borderRadius: 9,
                   background: isRunning
                     ? 'var(--cream-dark)'
-                    : 'linear-gradient(135deg, var(--brown) 0%, var(--brown-light) 100%)',
-                  border: isRunning ? '1px solid var(--border)' : 'none',
+                    : 'linear-gradient(135deg, var(--green-dark) 0%, var(--green) 100%)',
+                  border: isRunning ? '1px solid var(--border)' : '1px solid var(--green-dark)',
                   color: isRunning ? 'var(--text-muted)' : '#fff',
                   cursor: isRunning ? 'not-allowed' : 'pointer',
                   fontSize: 12, fontWeight: 700,
                   display: 'flex', alignItems: 'center', gap: 6,
-                  boxShadow: isRunning ? 'none' : '0 2px 10px rgba(155,118,83,0.35)',
+                  boxShadow: isRunning ? 'none' : '0 2px 10px rgba(74,148,112,0.3)',
                   transition: 'all 0.2s',
                   letterSpacing: '0.02em',
                 }}
@@ -205,7 +225,7 @@ export default function Home() {
               </button>
             </div>
 
-            <PriceChart priceHistory={pf?.priceHistory ?? []} strikePrice={md?.strikePrice ?? 0} currentPrice={pf?.currentPrice ?? 0} />
+            <PriceChart priceHistory={priceHistory} strikePrice={strikePrice} currentPrice={currentBTCPrice} />
             <AgentPipeline pipeline={pipeline} isRunning={isRunning} />
 
             {/* Architecture note */}

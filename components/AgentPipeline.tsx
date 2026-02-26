@@ -3,95 +3,127 @@
 import { useState, useEffect, useRef } from 'react'
 import type { PipelineState, AgentStatus } from '@/lib/types'
 
-// ── ROMA stage definitions ─────────────────────────────────────────────────
-// Timing based on observed ~94s ROMA run (approximate, cascades visually)
+// ── ROMA stage definitions ──────────────────────────────────────────────────
 const ROMA_STAGES = [
-  { id: 'atomize',   label: 'ATOMIZE',    icon: '◎', color: 'var(--brown)',  glow: 'nodeGlowBrown',  startAt: 0,  endAt: 7  },
-  { id: 'plan',      label: 'PLAN',       icon: '◉', color: 'var(--pink)',   glow: 'nodeGlowPink',   startAt: 7,  endAt: 20 },
-  { id: 'execute',   label: 'EXECUTE ×N', icon: '▶', color: 'var(--green)',  glow: 'nodeGlowGreen',  startAt: 20, endAt: 76 },
-  { id: 'aggregate', label: 'AGGREGATE',  icon: '⬟', color: 'var(--amber)',  glow: 'nodeGlowAmber',  startAt: 76, endAt: 93 },
-  { id: 'extract',   label: 'EXTRACT',    icon: '◈', color: '#4a7fa5',       glow: 'nodeGlowBlue',   startAt: 93, endAt: 999},
+  { id: 'atomize',   label: 'ATOMIZE',    icon: '◎', color: 'var(--brown)',  rgb: '125,112,96',  startAt: 0,  endAt: 7   },
+  { id: 'plan',      label: 'PLAN',       icon: '◉', color: 'var(--blue)',   rgb: '74,127,165',  startAt: 7,  endAt: 20  },
+  { id: 'execute',   label: 'EXECUTE ×N', icon: '▶', color: 'var(--green)',  rgb: '74,148,112',  startAt: 20, endAt: 76  },
+  { id: 'aggregate', label: 'AGGREGATE',  icon: '⬟', color: 'var(--amber)',  rgb: '160,120,64',  startAt: 76, endAt: 93  },
+  { id: 'extract',   label: 'EXTRACT',    icon: '◈', color: 'var(--pink)',   rgb: '181,96,112',  startAt: 93, endAt: 999 },
 ]
 
-const MESSAGES: [number, string][] = [
-  [0,  'Sending market context to Atomizer...'],
-  [4,  'ROMA: task is complex — decomposing into subtasks...'],
-  [8,  'Planner analyzing market structure...'],
-  [14, 'Generating 3–5 parallel analysis subtasks...'],
-  [20, 'Dispatching Executors in parallel...'],
-  [28, 'Analyzing BTC 1h price momentum signal...'],
-  [38, 'Analyzing Kalshi orderbook crowd sentiment...'],
-  [48, 'Estimating P(YES) given price position + time decay...'],
-  [58, 'Evaluating edge vs market-implied probability...'],
-  [67, 'Assessing risk-adjusted trade decision...'],
-  [76, 'Aggregator synthesizing all subtask results...'],
-  [83, 'Building unified market thesis...'],
-  [90, 'Aggregation complete — extracting structured signals...'],
-  [95, 'Mapping ROMA output to trading parameters...'],
+const LOG_MESSAGES: [number, string][] = [
+  [0,  '› Sending market context to Atomizer'],
+  [4,  '› Task complexity — initiating decomposition'],
+  [8,  '› Planner mapping market structure'],
+  [14, '› Generating 3–5 parallel analysis subtasks'],
+  [20, '› Dispatching Executors in parallel'],
+  [28, '› Executor A — BTC 1h momentum signal'],
+  [38, '› Executor B — Kalshi orderbook sentiment'],
+  [48, '› Executor C — P(YES) vs time decay model'],
+  [58, '› Executor D — Edge vs market-implied prob'],
+  [67, '› Executor E — Risk-adjusted trade signal'],
+  [76, '› Aggregator synthesizing subtask results'],
+  [83, '› Building unified market thesis'],
+  [90, '› Aggregation complete'],
+  [93, '› Extracting structured trading parameters'],
+  [97, '› Mapping ROMA output → pModel, edge, rec'],
 ]
 
+// ── Running loader ──────────────────────────────────────────────────────────
 function RomaLoader({ elapsed }: { elapsed: number }) {
-  const sec = elapsed / 1000
-  const mins = Math.floor(sec / 60)
-  const secs = Math.floor(sec % 60)
+  const sec    = elapsed / 1000
+  const mins   = Math.floor(sec / 60)
+  const secs   = Math.floor(sec % 60)
   const timeStr = `${mins}:${String(secs).padStart(2, '0')}`
-  const message = [...MESSAGES].reverse().find(([t]) => sec >= t)?.[1] ?? MESSAGES[0][1]
+
+  const visibleLogs = LOG_MESSAGES.filter(([t]) => sec >= t).slice(-5)
 
   return (
-    <div style={{ padding: '4px 0 2px' }}>
-      {/* Stage pipeline */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', marginBottom: 14 }}>
+    <div style={{ padding: '2px 0' }}>
+
+      {/* ── Stage pipeline ── */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', marginBottom: 20, padding: '8px 4px 0' }}>
         {ROMA_STAGES.map((stage, i) => {
           const active = sec >= stage.startAt && sec < stage.endAt
           const done   = sec >= stage.endAt
 
           return (
             <div key={stage.id} style={{ display: 'flex', alignItems: 'center', flex: 1, minWidth: 0 }}>
-              {/* Node + label */}
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, flex: 'none' }}>
+              {/* Node column */}
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, flex: 'none', position: 'relative' }}>
+
+                {/* Ripple rings */}
+                {active && ([64, 52] as const).map((size, ri) => (
+                  <div key={ri} style={{
+                    position: 'absolute', top: '50%', left: '50%',
+                    transform: 'translate(-50%, -62%)',
+                    width: size + 20, height: size + 20, borderRadius: '50%',
+                    border: `1px solid rgba(${stage.rgb},${0.3 - ri * 0.1})`,
+                    animation: `rippleOut 1.6s ease-out ${ri * 0.5}s infinite`,
+                    pointerEvents: 'none',
+                  }} />
+                ))}
+
+                {/* Main node */}
                 <div style={{
-                  width: 34, height: 34, borderRadius: '50%',
+                  width: 58, height: 58, borderRadius: '50%',
                   border: `2px solid ${(active || done) ? stage.color : 'var(--border)'}`,
-                  background: done ? stage.color + '28' : active ? stage.color + '12' : 'rgba(255,255,255,0.6)',
+                  background: done
+                    ? `rgba(${stage.rgb},0.12)`
+                    : active
+                    ? `rgba(${stage.rgb},0.07)`
+                    : 'rgba(255,255,255,0.5)',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: done ? 12 : 14,
+                  fontSize: done ? 16 : 20,
                   color: (active || done) ? stage.color : 'var(--text-light)',
-                  transition: 'all 0.5s ease',
-                  animation: active ? `${stage.glow} 1s ease-in-out infinite` : 'none',
-                  position: 'relative',
+                  transition: 'all 0.5s cubic-bezier(0.34,1.56,0.64,1)',
+                  boxShadow: active
+                    ? `0 0 0 4px rgba(${stage.rgb},0.12), 0 0 20px 4px rgba(${stage.rgb},0.18)`
+                    : 'none',
+                  position: 'relative', overflow: 'hidden',
                 }}>
-                  {done ? '✓' : stage.icon}
                   {active && (
                     <div style={{
-                      position: 'absolute', inset: -4, borderRadius: '50%',
-                      border: `1.5px solid ${stage.color}`,
-                      opacity: 0.4,
-                      animation: 'pulse-dot 1.2s ease-in-out infinite',
+                      position: 'absolute', inset: 0, borderRadius: '50%',
+                      background: `conic-gradient(from 0deg, transparent 70%, rgba(${stage.rgb},0.28) 100%)`,
+                      animation: 'spin-slow 1.8s linear infinite',
                     }} />
                   )}
+                  <span style={{ position: 'relative', zIndex: 1, animation: active ? 'iconBeat 1.2s ease-in-out infinite' : 'none' }}>
+                    {done ? '✓' : stage.icon}
+                  </span>
                 </div>
+
                 <span style={{
-                  fontSize: 7, fontWeight: 700, letterSpacing: '0.07em',
-                  color: active ? stage.color : done ? stage.color : 'var(--text-light)',
+                  fontSize: 9, fontWeight: 700, letterSpacing: '0.08em',
+                  color: active ? stage.color : done ? stage.color + 'bb' : 'var(--text-light)',
                   textTransform: 'uppercase', textAlign: 'center', lineHeight: 1.2,
+                  maxWidth: 60, whiteSpace: 'nowrap',
                   transition: 'color 0.4s',
-                  maxWidth: 46, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                 }}>{stage.label}</span>
               </div>
 
               {/* Connector */}
               {i < ROMA_STAGES.length - 1 && (
                 <div style={{
-                  flex: 1, height: 2, margin: '0 3px', marginBottom: 18,
-                  background: done ? stage.color : 'var(--border)',
+                  flex: 1, height: 3, margin: '0 6px', marginBottom: 24,
+                  background: done ? `rgba(${stage.rgb},0.3)` : 'var(--border)',
                   position: 'relative', overflow: 'hidden',
-                  borderRadius: 1, transition: 'background 0.5s',
+                  borderRadius: 2, transition: 'background 0.6s ease',
                 }}>
-                  {(active || (sec >= stage.startAt && sec < ROMA_STAGES[i + 1].endAt)) && (
+                  {(active || (sec >= stage.startAt && sec < ROMA_STAGES[i + 1].endAt)) && [0, 0.35, 0.7].map((delay, di) => (
+                    <div key={di} style={{
+                      position: 'absolute', top: '50%', transform: 'translateY(-50%)',
+                      width: 6, height: 6, borderRadius: '50%',
+                      background: stage.color,
+                      animation: `dataPacket 1.1s ${delay}s linear infinite`,
+                    }} />
+                  ))}
+                  {done && (
                     <div style={{
-                      position: 'absolute', top: 0, left: '-100%', width: '100%', height: '100%',
-                      background: `linear-gradient(90deg, transparent, ${stage.color}cc, transparent)`,
-                      animation: 'flowRight 0.8s linear infinite',
+                      position: 'absolute', inset: 0,
+                      background: `linear-gradient(90deg, rgba(${stage.rgb},0.45), rgba(${stage.rgb},0.15))`,
                     }} />
                   )}
                 </div>
@@ -101,89 +133,160 @@ function RomaLoader({ elapsed }: { elapsed: number }) {
         })}
       </div>
 
-      {/* Status message + timer */}
+      {/* ── Terminal log ── */}
       <div style={{
-        padding: '9px 12px', borderRadius: 9,
-        background: 'var(--bg-secondary)', border: '1px solid var(--border)',
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+        borderRadius: 10,
+        background: 'rgba(26,24,20,0.03)',
+        border: '1px solid var(--border)',
+        overflow: 'hidden',
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
-          <span className="status-dot running" style={{ width: 5, height: 5, flexShrink: 0 }} />
-          <span style={{
-            fontSize: 9.5, color: 'var(--text-secondary)', lineHeight: 1.3,
-            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-            animation: 'romaTyping 2s ease-in-out infinite',
-          }}>{message}</span>
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '7px 14px',
+          borderBottom: '1px solid var(--border)',
+          background: 'rgba(26,24,20,0.02)',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+            <span className="status-dot running" style={{ width: 6, height: 6 }} />
+            <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 9, fontWeight: 700, letterSpacing: '0.1em', color: 'var(--text-muted)', textTransform: 'uppercase' }}>roma · solve</span>
+          </div>
+          <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)' }}>{timeStr}</span>
         </div>
-        <span style={{
-          fontFamily: 'var(--font-geist-mono)', fontSize: 10.5, fontWeight: 700,
-          color: 'var(--text-muted)', flexShrink: 0,
-        }}>{timeStr}</span>
+
+        <div style={{ padding: '10px 14px', minHeight: 78, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', gap: 4 }}>
+          {visibleLogs.map(([t, msg], idx) => {
+            const isLatest = idx === visibleLogs.length - 1
+            return (
+              <div key={t} style={{
+                display: 'flex', alignItems: 'center', gap: 10,
+                opacity: isLatest ? 1 : 0.35 + idx * 0.12,
+                animation: isLatest ? 'logEntry 0.25s ease forwards' : 'none',
+              }}>
+                <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 9.5, color: isLatest ? 'var(--brown)' : 'var(--text-light)', flexShrink: 0 }}>
+                  {String(Math.floor(t / 60)).padStart(1, '0')}:{String(t % 60).padStart(2, '0')}
+                </span>
+                <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 10.5, color: isLatest ? 'var(--text-primary)' : 'var(--text-muted)', lineHeight: 1.4 }}>
+                  {msg}
+                  {isLatest && <span style={{ animation: 'blink 0.9s step-end infinite', marginLeft: 2, color: 'var(--blue)' }}>▌</span>}
+                </span>
+              </div>
+            )
+          })}
+        </div>
       </div>
     </div>
   )
 }
 
-// ── Agent cards (post-run results) ─────────────────────────────────────────
+// ── Agent cards (post-run results) ──────────────────────────────────────────
 const AGENTS = [
-  { key: 'marketDiscovery' as const, short: 'MARKET', icon: '◎', desc: 'KXBTC15M scan',     color: 'var(--brown)',  bg: 'var(--brown-pale)', border: '#d4bfad' },
-  { key: 'priceFeed'       as const, short: 'PRICE',  icon: '◈', desc: 'CMC BTC feed',      color: 'var(--green)',  bg: 'var(--green-pale)', border: '#aed5b8' },
-  { key: 'sentiment'       as const, short: 'ROMA·S', icon: '◉', desc: 'ROMA sentiment',    color: 'var(--pink)',   bg: 'var(--pink-pale)',  border: '#e0b0bf' },
-  { key: 'probability'     as const, short: 'ROMA·P', icon: '⬟', desc: 'ROMA probability',  color: 'var(--amber)',  bg: 'var(--amber-pale)', border: '#dfbf98' },
-  { key: 'risk'            as const, short: 'RISK',   icon: '⬡', desc: 'Kelly + limits',    color: 'var(--brown)',  bg: 'var(--brown-pale)', border: '#d4bfad' },
-  { key: 'execution'       as const, short: 'EXEC',   icon: '▶', desc: 'Paper order',       color: 'var(--green)',  bg: 'var(--green-pale)', border: '#aed5b8' },
+  { key: 'marketDiscovery' as const, label: 'Market Discovery', short: 'MARKET',   icon: '◎', desc: 'KXBTC15M scan',     color: 'var(--brown)',  rgb: '125,112,96',  bg: 'var(--brown-pale)', border: '#cbc6be' },
+  { key: 'priceFeed'       as const, label: 'Price Feed',       short: 'PRICE',    icon: '◈', desc: 'CMC BTC feed',      color: 'var(--green)',  rgb: '74,148,112',  bg: 'var(--green-pale)', border: '#9ecfb8' },
+  { key: 'sentiment'       as const, label: 'Sentiment',        short: 'SENTIMENT',icon: '◉', desc: 'ROMA sentiment',    color: 'var(--blue)',   rgb: '74,127,165',  bg: 'var(--blue-pale)',  border: '#a8cce0' },
+  { key: 'probability'     as const, label: 'Probability',      short: 'PROB',     icon: '⬟', desc: 'ROMA probability',  color: 'var(--amber)',  rgb: '160,120,64',  bg: 'var(--amber-pale)', border: '#d0b888' },
+  { key: 'risk'            as const, label: 'Risk Manager',     short: 'RISK',     icon: '⬡', desc: 'Kelly + limits',    color: 'var(--brown)',  rgb: '125,112,96',  bg: 'var(--brown-pale)', border: '#cbc6be' },
+  { key: 'execution'       as const, label: 'Execution',        short: 'EXEC',     icon: '▶', desc: 'Paper order',       color: 'var(--green)',  rgb: '74,148,112',  bg: 'var(--green-pale)', border: '#9ecfb8' },
 ]
 
-function agentColor(s: AgentStatus, base: string) {
-  if (s === 'running') return 'var(--pink)'
-  if (s === 'done')    return base
-  if (s === 'error')   return 'var(--red)'
-  if (s === 'skipped') return 'var(--amber)'
-  return 'var(--text-light)'
-}
-
-function AgentCard({ agent, result }: { agent: typeof AGENTS[0]; result?: PipelineState['agents'][keyof PipelineState['agents']] }) {
+function AgentCard({
+  agent,
+  result,
+  index,
+}: {
+  agent: typeof AGENTS[0]
+  result?: PipelineState['agents'][keyof PipelineState['agents']]
+  index: number
+}) {
   const status: AgentStatus = result?.status ?? 'idle'
-  const color   = agentColor(status, agent.color)
   const done    = status === 'done'
   const skipped = status === 'skipped'
+  const active  = !done && !skipped
 
   return (
     <div style={{
-      flex: 1, minWidth: 0, padding: '10px 11px', borderRadius: 10,
-      background: (done || skipped) ? agent.bg : 'rgba(255,255,255,0.7)',
+      padding: '18px 18px 16px',
+      borderRadius: 12,
+      background: (done || skipped) ? agent.bg : 'rgba(255,255,255,0.5)',
       border: `1px solid ${(done || skipped) ? agent.border : 'var(--border)'}`,
       position: 'relative', overflow: 'hidden',
-      transition: 'background 0.3s, border-color 0.3s',
+      transition: 'background 0.35s, border-color 0.35s, box-shadow 0.35s',
+      boxShadow: done ? `0 2px 16px rgba(${agent.rgb},0.1)` : 'none',
+      animation: (done || skipped) ? `cardIn 0.35s ${index * 70}ms cubic-bezier(0.34,1.56,0.64,1) both` : 'none',
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4 }}>
-        <span style={{ fontSize: 11, color }}>{agent.icon}</span>
-        <span style={{ fontSize: 8, fontWeight: 800, letterSpacing: '0.08em', color, fontFamily: 'var(--font-geist-mono)', textTransform: 'uppercase' }}>{agent.short}</span>
-        {done    && <span style={{ fontSize: 9, color: agent.color, marginLeft: 'auto' }}>✓</span>}
-        {skipped && <span style={{ fontSize: 9, color: 'var(--amber)', marginLeft: 'auto' }}>—</span>}
+      {/* Top accent bar */}
+      {(done || skipped) && (
+        <div style={{
+          position: 'absolute', top: 0, left: 0, right: 0, height: 3,
+          background: done
+            ? `linear-gradient(90deg, ${agent.color}, rgba(${agent.rgb},0.15))`
+            : 'var(--amber)',
+          borderRadius: '12px 12px 0 0',
+        }} />
+      )}
+
+      {/* Step number */}
+      <div style={{
+        position: 'absolute', top: 14, right: 14,
+        fontFamily: 'var(--font-geist-mono)', fontSize: 9, fontWeight: 700,
+        color: (done || skipped) ? agent.color : 'var(--text-light)',
+        opacity: 0.6, letterSpacing: '0.04em',
+      }}>
+        {String(index + 1).padStart(2, '0')}
       </div>
-      <div style={{ fontSize: 8.5, color: 'var(--text-muted)', marginBottom: result ? 4 : 0, lineHeight: 1.3 }}>{agent.desc}</div>
-      {result && (
-        <div style={{ fontSize: 7.5, color: 'var(--text-secondary)', lineHeight: 1.4, borderTop: '1px solid var(--border)', paddingTop: 4 }}>
-          {result.reasoning.length > 72 ? result.reasoning.slice(0, 72) + '…' : result.reasoning}
+
+      {/* Icon + label */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+        <div style={{
+          width: 40, height: 40, borderRadius: 10, flexShrink: 0,
+          background: (done || skipped) ? `rgba(${agent.rgb},0.15)` : 'var(--bg-secondary)',
+          border: `1.5px solid ${(done || skipped) ? agent.border : 'var(--border)'}`,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 18, color: active ? 'var(--text-light)' : agent.color,
+          animation: done ? 'iconLand 0.4s cubic-bezier(0.34,1.56,0.64,1) forwards' : 'none',
+          transition: 'all 0.3s',
+        }}>{agent.icon}</div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{
+            fontSize: 15, fontWeight: 800, letterSpacing: '-0.02em',
+            color: active ? 'var(--text-muted)' : 'var(--text-primary)',
+            lineHeight: 1.2, marginBottom: 3,
+          }}>{agent.label}</div>
+          <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-muted)' }}>{agent.desc}</div>
+        </div>
+        {done    && <span style={{ fontSize: 14, color: agent.color, flexShrink: 0, marginRight: 20, animation: 'tickPop 0.3s cubic-bezier(0.34,1.56,0.64,1) forwards' }}>✓</span>}
+        {skipped && <span style={{ fontSize: 12, color: 'var(--amber)', flexShrink: 0, marginRight: 20 }}>—</span>}
+      </div>
+
+      {/* Reasoning */}
+      {result ? (
+        <div style={{
+          fontSize: 12, fontWeight: 500, color: 'var(--text-secondary)', lineHeight: 1.65,
+          borderTop: `1px solid rgba(${agent.rgb},0.15)`,
+          paddingTop: 10,
+        }}>
+          {result.reasoning.length > 200 ? result.reasoning.slice(0, 200) + '…' : result.reasoning}
+        </div>
+      ) : (
+        <div style={{
+          fontSize: 12, color: 'var(--text-light)', lineHeight: 1.5,
+          borderTop: '1px solid var(--border)', paddingTop: 10,
+          fontStyle: 'italic',
+        }}>
+          Waiting for pipeline run...
         </div>
       )}
-      {result?.durationMs ? (
-        <div style={{ marginTop: 2, fontSize: 7, color: 'var(--text-muted)', fontFamily: 'var(--font-geist-mono)' }}>{result.durationMs}ms</div>
-      ) : null}
+
+      {/* Duration */}
+      {result?.durationMs != null && (
+        <div style={{ marginTop: 8, fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--font-geist-mono)', fontWeight: 600, opacity: 0.7 }}>
+          {result.durationMs >= 1000 ? (result.durationMs / 1000).toFixed(1) + 's' : result.durationMs + 'ms'}
+        </div>
+      )}
     </div>
   )
 }
 
-function Connector({ done }: { done: boolean }) {
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0, width: 14, margin: '0 -1px' }}>
-      <div style={{ width: '100%', height: 2, background: done ? 'var(--green)' : 'var(--border)', borderRadius: 1, transition: 'background 0.3s' }} />
-    </div>
-  )
-}
-
-// ── Main export ────────────────────────────────────────────────────────────
+// ── Main export ─────────────────────────────────────────────────────────────
 export default function AgentPipeline({ pipeline, isRunning }: { pipeline: PipelineState | null; isRunning: boolean }) {
   const [elapsedMs, setElapsedMs] = useState(0)
   const startRef = useRef<number | null>(null)
@@ -192,22 +295,24 @@ export default function AgentPipeline({ pipeline, isRunning }: { pipeline: Pipel
     if (isRunning) {
       startRef.current = Date.now()
       setElapsedMs(0)
-      const id = setInterval(() => setElapsedMs(Date.now() - (startRef.current ?? Date.now())), 500)
+      const id = setInterval(() => setElapsedMs(Date.now() - (startRef.current ?? Date.now())), 250)
       return () => clearInterval(id)
     }
   }, [isRunning])
 
   return (
-    <div className="card" style={{ padding: '14px 16px' }}>
+    <div className="card" style={{ padding: '18px 18px 16px' }}>
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
         <div>
-          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>ROMA Agent Pipeline</div>
-          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 1 }}>ROMA Pattern · Atomizer → Planner → Executors → Aggregator</div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '-0.01em' }}>ROMA Agent Pipeline</div>
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2, letterSpacing: '0.02em' }}>
+            Atomizer → Planner → Executors → Aggregator → Extract
+          </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {isRunning && (
-            <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 10, color: 'var(--pink)' }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--pink)', fontWeight: 600 }}>
               <span className="status-dot running" /> Running
             </span>
           )}
@@ -215,32 +320,32 @@ export default function AgentPipeline({ pipeline, isRunning }: { pipeline: Pipel
         </div>
       </div>
 
-      {/* Body: loader while running, agent cards when done */}
+      {/* Body */}
       {isRunning ? (
         <RomaLoader elapsed={elapsedMs} />
       ) : pipeline ? (
         <>
-          <div style={{ display: 'flex', alignItems: 'stretch' }}>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr',
+            gap: 12,
+          }}>
             {AGENTS.map((agent, i) => {
               const result = pipeline.agents[agent.key]
-              const done   = result?.status === 'done' || result?.status === 'skipped'
-              return (
-                <div key={agent.key} style={{ display: 'flex', alignItems: 'stretch', flex: 1, minWidth: 0 }}>
-                  <AgentCard agent={agent} result={result} />
-                  {i < AGENTS.length - 1 && <Connector done={done} />}
-                </div>
-              )
+              return <AgentCard key={agent.key} agent={agent} result={result} index={i} />
             })}
           </div>
+
           {pipeline.cycleCompletedAt && (
-            <div style={{ marginTop: 8, fontSize: 8, color: 'var(--text-muted)', fontFamily: 'var(--font-geist-mono)', textAlign: 'right' }}>
-              Completed {new Date(pipeline.cycleCompletedAt).toLocaleTimeString('en-US', { hour12: false })} UTC
+            <div style={{ marginTop: 12, fontSize: 9, color: 'var(--text-muted)', fontFamily: 'var(--font-geist-mono)', textAlign: 'right', opacity: 0.6 }}>
+              completed {new Date(pipeline.cycleCompletedAt).toLocaleTimeString('en-US', { hour12: false })}
             </div>
           )}
         </>
       ) : (
-        <div style={{ padding: '20px 0', textAlign: 'center' }}>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Awaiting first ROMA cycle...</div>
+        <div style={{ padding: '32px 0', textAlign: 'center' }}>
+          <div style={{ fontSize: 10, letterSpacing: '0.07em', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 6 }}>// AWAITING</div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Awaiting first ROMA cycle…</div>
         </div>
       )}
     </div>

@@ -1,51 +1,57 @@
 @import "tailwindcss";
 
 :root {
-  /* ── Warm cream base ── */
-  --bg-primary:    #fdf8f3;
-  --bg-secondary:  #f7f0e8;
-  --bg-card:       #fffefb;
-  --bg-card-hover: #fdf9f4;
+  /* ── Sentient Foundation palette — off-white, stone, slate-blue ── */
+  --bg-primary:    #f9f8f6;
+  --bg-secondary:  #f2f0ec;
+  --bg-card:       #ffffff;
+  --bg-card-hover: #fafaf8;
 
-  /* Borders — warm */
-  --border:        #ecddd0;
-  --border-bright: #d4bfad;
+  /* Borders — cool neutral */
+  --border:        #e4e0da;
+  --border-bright: #cbc6be;
 
-  /* Browns */
-  --brown:         #9b7653;
-  --brown-light:   #b8956e;
-  --brown-dark:    #7a5c3a;
-  --brown-pale:    #e8d5c0;
+  /* Stone — light warm brown */
+  --brown:         #7d7060;
+  --brown-light:   #9b8f7e;
+  --brown-dark:    #5c5247;
+  --brown-pale:    #ede9e4;
 
-  /* Pinks */
-  --pink:          #d4738e;
-  --pink-light:    #e8a0b4;
-  --pink-pale:     #f5dde5;
-  --pink-dark:     #b85a75;
+  /* Rose — soft muted pink-red for below-strike / bearish direction */
+  --pink:          #b56070;
+  --pink-light:    #cf9098;
+  --pink-pale:     #f4e2e4;
+  --pink-dark:     #8c4858;
 
-  /* Greens — sage/warm */
-  --green:         #6aaa7a;
-  --green-light:   #8dc49a;
-  --green-pale:    #d9ede0;
-  --green-dark:    #4e8a5e;
+  /* Blue — slate accent for signals/UI */
+  --blue:          #4a7fa5;
+  --blue-light:    #7aaac8;
+  --blue-pale:     #dce9f2;
+  --blue-dark:     #2d5f80;
 
-  /* Creams / whites */
-  --cream:         #f9f2e8;
-  --cream-dark:    #ede3d5;
+  /* Green — positive / above-strike / win */
+  --green:         #4a9470;
+  --green-light:   #75b898;
+  --green-pale:    #d8ede5;
+  --green-dark:    #2d7050;
 
-  /* Soft amber */
-  --amber:         #c8874a;
-  --amber-pale:    #f2dfc8;
+  /* Neutral creams */
+  --cream:         #f5f2ee;
+  --cream-dark:    #e8e4de;
 
-  /* Red — soft rose for losses */
-  --red:           #c96060;
-  --red-pale:      #f5dada;
+  /* Amber — warning/neutral */
+  --amber:         #a07840;
+  --amber-pale:    #f0e4d0;
 
-  /* Text */
-  --text-primary:   #3d2e1e;
-  --text-secondary: #7a6252;
-  --text-muted:     #a8917a;
-  --text-light:     #c9b5a0;
+  /* Red — loss / error */
+  --red:           #a85858;
+  --red-pale:      #f0dede;
+
+  /* Text — editorial near-black */
+  --text-primary:   #1a1814;
+  --text-secondary: #5a5248;
+  --text-muted:     #908880;
+  --text-light:     #bab2a8;
 }
 
 * { box-sizing: border-box; }
@@ -53,10 +59,14 @@
 html, body {
   background-color: var(--bg-primary);
   color: var(--text-primary);
-  font-family: var(--font-inter), system-ui, sans-serif;
+  font-family: var(--font-inter), 'Helvetica Neue', system-ui, sans-serif;
+  font-feature-settings: 'kern' 1, 'liga' 1;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   margin: 0; padding: 0;
   min-height: 100vh;
   overflow-x: hidden;
+  letter-spacing: -0.01em;
 }
 
 ::-webkit-scrollbar { width: 4px; height: 4px; }
@@ -69,17 +79,17 @@ html, body {
 .card {
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: 18px;
+  border-radius: 12px;
   padding: 20px;
   box-shadow:
-    0 1px 2px rgba(155,118,83,0.06),
-    0 4px 20px rgba(155,118,83,0.05);
-  transition: box-shadow 0.25s ease, border-color 0.25s ease;
+    0 1px 2px rgba(26,24,20,0.04),
+    0 2px 12px rgba(26,24,20,0.04);
+  transition: box-shadow 0.2s ease, border-color 0.2s ease;
 }
 .card:hover {
   box-shadow:
-    0 2px 6px rgba(155,118,83,0.08),
-    0 8px 32px rgba(155,118,83,0.08);
+    0 1px 4px rgba(26,24,20,0.06),
+    0 4px 20px rgba(26,24,20,0.06);
   border-color: var(--border-bright);
 }
 
@@ -144,6 +154,71 @@ html, body {
   0%,100% { opacity: 1; }
   50%      { opacity: 0.5; }
 }
+@keyframes rippleOut {
+  0%   { transform: translate(-50%,-68%) scale(0.85); opacity: 0.6; }
+  100% { transform: translate(-50%,-68%) scale(1.55); opacity: 0; }
+}
+@keyframes dataPacket {
+  0%   { left: -3%;  opacity: 0; }
+  10%  { opacity: 1; }
+  90%  { opacity: 1; }
+  100% { left: 103%; opacity: 0; }
+}
+@keyframes iconBeat {
+  0%,100% { transform: scale(1); }
+  50%      { transform: scale(1.18); }
+}
+@keyframes cardIn {
+  from { opacity: 0; transform: translateY(8px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0)   scale(1); }
+}
+@keyframes tickPop {
+  from { opacity: 0; transform: scale(0.5); }
+  to   { opacity: 1; transform: scale(1); }
+}
+@keyframes iconLand {
+  0%   { transform: scale(1.3) rotate(-8deg); }
+  60%  { transform: scale(0.95) rotate(2deg); }
+  100% { transform: scale(1)    rotate(0deg); }
+}
+@keyframes logEntry {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes blink {
+  0%,100% { opacity: 1; }
+  50%      { opacity: 0; }
+}
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
+}
+@keyframes slideUpFade {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.9); }
+  to   { opacity: 1; transform: scale(1); }
+}
+@keyframes numberPop {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(1.1); }
+  100% { transform: scale(1); }
+}
+@keyframes urgentPulse {
+  0%,100% { opacity: 1; color: var(--pink); }
+  50%     { opacity: 0.55; }
+}
+@keyframes gradientFlow {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+@keyframes ringFill {
+  from { stroke-dashoffset: 138.2; }
+  to   { stroke-dashoffset: 0; }
+}
 
 .animate-float1    { animation: float1  14s ease-in-out infinite; }
 .animate-float2    { animation: float2  18s ease-in-out infinite; }
@@ -156,6 +231,8 @@ html, body {
 .animate-sparkle   { animation: sparkle 2.5s ease-in-out infinite; }
 .animate-spin-slow { animation: spin-slow 24s linear infinite; }
 .animate-spin-rev  { animation: spin-reverse 18s linear infinite; }
+.animate-slide-up  { animation: slideUpFade 0.4s ease both; }
+.animate-scale-in  { animation: scaleIn 0.35s cubic-bezier(0.34,1.56,0.64,1) both; }
 
 /* ── Status dots ───────────────────────── */
 .status-dot {
@@ -177,10 +254,11 @@ html, body {
   font-size: 10px; font-weight: 600; letter-spacing: 0.03em;
 }
 .pill-brown { background: var(--brown-pale);  border: 1px solid var(--border-bright);  color: var(--brown-dark); }
-.pill-pink  { background: var(--pink-pale);   border: 1px solid #e0b0bf;               color: var(--pink-dark); }
-.pill-green { background: var(--green-pale);  border: 1px solid #aed5b8;               color: var(--green-dark); }
-.pill-red   { background: var(--red-pale);    border: 1px solid #e0b0b0;               color: var(--red); }
-.pill-amber { background: var(--amber-pale);  border: 1px solid #dfbf98;               color: var(--amber); }
+.pill-pink  { background: var(--pink-pale);   border: 1px solid #d8a8b0;               color: var(--pink-dark); }
+.pill-blue  { background: var(--blue-pale);   border: 1px solid #a8cce0;               color: var(--blue-dark); }
+.pill-green { background: var(--green-pale);  border: 1px solid #9ecfb8;               color: var(--green-dark); }
+.pill-red   { background: var(--red-pale);    border: 1px solid #d8b0b0;               color: var(--red); }
+.pill-amber { background: var(--amber-pale);  border: 1px solid #d0b888;               color: var(--amber); }
 .pill-cream { background: var(--cream-dark);  border: 1px solid var(--border);         color: var(--text-secondary); }
 
 /* ── Gradient text ─────────────────────── */
@@ -196,6 +274,11 @@ html, body {
   background: linear-gradient(135deg, var(--green) 0%, var(--brown) 100%);
   -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
 }
+/* SF editorial annotation style */
+.annotation {
+  font-size: 9px; font-weight: 600; letter-spacing: 0.07em;
+  text-transform: uppercase; color: var(--text-muted);
+}
 
 /* ── Bracket corner accent ─────────────── */
 .bracket-card { position: relative; }
@@ -208,7 +291,7 @@ html, body {
 }
 .bracket-card::before { top: -1px; left: -1px; border-width: 2px 0 0 2px; border-radius: 4px 0 0 0; }
 .bracket-card::after  { bottom: -1px; right: -1px; border-width: 0 2px 2px 0; border-radius: 0 0 4px 0; }
-.bracket-card:hover::before, .bracket-card:hover::after { border-color: var(--pink); }
+.bracket-card:hover::before, .bracket-card:hover::after { border-color: var(--brown); }
 
 /* ── Hide number input spinners ────────── */
 input[type=number]::-webkit-inner-spin-button,
@@ -218,7 +301,7 @@ input[type=number] { -moz-appearance: textfield; }
 /* ── Noise overlay ─────────────────────── */
 .noise-overlay {
   position: fixed; inset: 0; pointer-events: none; z-index: 0;
-  opacity: 0.02;
+  opacity: 0.015;
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
   background-size: 180px 180px;
 }

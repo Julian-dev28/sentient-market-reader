@@ -14,10 +14,48 @@ interface MarketCardProps {
 const fmt  = (p: number) => p.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })
 const fmtD = (p: number) => p.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 })
 
-function Bar({ value, color }: { value: number; color: string }) {
+/** SVG arc ring showing remaining fraction */
+function CountdownRing({ seconds, total = 900, urgent }: { seconds: number; total?: number; urgent: boolean }) {
+  const r    = 22
+  const circ = 2 * Math.PI * r
+  const frac = Math.max(0, Math.min(1, seconds / total))
+  const offset = circ * (1 - frac)
+
+  return (
+    <svg width={56} height={56} style={{ transform: 'rotate(-90deg)', flexShrink: 0 }}>
+      <circle cx={28} cy={28} r={r} fill="none" stroke="var(--border)" strokeWidth={3} />
+      <circle
+        cx={28} cy={28} r={r} fill="none"
+        stroke={urgent ? 'var(--pink)' : frac < 0.3 ? 'var(--amber)' : 'var(--green)'}
+        strokeWidth={3}
+        strokeDasharray={circ}
+        strokeDashoffset={offset}
+        strokeLinecap="round"
+        style={{ transition: 'stroke-dashoffset 1s linear, stroke 0.5s ease' }}
+      />
+    </svg>
+  )
+}
+
+/** Animated bid/ask bar */
+function AnimatedBar({ value, color }: { value: number; color: string }) {
+  const [width, setWidth] = useState(0)
+  useEffect(() => { const id = setTimeout(() => setWidth(Math.min(100, value)), 100); return () => clearTimeout(id) }, [value])
   return (
     <div style={{ height: 5, borderRadius: 3, background: 'var(--bg-secondary)', overflow: 'hidden' }}>
-      <div style={{ height: '100%', width: `${Math.min(100, value)}%`, background: color, borderRadius: 3, transition: 'width 0.5s ease' }} />
+      <div style={{
+        height: '100%', width: `${width}%`, background: color, borderRadius: 3,
+        transition: 'width 0.6s cubic-bezier(0.34,1.56,0.64,1)',
+        position: 'relative',
+      }}>
+        <div style={{
+          position: 'absolute', inset: 0,
+          background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.5) 50%, transparent 100%)',
+          backgroundSize: '200% 100%',
+          animation: 'shimmer 2s ease infinite',
+          borderRadius: 3,
+        }} />
+      </div>
     </div>
   )
 }
@@ -41,17 +79,11 @@ function BuyBox({
     setOrder({ status: 'placing' })
     try {
       const body = {
-        ticker,
-        side,
-        count,
+        ticker, side, count,
         ...(side === 'yes' ? { yesPrice: ask } : { noPrice: ask }),
         clientOrderId: `manual-${side}-${Date.now()}`,
       }
-      const res = await fetch('/api/place-order', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
+      const res  = await fetch('/api/place-order', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       const data = await res.json()
       if (!res.ok || !data.ok) {
         setOrder({ status: 'err', message: data.error ?? `HTTP ${res.status}` })
@@ -77,9 +109,8 @@ function BuyBox({
         <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Ask</span>
         <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>{ask}¢</span>
       </div>
-      <Bar value={ask} color={color} />
+      <AnimatedBar value={ask} color={color} />
 
-      {/* Buy controls — only in live mode */}
       {liveMode && order.status === 'idle' && (
         <button
           onClick={() => setOrder({ status: 'confirm', count: 1 })}
@@ -87,59 +118,46 @@ function BuyBox({
             marginTop: 8, width: '100%', padding: '5px 0', borderRadius: 7,
             background: color + '22', border: `1px solid ${borderCol}`,
             fontSize: 10, fontWeight: 800, color,
-            cursor: 'pointer', transition: 'background 0.15s',
+            cursor: 'pointer', transition: 'background 0.15s, transform 0.15s',
           }}
+          onMouseEnter={e => (e.currentTarget.style.transform = 'scale(1.02)')}
+          onMouseLeave={e => (e.currentTarget.style.transform = 'scale(1)')}
         >
           BUY {label} @ {ask}¢
         </button>
       )}
 
       {liveMode && order.status === 'confirm' && (
-        <div style={{ marginTop: 8 }}>
+        <div style={{ marginTop: 8, animation: 'scaleIn 0.2s ease' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 5 }}>
             <span style={{ fontSize: 9, color: 'var(--text-muted)', flexShrink: 0 }}>Qty</span>
             <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
               <button onClick={() => setCount(c => Math.max(1, c - 1))} style={{ width: 18, height: 18, borderRadius: 4, border: '1px solid var(--border)', background: 'white', cursor: 'pointer', fontSize: 12, lineHeight: 1, color: 'var(--text-secondary)' }}>−</button>
               <input
-                type="number"
-                min={1}
-                max={500}
-                value={count}
-                onChange={e => {
-                  const v = parseInt(e.target.value, 10)
-                  if (!isNaN(v)) setCount(Math.max(1, Math.min(500, v)))
-                }}
-                style={{
-                  fontFamily: 'var(--font-geist-mono)', fontSize: 13, fontWeight: 800,
-                  color: 'var(--text-primary)', width: 44, textAlign: 'center',
-                  border: '1px solid var(--border)', borderRadius: 5,
-                  padding: '1px 4px', background: 'white', outline: 'none',
-                  MozAppearance: 'textfield',
-                }}
+                type="number" min={1} max={500} value={count}
+                onChange={e => { const v = parseInt(e.target.value, 10); if (!isNaN(v)) setCount(Math.max(1, Math.min(500, v))) }}
+                style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 13, fontWeight: 800, color: 'var(--text-primary)', width: 44, textAlign: 'center', border: '1px solid var(--border)', borderRadius: 5, padding: '1px 4px', background: 'white', outline: 'none', MozAppearance: 'textfield' }}
               />
               <button onClick={() => setCount(c => Math.min(500, c + 1))} style={{ width: 18, height: 18, borderRadius: 4, border: '1px solid var(--border)', background: 'white', cursor: 'pointer', fontSize: 12, lineHeight: 1, color: 'var(--text-secondary)' }}>+</button>
             </div>
             <span style={{ fontSize: 9, color: 'var(--text-muted)', marginLeft: 'auto' }}>${cost}</span>
           </div>
           <div style={{ display: 'flex', gap: 5 }}>
-            <button onClick={() => setOrder({ status: 'idle' })} style={{ flex: 1, padding: '5px 0', borderRadius: 6, border: '1px solid var(--border)', background: 'white', fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', cursor: 'pointer' }}>
-              Cancel
-            </button>
-            <button onClick={placeIt} style={{ flex: 2, padding: '5px 0', borderRadius: 6, border: `1px solid ${borderCol}`, background: color, fontSize: 10, fontWeight: 800, color: '#fff', cursor: 'pointer' }}>
-              Confirm Buy
-            </button>
+            <button onClick={() => setOrder({ status: 'idle' })} style={{ flex: 1, padding: '5px 0', borderRadius: 6, border: '1px solid var(--border)', background: 'white', fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', cursor: 'pointer' }}>Cancel</button>
+            <button onClick={placeIt} style={{ flex: 2, padding: '5px 0', borderRadius: 6, border: `1px solid ${borderCol}`, background: color, fontSize: 10, fontWeight: 800, color: '#fff', cursor: 'pointer' }}>Confirm Buy</button>
           </div>
         </div>
       )}
 
       {liveMode && order.status === 'placing' && (
         <div style={{ marginTop: 8, textAlign: 'center', fontSize: 10, color: 'var(--text-muted)' }}>
+          <span style={{ animation: 'spin-slow 1s linear infinite', display: 'inline-block', marginRight: 4 }}>◌</span>
           Placing order...
         </div>
       )}
 
       {liveMode && order.status === 'ok' && (
-        <div style={{ marginTop: 8, padding: '6px 8px', borderRadius: 6, background: 'var(--green-pale)', border: '1px solid #a8d8b5' }}>
+        <div style={{ marginTop: 8, padding: '6px 8px', borderRadius: 6, background: 'var(--green-pale)', border: '1px solid #a8d8b5', animation: 'scaleIn 0.2s ease' }}>
           <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--green-dark)' }}>✓ Order placed</div>
           <div style={{ fontSize: 9, color: 'var(--text-muted)', fontFamily: 'var(--font-geist-mono)', marginTop: 2 }}>
             {order.fillCount > 0 ? `Filled ${order.fillCount}×` : 'Resting on book'}
@@ -148,7 +166,7 @@ function BuyBox({
       )}
 
       {liveMode && order.status === 'err' && (
-        <div style={{ marginTop: 8, padding: '6px 8px', borderRadius: 6, background: 'var(--red-pale)', border: '1px solid #e0b0b0' }}>
+        <div style={{ marginTop: 8, padding: '6px 8px', borderRadius: 6, background: 'var(--red-pale)', border: '1px solid #e0b0b0', animation: 'scaleIn 0.2s ease' }}>
           <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--red)' }}>Order failed</div>
           <div style={{ fontSize: 9, color: 'var(--red)', marginTop: 2, lineHeight: 1.4 }}>{order.message}</div>
           <button onClick={() => setOrder({ status: 'idle' })} style={{ marginTop: 4, fontSize: 9, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>Dismiss</button>
@@ -173,20 +191,18 @@ export default function MarketCard({ market, strikePrice, currentBTCPrice, secon
   const above   = strikePrice > 0 && currentBTCPrice > strikePrice
   const diff    = currentBTCPrice - strikePrice
   const pct     = strikePrice > 0 ? (diff / strikePrice) * 100 : 0
-
-  const upColor   = 'var(--green)'
-  const downColor = 'var(--pink)'
-  const trendCol  = above ? upColor : downColor
+  const trendCol = above ? 'var(--green)' : 'var(--pink)'
 
   return (
     <div className="card bracket-card" style={{ overflow: 'hidden', padding: 0 }}>
-      {/* Top gradient bar */}
+      {/* Top gradient bar — animates with above/below */}
       <div style={{
         height: 4,
         background: above
-          ? 'linear-gradient(90deg, var(--green) 0%, var(--green-light) 100%)'
+          ? 'linear-gradient(90deg, var(--green-dark) 0%, var(--green-light) 100%)'
           : 'linear-gradient(90deg, var(--pink-dark) 0%, var(--pink-light) 100%)',
         borderRadius: '18px 18px 0 0',
+        transition: 'background 0.6s ease',
       }} />
 
       <div style={{ padding: '16px 18px' }}>
@@ -225,22 +241,23 @@ export default function MarketCard({ market, strikePrice, currentBTCPrice, secon
               padding: '12px 14px', borderRadius: 12, marginBottom: 12,
               background: above ? 'var(--green-pale)' : 'var(--pink-pale)',
               border: `1px solid ${above ? '#b8dfc3' : '#e0b8c6'}`,
+              transition: 'background 0.5s ease, border-color 0.5s ease',
             }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <div>
                   <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>BTC Now</div>
-                  <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 20, fontWeight: 800, color: trendCol }}>
+                  <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 22, fontWeight: 800, color: trendCol, transition: 'color 0.5s ease' }}>
                     {currentBTCPrice > 0 ? fmt(currentBTCPrice) : '—'}
                   </div>
                 </div>
-                <div style={{ textAlign: 'center' }}>
-                  <div style={{
-                    width: 38, height: 38, borderRadius: '50%',
-                    background: above ? 'rgba(106,170,122,0.2)' : 'rgba(212,115,142,0.2)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: 20, fontWeight: 800, color: trendCol,
-                  }}>{above ? '↑' : '↓'}</div>
-                </div>
+                <div style={{
+                  width: 40, height: 40, borderRadius: '50%',
+                  background: above ? 'rgba(106,170,122,0.2)' : 'rgba(212,115,142,0.2)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 22, fontWeight: 800, color: trendCol,
+                  transition: 'all 0.5s ease',
+                  animation: 'iconBeat 3s ease infinite',
+                }}>{above ? '↑' : '↓'}</div>
                 <div style={{ textAlign: 'right' }}>
                   <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>vs Strike</div>
                   <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 14, fontWeight: 800, color: trendCol }}>
@@ -253,30 +270,34 @@ export default function MarketCard({ market, strikePrice, currentBTCPrice, secon
               </div>
             </div>
 
-            {/* YES / NO with buy buttons */}
+            {/* YES / NO order boxes */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
               <BuyBox label="YES" bid={market.yes_bid} ask={market.yes_ask} side="yes" ticker={market.ticker}
-                color="var(--green)" bg="var(--green-pale)" borderCol="#aed5b8" liveMode={liveMode} />
+                color="var(--green)" bg="var(--green-pale)" borderCol="#9ecfb8" liveMode={liveMode} />
               <BuyBox label="NO"  bid={market.no_bid}  ask={market.no_ask}  side="no"  ticker={market.ticker}
-                color="var(--pink)"  bg="var(--pink-pale)"  borderCol="#e0b0bf"  liveMode={liveMode} />
+                color="var(--blue)"  bg="var(--blue-pale)"  borderCol="#a8cce0"  liveMode={liveMode} />
             </div>
 
-            {/* Countdown */}
+            {/* Countdown with SVG ring */}
             <div style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              padding: '10px 14px', borderRadius: 10,
+              display: 'flex', alignItems: 'center', gap: 12,
+              padding: '10px 14px', borderRadius: 12,
               background: urgency ? 'var(--pink-pale)' : 'var(--cream)',
               border: urgency ? '1px solid #e0b0bf' : '1px solid var(--border)',
+              transition: 'all 0.5s ease',
             }}>
-              <div>
-                <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Expires in</div>
-                <div style={{ fontSize: 9, color: 'var(--text-light)', marginTop: 1 }}>CF Benchmarks settlement</div>
-              </div>
-              <div style={{
-                fontFamily: 'var(--font-geist-mono)', fontSize: 22, fontWeight: 800,
-                color: urgency ? 'var(--pink)' : 'var(--green)',
-              }}>
-                {`${mins}:${String(secs).padStart(2, '0')}`}
+              <CountdownRing seconds={countdown} urgent={urgency} />
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>Expires in</div>
+                <div style={{
+                  fontFamily: 'var(--font-geist-mono)', fontSize: 24, fontWeight: 800,
+                  color: urgency ? 'var(--pink)' : 'var(--green)',
+                  lineHeight: 1,
+                  animation: urgency ? 'urgentPulse 1s ease infinite' : 'none',
+                }}>
+                  {`${mins}:${String(secs).padStart(2, '0')}`}
+                </div>
+                <div style={{ fontSize: 9, color: 'var(--text-light)', marginTop: 2 }}>CF Benchmarks settlement</div>
               </div>
             </div>
 
@@ -294,9 +315,9 @@ export default function MarketCard({ market, strikePrice, currentBTCPrice, secon
           </>
         ) : (
           <div style={{ padding: '32px 0', textAlign: 'center' }}>
-            <div style={{ fontSize: 26, marginBottom: 8 }}>⏳</div>
-            <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>No open KXBTC15M markets</div>
-            <div style={{ fontSize: 11, color: 'var(--text-light)', marginTop: 4 }}>Waiting for next 15-min window...</div>
+            <div style={{ fontSize: 11, letterSpacing: '0.06em', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 6 }}>// WAITING</div>
+            <div style={{ fontSize: 13, color: 'var(--text-secondary)', fontWeight: 500 }}>No open KXBTC15M markets</div>
+            <div style={{ fontSize: 11, color: 'var(--text-light)', marginTop: 4 }}>Next 15-min window...</div>
           </div>
         )}
       </div>
