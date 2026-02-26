@@ -1,71 +1,59 @@
 import { NextResponse } from 'next/server'
+import { buildKalshiHeaders } from '@/lib/kalshi-auth'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 const KALSHI_BASE = 'https://api.elections.kalshi.com/trade-api/v2'
 
-export async function GET() {
-  try {
-    const res = await fetch(
-      `${KALSHI_BASE}/markets?series_ticker=KXBTC15M&status=active&limit=10`,
-      {
-        headers: { Accept: 'application/json' },
-        cache: 'no-store',
-      }
-    )
+/** Compute the current active KXBTC15M event_ticker in US Eastern Time */
+function getCurrentEventTicker(): string {
+  const MONTHS = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC']
+  const now = new Date()
+  const etStr = now.toLocaleString('en-US', { timeZone: 'America/New_York' })
+  const et = new Date(etStr)
+  const mins = et.getMinutes()
+  const blockEnd = Math.ceil((mins + 1) / 15) * 15
+  et.setMinutes(blockEnd, 0, 0)
 
-    if (!res.ok) {
-      // If Kalshi returns an error, return mock data so the demo still works
-      return NextResponse.json(getMockMarkets())
-    }
-
-    const data = await res.json()
-    return NextResponse.json(data)
-  } catch {
-    // Network error — return mock markets
-    return NextResponse.json(getMockMarkets())
-  }
+  const yy  = String(et.getFullYear()).slice(-2)
+  const mon = MONTHS[et.getMonth()]
+  const dd  = String(et.getDate()).padStart(2, '0')
+  const hh  = String(et.getHours()).padStart(2, '0')
+  const mm  = String(et.getMinutes() % 60).padStart(2, '0')
+  return `KXBTC15M-${yy}${mon}${dd}${hh}${mm}`
 }
 
-function getMockMarkets() {
-  const now = new Date()
-  // Round up to next 15-min boundary
-  const mins = now.getMinutes()
-  const nextBoundary = Math.ceil(mins / 15) * 15
-  const expiry = new Date(now)
-  expiry.setMinutes(nextBoundary, 0, 0)
+export async function GET() {
+  // ── Attempt 1: query by current event_ticker (most precise) ──────────────
+  try {
+    const eventTicker = getCurrentEventTicker()
+    const path = `/trade-api/v2/markets?event_ticker=${eventTicker}&limit=5`
+    const res = await fetch(`https://api.elections.kalshi.com${path}`, {
+      headers: { ...buildKalshiHeaders('GET', path), Accept: 'application/json' },
+      cache: 'no-store',
+    })
+    if (res.ok) {
+      const data = await res.json()
+      const active = (data.markets ?? []).filter((m: { yes_ask: number }) => m.yes_ask > 0)
+      if (active.length > 0) return NextResponse.json({ ...data, markets: active })
+    }
+  } catch { /* fall through */ }
 
-  const pad = (n: number) => String(n).padStart(2, '0')
-  const day = expiry.getDate()
-  const months = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC']
-  const month = months[expiry.getMonth()]
-  const hhmm = `${pad(expiry.getHours())}${pad(expiry.getMinutes())}`
-  const ticker = `KXBTC15M-${pad(day)}${month}${hhmm}`
+  // ── Attempt 2: series query with auth ─────────────────────────────────────
+  try {
+    const path = '/trade-api/v2/markets?series_ticker=KXBTC15M&limit=20'
+    const res = await fetch(`https://api.elections.kalshi.com${path}`, {
+      headers: { ...buildKalshiHeaders('GET', path), Accept: 'application/json' },
+      cache: 'no-store',
+    })
+    if (res.ok) {
+      const data = await res.json()
+      const active = (data.markets ?? []).filter((m: { yes_ask: number }) => m.yes_ask > 0)
+      if (active.length > 0) return NextResponse.json({ ...data, markets: active })
+    }
+  } catch { /* fall through */ }
 
-  // Mock floor strike based on a realistic BTC price
-  const mockStrike = 95000
-  return {
-    markets: [
-      {
-        ticker,
-        event_ticker: ticker,
-        series_ticker: 'KXBTC15M',
-        title: 'BTC price up in next 15 mins?',
-        yes_sub_title: `Price to beat: $${mockStrike.toLocaleString()}`,
-        floor_strike: mockStrike,
-        yes_bid: 48,
-        yes_ask: 52,
-        no_bid: 48,
-        no_ask: 52,
-        last_price: 50,
-        volume: 1240,
-        open_interest: 340,
-        close_time: expiry.toISOString(),
-        expiration_time: expiry.toISOString(),
-        status: 'active',
-      },
-    ],
-    cursor: '',
-  }
+  // Both Kalshi queries failed
+  return NextResponse.json({ error: 'No active KXBTC15M markets found', markets: [] }, { status: 503 })
 }

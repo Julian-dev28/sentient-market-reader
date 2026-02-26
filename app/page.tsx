@@ -34,7 +34,6 @@ export default function Home() {
   // Live 5-second tick — keeps bid/ask and BTC price fresh between pipeline cycles
   const { liveMarket, liveBTCPrice, livePriceHistory, refresh: refreshMarket } = useMarketTick(
     md?.activeMarket?.ticker ?? null,
-    pf?.priceHistory ?? [],
   )
 
   // Merge: live tick overrides stale pipeline values
