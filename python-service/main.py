@@ -139,13 +139,13 @@ def build_llm_config(roma_mode: str = "keen") -> tuple[LLMConfig, str]:
         api_key = os.getenv("HUGGINGFACE_API_KEY") or os.getenv("HF_API_KEY")
         if not api_key:
             raise ValueError("HUGGINGFACE_API_KEY not set")
-        base_url = os.getenv("HF_BASE_URL", "https://api-inference.huggingface.co/v1")
+        base_url = os.getenv("HF_BASE_URL", "https://router.huggingface.co/v1")
         if roma_mode == "blitz":
-            model = os.getenv("HF_BLITZ_MODEL", "meta-llama/Llama-3.2-3B-Instruct")
+            model = os.getenv("HF_BLITZ_MODEL", "Qwen/Qwen2.5-1.5B-Instruct")
         elif roma_mode == "sharp":
-            model = os.getenv("HF_FAST_MODEL", "meta-llama/Llama-3.1-8B-Instruct")
+            model = os.getenv("HF_FAST_MODEL", "meta-llama/Llama-3.2-3B-Instruct")
         elif roma_mode == "keen":
-            model = os.getenv("HF_MID_MODEL", "meta-llama/Llama-3.3-70B-Instruct")
+            model = os.getenv("HF_MID_MODEL", "meta-llama/Llama-3.1-8B-Instruct")
         else:  # smart
             model = os.getenv("HF_SMART_MODEL", "meta-llama/Llama-3.3-70B-Instruct")
         return (

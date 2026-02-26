@@ -55,11 +55,11 @@ export const ROMA_MODE: RomaMode = (() => {
 //   smart: grok-3                     ~30–50s  — smart tier
 //
 // For openrouter: set OPENROUTER_MODEL (smart), OPENROUTER_MID_MODEL (keen), OPENROUTER_FAST_MODEL (sharp/blitz).
-// For huggingface: set HF_API_KEY + optionally HF_BASE_URL (default: serverless inference API).
-//   blitz: Llama-3.2-3B-Instruct  ~3–8s   — smallest, fastest
-//   fast:  Llama-3.1-8B-Instruct  ~5–15s  — sharp tier
-//   mid:   Llama-3.3-70B-Instruct ~15–40s — keen tier
-//   smart: Llama-3.3-70B-Instruct ~15–40s — smart tier (same GPU, just more context)
+// For huggingface: set HUGGINGFACE_API_KEY + optionally HF_BASE_URL (default: router.huggingface.co/v1).
+//   blitz: Qwen2.5-1.5B-Instruct  ~2–5s   — 1.5B, practical minimum w/ reliable JSON
+//   fast:  Llama-3.2-3B-Instruct  ~3–8s   — sharp tier
+//   mid:   Llama-3.1-8B-Instruct  ~5–15s  — keen tier
+//   smart: Llama-3.3-70B-Instruct ~15–40s — smart tier
 export const PROVIDER_MODELS: Record<AIProvider, { blitz: string; fast: string; mid: string; smart: string; label: string }> = {
   anthropic: {
     blitz: process.env.ANTHROPIC_BLITZ_MODEL ?? 'claude-haiku-4-5-20251001',
@@ -90,9 +90,9 @@ export const PROVIDER_MODELS: Record<AIProvider, { blitz: string; fast: string; 
     label: 'OpenRouter',
   },
   huggingface: {
-    blitz: process.env.HF_BLITZ_MODEL ?? 'meta-llama/Llama-3.2-3B-Instruct',
-    fast:  process.env.HF_FAST_MODEL  ?? 'meta-llama/Llama-3.1-8B-Instruct',
-    mid:   process.env.HF_MID_MODEL   ?? 'meta-llama/Llama-3.3-70B-Instruct',
+    blitz: process.env.HF_BLITZ_MODEL ?? 'Qwen/Qwen2.5-1.5B-Instruct',   // 1.5B — fastest w/ reliable JSON
+    fast:  process.env.HF_FAST_MODEL  ?? 'meta-llama/Llama-3.2-3B-Instruct',
+    mid:   process.env.HF_MID_MODEL   ?? 'meta-llama/Llama-3.1-8B-Instruct',
     smart: process.env.HF_SMART_MODEL ?? 'meta-llama/Llama-3.3-70B-Instruct',
     label: 'HuggingFace',
   },
@@ -137,7 +137,7 @@ function openrouterClient(): OpenAI {
 function huggingfaceClient(): OpenAI {
   if (!_huggingface) _huggingface = new OpenAI({
     apiKey: process.env.HUGGINGFACE_API_KEY ?? process.env.HF_API_KEY,
-    baseURL: process.env.HF_BASE_URL ?? 'https://api-inference.huggingface.co/v1',
+    baseURL: process.env.HF_BASE_URL ?? 'https://router.huggingface.co/v1',
   })
   return _huggingface
 }
