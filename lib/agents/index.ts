@@ -92,6 +92,8 @@ export async function runAgentPipeline(
   }
 
   // ── Stage 4: Probability Model (full quality mode) ────────────────────
+  // probProvider may be provider2 (e.g. huggingface) — used for the ROMA solve only.
+  // Extraction always runs on the primary provider to ensure reliable tool-call JSON.
   const probResult = await runProbabilityModel(
     sentResult.output.score,
     sentResult.output.signals,
@@ -100,6 +102,7 @@ export async function runAgentPipeline(
     mdResult.output.activeMarket,
     probProvider,
     probMode,
+    provider,   // extraction provider — always primary (grok)
   )
 
   // ── Stage 5: Risk Manager ──────────────────────────────────────────────

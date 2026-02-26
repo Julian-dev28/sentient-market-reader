@@ -8,8 +8,9 @@ export async function runProbabilityModel(
   distanceFromStrikePct: number,
   minutesUntilExpiry: number,
   market: KalshiMarket | null,
-  provider: AIProvider,
+  provider: AIProvider,       // ROMA solve provider (may be split provider2)
   romaMode?: string,
+  extractionProvider?: AIProvider,  // provider for JSON extraction step (defaults to provider)
 ): Promise<AgentResult<ProbabilityOutput>> {
   const start = Date.now()
 
@@ -39,13 +40,14 @@ export async function runProbabilityModel(
   const agentLabel = `ProbabilityModelAgent (roma-dspy · ${pythonResult.provider})`
   const romaTrace  = formatRomaTrace(pythonResult)
 
-  // Use fast tier (grok-3-mini) — keeps token pressure low after ROMA's heavy calls.
+  // Use fast tier for extraction — always on the primary provider (grok), never on the
+  // split provider2, since smaller HF models can't reliably produce tool-call JSON.
   const extracted = await llmToolCall<{
     pModel: number
     recommendation: ProbabilityOutput['recommendation']
     confidence: ProbabilityOutput['confidence']
   }>({
-    provider,
+    provider: extractionProvider ?? provider,
     tier: 'fast',
     maxTokens: romaMode === 'blitz' ? 256 : 512,
     toolName: 'extract_probability',
