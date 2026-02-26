@@ -13,21 +13,31 @@ export const maxDuration = 180  // allow up to 3 min — depth=1 ROMA typically 
  */
 function getCurrentEventTicker(): string {
   const MONTHS = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC']
-  // Get current ET time (approximation: UTC-5 for EST, UTC-4 for EDT)
-  // Use Intl for accuracy
+  // Use formatToParts — avoids the new Date(localeString) re-parse bug where
+  // the locale string is re-interpreted in the server's local TZ instead of ET.
   const now = new Date()
-  const etStr = now.toLocaleString('en-US', { timeZone: 'America/New_York' })
-  const et = new Date(etStr)
-  const mins = et.getMinutes()
-  // Current 15-min block end
-  const blockEnd = Math.ceil((mins + 1) / 15) * 15
-  et.setMinutes(blockEnd, 0, 0)
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York',
+      year: 'numeric', month: 'numeric', day: 'numeric',
+      hour: 'numeric', minute: 'numeric', hour12: false,
+    }).formatToParts(now)
+      .filter(p => p.type !== 'literal')
+      .map(p => [p.type, parseInt(p.value)])
+  ) as Record<string, number>
 
-  const yy = String(et.getFullYear()).slice(-2)
-  const mon = MONTHS[et.getMonth()]
-  const dd = String(et.getDate()).padStart(2, '0')
-  const hh = String(et.getHours()).padStart(2, '0')
-  const mm = String(et.getMinutes() % 60).padStart(2, '0')
+  const { year, month, day, hour, minute } = parts
+
+  // Advance to the end of the current 15-min block
+  let blockMin  = Math.ceil((minute + 1) / 15) * 15
+  let blockHour = hour % 24  // hour12:false can yield 24 at midnight on some engines
+  if (blockMin >= 60) { blockMin = 0; blockHour += 1 }
+
+  const yy  = String(year).slice(-2)
+  const mon = MONTHS[month - 1]
+  const dd  = String(day).padStart(2, '0')
+  const hh  = String(blockHour).padStart(2, '0')
+  const mm  = String(blockMin).padStart(2, '0')
   return `KXBTC15M-${yy}${mon}${dd}${hh}${mm}`
 }
 
