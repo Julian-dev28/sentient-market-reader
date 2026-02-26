@@ -65,24 +65,22 @@ export async function GET(_req: NextRequest) {
     }
 
     if (!markets.length) {
-      markets = getMockMarkets()
+      return NextResponse.json({ error: 'No active KXBTC15M markets found' }, { status: 503 })
     }
 
-    // Fetch BTC price
-    const cmcKey = process.env.CMC_API_KEY ?? ''
+    // Fetch BTC price — CMC first, Binance fallback
     let quote: BTCQuote | null = null
+
+    const cmcKey = process.env.CMC_API_KEY ?? ''
     if (cmcKey) {
       const priceRes = await fetch(
         'https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest?symbol=BTC&convert=USD',
-        {
-          headers: { 'X-CMC_PRO_API_KEY': cmcKey, Accept: 'application/json' },
-          cache: 'no-store',
-        }
+        { headers: { 'X-CMC_PRO_API_KEY': cmcKey, Accept: 'application/json' }, cache: 'no-store' }
       ).catch(() => null)
       if (priceRes?.ok) {
         const data = await priceRes.json()
         const q = data?.data?.BTC?.quote?.USD
-        if (q) {
+        if (q?.price > 0) {
           quote = {
             price: q.price,
             percent_change_1h: q.percent_change_1h,
@@ -95,8 +93,31 @@ export async function GET(_req: NextRequest) {
       }
     }
 
+    // Binance fallback — free, real-time, no key required
     if (!quote) {
-      quote = getMockQuote()
+      const [tickerRes, statsRes] = await Promise.all([
+        fetch('https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT', { cache: 'no-store' }).catch(() => null),
+        fetch('https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT',  { cache: 'no-store' }).catch(() => null),
+      ])
+      if (tickerRes?.ok && statsRes?.ok) {
+        const ticker = await tickerRes.json()
+        const stats  = await statsRes.json()
+        const price  = parseFloat(ticker.price)
+        if (price > 0) {
+          quote = {
+            price,
+            percent_change_1h: 0,
+            percent_change_24h: parseFloat(stats.priceChangePercent),
+            volume_24h: parseFloat(stats.quoteVolume),
+            market_cap: price * 19_700_000,
+            last_updated: new Date().toISOString(),
+          }
+        }
+      }
+    }
+
+    if (!quote) {
+      return NextResponse.json({ error: 'BTC price unavailable — all sources failed' }, { status: 503 })
     }
 
     // Fetch orderbook for nearest market
@@ -120,41 +141,3 @@ export async function GET(_req: NextRequest) {
   }
 }
 
-function getMockQuote(): BTCQuote {
-  const base = 95000 + (Math.random() - 0.5) * 4000
-  return {
-    price: base,
-    percent_change_1h: (Math.random() - 0.48) * 1.5,
-    percent_change_24h: (Math.random() - 0.45) * 5,
-    volume_24h: 28_000_000_000,
-    market_cap: base * 19_700_000,
-    last_updated: new Date().toISOString(),
-  }
-}
-
-function getMockMarkets(): KalshiMarket[] {
-  const now = new Date()
-  const mins = now.getMinutes()
-  const nextBoundary = Math.ceil(mins / 15) * 15
-  const expiry = new Date(now)
-  expiry.setMinutes(nextBoundary, 0, 0)
-
-  const pad = (n: number) => String(n).padStart(2, '0')
-  const months = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC']
-  const ticker = `KXBTC15M-${pad(expiry.getDate())}${months[expiry.getMonth()]}${pad(expiry.getHours())}${pad(expiry.getMinutes())}`
-
-  const mockStrike = 95000
-  return [{
-    ticker,
-    event_ticker: ticker,
-    series_ticker: 'KXBTC15M',
-    title: 'BTC price up in next 15 mins?',
-    yes_sub_title: `Price to beat: $${mockStrike.toLocaleString()}`,
-    floor_strike: mockStrike,
-    yes_bid: 48, yes_ask: 52, no_bid: 48, no_ask: 52,
-    last_price: 50, volume: 1240, open_interest: 340,
-    close_time: expiry.toISOString(),
-    expiration_time: expiry.toISOString(),
-    status: 'active',
-  }]
-}
