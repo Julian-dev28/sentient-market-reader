@@ -230,8 +230,10 @@ def analyze(req: AnalyzeRequest):
         raise HTTPException(status_code=503, detail="LLM not configured — check env vars")
 
     # Rebuild LLM config using the mode sent by the caller (not env)
-    roma_mode = req.roma_mode or "normal"
+    roma_mode = req.roma_mode or "smart"
     llm_config, provider_label = build_llm_config(roma_mode)
+
+    print(f"[ROMA] /analyze  mode={roma_mode}  model={llm_config.model}  provider={provider_label}")
 
     start = time.time()
 
@@ -247,6 +249,7 @@ Market context:
         # ─────────────────────────────────────────────────────────────────────
 
         duration_ms = int((time.time() - start) * 1000)
+        print(f"[ROMA] done  model={llm_config.model}  duration={duration_ms}ms")
 
         if isinstance(result, str):
             answer = result
