@@ -46,7 +46,7 @@ app.add_middleware(
 
 # ── LLM configuration ────────────────────────────────────────────────────────
 
-def build_llm_config(roma_mode: str = "normal") -> tuple[LLMConfig, str]:
+def build_llm_config(roma_mode: str = "keen") -> tuple[LLMConfig, str]:
     """
     Build an LLMConfig from environment variables.
     Mirrors the TypeScript llm-client providers exactly:
@@ -57,9 +57,9 @@ def build_llm_config(roma_mode: str = "normal") -> tuple[LLMConfig, str]:
 
     roma_mode is passed from the Next.js request body (not read from env),
     so only the root .env.local needs to be edited.
-      ultra-fast → fast model
-      normal     → smart model
-      deep       → deep model
+      sharp → fast model  (grok-3-mini, haiku, gpt-4o-mini)
+      keen  → mid model   (grok-3-fast)
+      smart → smart model (grok-3)
     Returns (llm_config, provider_label).
     """
     provider = os.getenv("AI_PROVIDER", "grok")
@@ -68,10 +68,10 @@ def build_llm_config(roma_mode: str = "normal") -> tuple[LLMConfig, str]:
         api_key = os.getenv("ANTHROPIC_API_KEY")
         if not api_key:
             raise ValueError("ANTHROPIC_API_KEY not set")
-        if roma_mode == "keen":
+        if roma_mode == "sharp":
             model = os.getenv("ANTHROPIC_FAST_MODEL", "claude-haiku-4-5-20251001")
-        elif roma_mode == "deep":
-            model = os.getenv("ANTHROPIC_DEEP_MODEL", "claude-opus-4-6")
+        elif roma_mode == "keen":
+            model = os.getenv("ANTHROPIC_MID_MODEL", "claude-haiku-4-5-20251001")
         else:  # smart
             model = os.getenv("ANTHROPIC_SMART_MODEL", "claude-sonnet-4-6")
         return (
@@ -83,10 +83,10 @@ def build_llm_config(roma_mode: str = "normal") -> tuple[LLMConfig, str]:
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
             raise ValueError("OPENAI_API_KEY not set")
-        if roma_mode == "keen":
+        if roma_mode == "sharp":
             model = os.getenv("OPENAI_FAST_MODEL", "gpt-4o-mini")
-        elif roma_mode == "deep":
-            model = os.getenv("OPENAI_DEEP_MODEL", "gpt-4o")
+        elif roma_mode == "keen":
+            model = os.getenv("OPENAI_MID_MODEL", "gpt-4o-mini")
         else:  # smart
             model = os.getenv("OPENAI_SMART_MODEL", "gpt-4o")
         return (
@@ -98,12 +98,12 @@ def build_llm_config(roma_mode: str = "normal") -> tuple[LLMConfig, str]:
         api_key = os.getenv("XAI_API_KEY")
         if not api_key:
             raise ValueError("XAI_API_KEY not set")
-        if roma_mode == "keen":
-            model = os.getenv("GROK_FAST_MODEL", "grok-3-fast")
-        elif roma_mode == "deep":
-            model = os.getenv("GROK_DEEP_MODEL", os.getenv("GROK_SMART_MODEL", "grok-4-0709"))
+        if roma_mode == "sharp":
+            model = os.getenv("GROK_FAST_MODEL", "grok-3-mini")
+        elif roma_mode == "keen":
+            model = os.getenv("GROK_MID_MODEL", "grok-3-fast")
         else:  # smart
-            model = os.getenv("GROK_SMART_MODEL", "grok-4-0709")
+            model = os.getenv("GROK_SMART_MODEL", "grok-3")
         return (
             LLMConfig(
                 model=f"openai/{model}",
@@ -161,7 +161,7 @@ def build_roma_config(llm: LLMConfig) -> ROMAConfig:
 
 # Build LLM config on startup using default mode — each /analyze call rebuilds with the request's roma_mode
 try:
-    _llm_config, _provider_label = build_llm_config("normal")
+    _llm_config, _provider_label = build_llm_config("keen")
     # Also configure global DSPy LM for any direct dspy.predict() calls
     dspy.configure(lm=dspy.LM(
         _llm_config.model,
@@ -182,7 +182,7 @@ class AnalyzeRequest(BaseModel):
     goal: str
     context: str
     max_depth: Optional[int] = 1
-    roma_mode: Optional[str] = "smart"  # keen | smart | deep — passed from Next.js root .env.local
+    roma_mode: Optional[str] = "keen"  # sharp | keen | smart — passed from Next.js root .env.local
 
 
 class SubtaskResult(BaseModel):
@@ -230,7 +230,7 @@ def analyze(req: AnalyzeRequest):
         raise HTTPException(status_code=503, detail="LLM not configured — check env vars")
 
     # Rebuild LLM config using the mode sent by the caller (not env)
-    roma_mode = req.roma_mode or "smart"
+    roma_mode = req.roma_mode or "keen"
     llm_config, provider_label = build_llm_config(roma_mode)
 
     print(f"[ROMA] /analyze  mode={roma_mode}  model={llm_config.model}  provider={provider_label}")
