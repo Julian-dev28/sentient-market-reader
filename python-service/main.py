@@ -157,7 +157,7 @@ except Exception as e:
 class AnalyzeRequest(BaseModel):
     goal: str
     context: str
-    max_depth: Optional[int] = 2
+    max_depth: Optional[int] = 1
 
 
 class SubtaskResult(BaseModel):
