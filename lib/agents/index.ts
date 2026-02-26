@@ -1,7 +1,7 @@
 /**
  * ROMA Pipeline Orchestrator
  * ───────────────────────────
- * Runs all 6 Sentient GRID agents in dependency order.
+ * Runs all 6 ROMA pipeline agents in dependency order.
  * Every LLM step uses the provider set in AI_PROVIDER env var.
  *
  * Pipeline DAG:

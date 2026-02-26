@@ -26,7 +26,7 @@ export async function plan(goal: string, context: string, provider: AIProvider):
       },
       required: ['subtasks', 'planningReasoning'],
     },
-    prompt: `You are the ROMA Planner in a Sentient GRID multi-agent trading system.
+    prompt: `You are the ROMA Planner in a ROMA multi-agent trading system.
 
 Market context:
 ${context}

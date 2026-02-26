@@ -203,7 +203,7 @@ export default function AgentPipeline({ pipeline, isRunning }: { pipeline: Pipel
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
         <div>
           <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>ROMA Agent Pipeline</div>
-          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 1 }}>Sentient GRID · Atomizer → Planner → Executors → Aggregator</div>
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 1 }}>ROMA Pattern · Atomizer → Planner → Executors → Aggregator</div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {isRunning && (

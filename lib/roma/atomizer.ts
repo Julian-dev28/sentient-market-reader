@@ -14,7 +14,7 @@ export async function atomize(goal: string, context: string, provider: AIProvide
       },
       required: ['atomic', 'reasoning'],
     },
-    prompt: `You are the ROMA Atomizer in a Sentient GRID multi-agent trading system.
+    prompt: `You are the ROMA Atomizer in a ROMA multi-agent trading system.
 
 Market context:
 ${context}

@@ -48,7 +48,7 @@ export default function Header({ cycleId, isRunning, nextCycleIn, liveMode, onTo
           <div>
             <div style={{ fontSize: 15, fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 1.15 }}>
               <span style={{ color: 'var(--text-primary)' }}>Sentient </span>
-              <span className="grad-brown-pink">GRID</span>
+              <span className="grad-brown-pink">ROMA</span>
             </div>
             <div style={{ fontSize: 9, color: 'var(--text-muted)', letterSpacing: '0.09em', textTransform: 'uppercase', marginTop: 1 }}>
               ROMA Multi-Agent · Kalshi Algotrader
