@@ -76,13 +76,16 @@ export function useMarketTick(
       } catch { /* network blip — keep previous value */ }
 
       // ── Market bid/ask ─────────────────────────────────────────────────
-      if (!ticker) return
+      // When ticker is known, filter to it. Otherwise auto-pick the first
+      // actively-trading market so data populates before the pipeline runs.
       try {
         const res = await fetch('/api/markets', { cache: 'no-store' })
         if (res.ok) {
           const data = await res.json()
-          const market = (data.markets as KalshiMarket[] | undefined)
-            ?.find(m => m.ticker === ticker)
+          const markets = data.markets as KalshiMarket[] | undefined
+          const market = ticker
+            ? markets?.find(m => m.ticker === ticker)
+            : markets?.find(m => (m.yes_ask ?? 0) > 0)
           if (mounted && market) setLiveMarket(market)
         }
       } catch { /* keep previous value */ }
