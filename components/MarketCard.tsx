@@ -62,22 +62,35 @@ function AnimatedBar({ value, color }: { value: number; color: string }) {
   )
 }
 
-type OrderState = { status: 'idle' } | { status: 'confirm'; count: number } | { status: 'placing' } | { status: 'ok'; orderId: string; fillCount: number } | { status: 'err'; message: string }
+type OrderState = { status: 'idle' } | { status: 'placing' } | { status: 'ok'; orderId: string; fillCount: number } | { status: 'err'; message: string }
 
-function BuyBox({
-  label, bid, ask, side, ticker, color, bg, borderCol, liveMode,
-}: {
-  label: 'YES' | 'NO'
-  bid: number; ask: number
-  side: 'yes' | 'no'
+/** Unified YES / NO trade box — Kalshi-style single card */
+function TradeBox({ yesBid, yesAsk, noBid, noAsk, ticker, liveMode }: {
+  yesBid: number; yesAsk: number
+  noBid: number;  noAsk: number
   ticker: string
-  color: string; bg: string; borderCol: string
   liveMode: boolean
 }) {
-  const [order, setOrder] = useState<OrderState>({ status: 'idle' })
+  const [side, setSide]   = useState<'yes' | 'no'>('yes')
   const [count, setCount] = useState(1)
+  const [order, setOrder] = useState<OrderState>({ status: 'idle' })
+
+  const isYes  = side === 'yes'
+  const bid    = isYes ? yesBid  : noBid
+  const ask    = isYes ? yesAsk  : noAsk
+  const cost   = ((ask / 100) * count).toFixed(2)
+  const profit = (count * (1 - ask / 100)).toFixed(2)
+  const col    = isYes ? 'var(--green)' : 'var(--pink)'
+  const colBdr = isYes ? '#9ecfb8'      : '#e0b0bf'
+  const colBg  = isYes ? 'var(--green-pale)' : 'var(--pink-pale)'
+
+  function handleCount(raw: string) {
+    const v = parseInt(raw, 10)
+    if (!isNaN(v)) setCount(Math.max(1, Math.min(500, v)))
+  }
 
   async function placeIt() {
+    if (!liveMode) return
     setOrder({ status: 'placing' })
     try {
       const body = {
@@ -102,82 +115,119 @@ function BuyBox({
     }
   }
 
-  const cost = ((ask / 100) * count).toFixed(2)
-
   return (
-    <div style={{ padding: '10px 12px', borderRadius: 10, background: bg, border: `1px solid ${borderCol}` }}>
-      <div style={{ fontSize: 11, fontWeight: 800, color, marginBottom: 7 }}>{label}</div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
-        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Bid</span>
-        <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>{bid}¢</span>
-      </div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 7 }}>
-        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Ask</span>
-        <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>{ask}¢</span>
-      </div>
-      <AnimatedBar value={ask} color={color} />
+    <div style={{ borderRadius: 12, border: '1px solid var(--border)', background: 'white', overflow: 'hidden' }}>
 
-      {liveMode && order.status === 'idle' && (
-        <button
-          onClick={() => setOrder({ status: 'confirm', count: 1 })}
-          style={{
-            marginTop: 8, width: '100%', padding: '5px 0', borderRadius: 7,
-            background: color + '22', border: `1px solid ${borderCol}`,
-            fontSize: 10, fontWeight: 800, color,
-            cursor: 'pointer', transition: 'background 0.15s, transform 0.15s',
-          }}
-          onMouseEnter={e => (e.currentTarget.style.transform = 'scale(1.02)')}
-          onMouseLeave={e => (e.currentTarget.style.transform = 'scale(1)')}
-        >
-          BUY {label} @ {ask}¢
-        </button>
-      )}
+      {/* YES / NO pill toggles */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0 }}>
+        {(['yes', 'no'] as const).map(s => {
+          const active = side === s
+          const a = s === 'yes' ? yesAsk : noAsk
+          const activeCol = s === 'yes' ? 'var(--green)' : 'var(--pink)'
+          const activeBg  = s === 'yes' ? 'var(--green-pale)' : 'var(--pink-pale)'
+          const activeBdr = s === 'yes' ? '#9ecfb8' : '#e0b0bf'
+          return (
+            <button key={s} onClick={() => { setSide(s); setOrder({ status: 'idle' }) }}
+              style={{
+                padding: '11px 8px', border: 'none',
+                borderBottom: active ? `2px solid ${activeCol}` : '2px solid var(--border)',
+                background: active ? activeBg : 'var(--bg-secondary)',
+                cursor: 'pointer', transition: 'all 0.18s',
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1,
+              }}>
+              <span style={{ fontSize: 10, fontWeight: 800, color: active ? activeCol : 'var(--text-muted)', letterSpacing: '0.05em' }}>
+                {s === 'yes' ? 'YES' : 'NO'}
+              </span>
+              <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 15, fontWeight: 800, color: active ? activeCol : 'var(--text-secondary)' }}>
+                {a}¢
+              </span>
+            </button>
+          )
+        })}
+      </div>
 
-      {liveMode && order.status === 'confirm' && (
-        <div style={{ marginTop: 8, animation: 'scaleIn 0.2s ease' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 5 }}>
-            <span style={{ fontSize: 9, color: 'var(--text-muted)', flexShrink: 0 }}>Qty</span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-              <button onClick={() => setCount(c => Math.max(1, c - 1))} style={{ width: 18, height: 18, borderRadius: 4, border: '1px solid var(--border)', background: 'white', cursor: 'pointer', fontSize: 12, lineHeight: 1, color: 'var(--text-secondary)' }}>−</button>
-              <input
-                type="number" min={1} max={500} value={count}
-                onChange={e => { const v = parseInt(e.target.value, 10); if (!isNaN(v)) setCount(Math.max(1, Math.min(500, v))) }}
-                style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 13, fontWeight: 800, color: 'var(--text-primary)', width: 44, textAlign: 'center', border: '1px solid var(--border)', borderRadius: 5, padding: '1px 4px', background: 'white', outline: 'none', MozAppearance: 'textfield' }}
-              />
-              <button onClick={() => setCount(c => Math.min(500, c + 1))} style={{ width: 18, height: 18, borderRadius: 4, border: '1px solid var(--border)', background: 'white', cursor: 'pointer', fontSize: 12, lineHeight: 1, color: 'var(--text-secondary)' }}>+</button>
+      <div style={{ padding: '12px 14px' }}>
+        {/* Bid / Ask row */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+          <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Bid</span>
+          <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)' }}>{bid}¢</span>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+          <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Ask</span>
+          <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>{ask}¢</span>
+        </div>
+        <AnimatedBar value={ask} color={col} />
+
+        {/* Qty input — always visible, always typeable */}
+        <div style={{ marginTop: 12, padding: '10px 12px', borderRadius: 9, background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
+          <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Contracts</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <button onClick={() => setCount(c => Math.max(1, c - 1))}
+              style={{ width: 26, height: 26, borderRadius: 6, border: '1px solid var(--border)', background: 'white', cursor: 'pointer', fontSize: 15, fontWeight: 700, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>−</button>
+            <input
+              type="number" min={1} max={500} value={count}
+              onChange={e => handleCount(e.target.value)}
+              style={{
+                flex: 1, textAlign: 'center', fontFamily: 'var(--font-geist-mono)',
+                fontSize: 20, fontWeight: 800, color: 'var(--text-primary)',
+                border: '1px solid var(--border)', borderRadius: 7, padding: '4px 6px',
+                background: 'white', outline: 'none',
+                // hide spinners
+                MozAppearance: 'textfield',
+              }}
+            />
+            <button onClick={() => setCount(c => Math.min(500, c + 1))}
+              style={{ width: 26, height: 26, borderRadius: 6, border: '1px solid var(--border)', background: 'white', cursor: 'pointer', fontSize: 15, fontWeight: 700, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>+</button>
+          </div>
+          <div style={{ marginTop: 8, display: 'flex', justifyContent: 'space-between', fontSize: 10 }}>
+            <span style={{ color: 'var(--text-muted)' }}>Cost <strong style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-geist-mono)' }}>${cost}</strong></span>
+            <span style={{ color: 'var(--text-muted)' }}>Max profit <strong style={{ color: col, fontFamily: 'var(--font-geist-mono)' }}>${profit}</strong></span>
+          </div>
+        </div>
+
+        {/* Action states */}
+        {order.status === 'idle' && (
+          <button onClick={placeIt} disabled={!liveMode}
+            style={{
+              marginTop: 10, width: '100%', padding: '11px 0', borderRadius: 9,
+              border: liveMode ? `1px solid ${colBdr}` : '1px solid var(--border)',
+              background: liveMode ? colBg : 'var(--bg-secondary)',
+              fontSize: 12, fontWeight: 800,
+              color: liveMode ? col : 'var(--text-muted)',
+              cursor: liveMode ? 'pointer' : 'not-allowed',
+              transition: 'all 0.15s', letterSpacing: '0.03em',
+            }}
+            onMouseEnter={e => { if (liveMode) { e.currentTarget.style.background = col; e.currentTarget.style.color = '#fff' } }}
+            onMouseLeave={e => { if (liveMode) { e.currentTarget.style.background = colBg; e.currentTarget.style.color = col } }}
+          >
+            {liveMode ? `BUY ${isYes ? 'YES' : 'NO'} @ ${ask}¢` : `Paper only · ${isYes ? 'YES' : 'NO'} @ ${ask}¢`}
+          </button>
+        )}
+
+        {order.status === 'placing' && (
+          <div style={{ marginTop: 10, padding: '11px 0', textAlign: 'center', fontSize: 11, color: 'var(--text-muted)' }}>
+            <span style={{ animation: 'spin-slow 1s linear infinite', display: 'inline-block', marginRight: 5 }}>◌</span>
+            Placing order...
+          </div>
+        )}
+
+        {order.status === 'ok' && (
+          <div style={{ marginTop: 10, padding: '10px 12px', borderRadius: 9, background: 'var(--green-pale)', border: '1px solid #a8d8b5', animation: 'scaleIn 0.2s ease' }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--green-dark)' }}>✓ Order placed</div>
+            <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--font-geist-mono)', marginTop: 2 }}>
+              {order.fillCount > 0 ? `Filled ${order.fillCount}×` : 'Resting on book'}
             </div>
-            <span style={{ fontSize: 9, color: 'var(--text-muted)', marginLeft: 'auto' }}>${cost}</span>
           </div>
-          <div style={{ display: 'flex', gap: 5 }}>
-            <button onClick={() => setOrder({ status: 'idle' })} style={{ flex: 1, padding: '5px 0', borderRadius: 6, border: '1px solid var(--border)', background: 'white', fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', cursor: 'pointer' }}>Cancel</button>
-            <button onClick={placeIt} style={{ flex: 2, padding: '5px 0', borderRadius: 6, border: `1px solid ${borderCol}`, background: color, fontSize: 10, fontWeight: 800, color: '#fff', cursor: 'pointer' }}>Confirm Buy</button>
+        )}
+
+        {order.status === 'err' && (
+          <div style={{ marginTop: 10, padding: '10px 12px', borderRadius: 9, background: 'var(--red-pale)', border: '1px solid #e0b0b0', animation: 'scaleIn 0.2s ease' }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--red)' }}>Order failed</div>
+            <div style={{ fontSize: 10, color: 'var(--red)', marginTop: 2, lineHeight: 1.4 }}>{order.message}</div>
+            <button onClick={() => setOrder({ status: 'idle' })} style={{ marginTop: 5, fontSize: 10, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>Dismiss</button>
           </div>
-        </div>
-      )}
-
-      {liveMode && order.status === 'placing' && (
-        <div style={{ marginTop: 8, textAlign: 'center', fontSize: 10, color: 'var(--text-muted)' }}>
-          <span style={{ animation: 'spin-slow 1s linear infinite', display: 'inline-block', marginRight: 4 }}>◌</span>
-          Placing order...
-        </div>
-      )}
-
-      {liveMode && order.status === 'ok' && (
-        <div style={{ marginTop: 8, padding: '6px 8px', borderRadius: 6, background: 'var(--green-pale)', border: '1px solid #a8d8b5', animation: 'scaleIn 0.2s ease' }}>
-          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--green-dark)' }}>✓ Order placed</div>
-          <div style={{ fontSize: 9, color: 'var(--text-muted)', fontFamily: 'var(--font-geist-mono)', marginTop: 2 }}>
-            {order.fillCount > 0 ? `Filled ${order.fillCount}×` : 'Resting on book'}
-          </div>
-        </div>
-      )}
-
-      {liveMode && order.status === 'err' && (
-        <div style={{ marginTop: 8, padding: '6px 8px', borderRadius: 6, background: 'var(--red-pale)', border: '1px solid #e0b0b0', animation: 'scaleIn 0.2s ease' }}>
-          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--red)' }}>Order failed</div>
-          <div style={{ fontSize: 9, color: 'var(--red)', marginTop: 2, lineHeight: 1.4 }}>{order.message}</div>
-          <button onClick={() => setOrder({ status: 'idle' })} style={{ marginTop: 4, fontSize: 9, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>Dismiss</button>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   )
 }
@@ -301,12 +351,13 @@ export default function MarketCard({ market, orderbook, strikePrice, currentBTCP
               </div>
             </div>
 
-            {/* YES / NO order boxes */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
-              <BuyBox label="YES" bid={market.yes_bid} ask={market.yes_ask} side="yes" ticker={market.ticker}
-                color="var(--green)" bg="var(--green-pale)" borderCol="#9ecfb8" liveMode={liveMode} />
-              <BuyBox label="NO"  bid={market.no_bid}  ask={market.no_ask}  side="no"  ticker={market.ticker}
-                color="var(--blue)"  bg="var(--blue-pale)"  borderCol="#a8cce0"  liveMode={liveMode} />
+            {/* Unified YES / NO trade box */}
+            <div style={{ marginBottom: 12 }}>
+              <TradeBox
+                yesBid={market.yes_bid} yesAsk={market.yes_ask}
+                noBid={market.no_bid}   noAsk={market.no_ask}
+                ticker={market.ticker}  liveMode={liveMode}
+              />
             </div>
 
             {/* Countdown with SVG ring */}
