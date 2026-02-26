@@ -57,7 +57,8 @@ def build_llm_config(roma_mode: str = "keen") -> tuple[LLMConfig, str]:
 
     roma_mode is passed from the Next.js request body (not read from env),
     so only the root .env.local needs to be edited.
-      sharp → fast model  (grok-3-mini, haiku, gpt-4o-mini)
+      blitz → blitz model (grok-3-mini-fast — faster infra, same weights as mini)
+      sharp → fast model  (grok-3-mini)
       keen  → mid model   (grok-3-fast)
       smart → smart model (grok-3)
     Returns (llm_config, provider_label).
@@ -68,7 +69,9 @@ def build_llm_config(roma_mode: str = "keen") -> tuple[LLMConfig, str]:
         api_key = os.getenv("ANTHROPIC_API_KEY")
         if not api_key:
             raise ValueError("ANTHROPIC_API_KEY not set")
-        if roma_mode == "sharp":
+        if roma_mode == "blitz":
+            model = os.getenv("ANTHROPIC_BLITZ_MODEL", "claude-haiku-4-5-20251001")
+        elif roma_mode == "sharp":
             model = os.getenv("ANTHROPIC_FAST_MODEL", "claude-haiku-4-5-20251001")
         elif roma_mode == "keen":
             model = os.getenv("ANTHROPIC_MID_MODEL", "claude-haiku-4-5-20251001")
@@ -83,7 +86,9 @@ def build_llm_config(roma_mode: str = "keen") -> tuple[LLMConfig, str]:
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
             raise ValueError("OPENAI_API_KEY not set")
-        if roma_mode == "sharp":
+        if roma_mode == "blitz":
+            model = os.getenv("OPENAI_BLITZ_MODEL", "gpt-4o-mini")
+        elif roma_mode == "sharp":
             model = os.getenv("OPENAI_FAST_MODEL", "gpt-4o-mini")
         elif roma_mode == "keen":
             model = os.getenv("OPENAI_MID_MODEL", "gpt-4o-mini")
@@ -98,7 +103,9 @@ def build_llm_config(roma_mode: str = "keen") -> tuple[LLMConfig, str]:
         api_key = os.getenv("XAI_API_KEY")
         if not api_key:
             raise ValueError("XAI_API_KEY not set")
-        if roma_mode == "sharp":
+        if roma_mode == "blitz":
+            model = os.getenv("GROK_BLITZ_MODEL", "grok-3-mini-fast")
+        elif roma_mode == "sharp":
             model = os.getenv("GROK_FAST_MODEL", "grok-3-mini")
         elif roma_mode == "keen":
             model = os.getenv("GROK_MID_MODEL", "grok-3-fast")
@@ -182,7 +189,7 @@ class AnalyzeRequest(BaseModel):
     goal: str
     context: str
     max_depth: Optional[int] = 1
-    roma_mode: Optional[str] = "keen"  # sharp | keen | smart — passed from Next.js root .env.local
+    roma_mode: Optional[str] = "keen"  # blitz | sharp | keen | smart — passed from Next.js root .env.local
 
 
 class SubtaskResult(BaseModel):
