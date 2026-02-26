@@ -80,13 +80,14 @@ def build_llm_config() -> tuple[LLMConfig, str]:
         api_key = os.getenv("XAI_API_KEY")
         if not api_key:
             raise ValueError("XAI_API_KEY not set")
+        model = os.getenv("GROK_SMART_MODEL", "grok-3")
         return (
             LLMConfig(
-                model="openai/grok-3",
+                model=f"openai/{model}",
                 api_key=api_key,
                 base_url="https://api.x.ai/v1",
             ),
-            "grok",
+            f"grok/{model}",
         )
 
     if provider == "openrouter":
