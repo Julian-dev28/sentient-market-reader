@@ -44,7 +44,12 @@ export default function PositionsPanel({ liveMode }: { liveMode: boolean }) {
 
       const balBody = await balRes.json().catch(() => null)
       if (!balRes.ok) {
-        setError(balBody?.error ?? `Auth error (HTTP ${balRes.status}) — check KALSHI_API_KEY and private key`)
+        const rawErr = balBody?.error
+        const errMsg = typeof rawErr === 'string' ? rawErr
+          : (rawErr?.message ?? rawErr?.code)
+          ? String(rawErr.message ?? rawErr.code)
+          : `Auth error (HTTP ${balRes.status}) — check KALSHI_API_KEY and private key`
+        setError(errMsg)
         setLoading(false)
         return
       }
@@ -110,7 +115,7 @@ export default function PositionsPanel({ liveMode }: { liveMode: boolean }) {
 
       {error && (
         <div style={{ fontSize: 10, color: 'var(--red)', background: 'var(--red-pale)', borderRadius: 6, padding: '7px 10px', marginBottom: 12, lineHeight: 1.5 }}>
-          {error}
+          {typeof error === 'string' ? error : JSON.stringify(error)}
         </div>
       )}
 
