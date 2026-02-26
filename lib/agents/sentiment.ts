@@ -42,6 +42,8 @@ export async function runSentiment(
   const romaResult = await callPythonRoma(goal, context, depth)
   const romaTrace  = formatRomaTrace(romaResult)
 
+  // Use fast tier (grok-3-mini) — extraction is simple JSON parsing, no need for the
+  // heavy model. Keeps token pressure low after ROMA already used the bulk of the budget.
   const extracted = await llmToolCall<{
     score: number
     label: SentimentOutput['label']
