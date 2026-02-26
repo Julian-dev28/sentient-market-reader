@@ -47,7 +47,8 @@ export async function runAgentPipeline(
   provider: AIProvider = 'grok',
   romaMode?: string,
   aiRisk: boolean = false,
-  provider2?: AIProvider,  // second provider for ProbabilityModel; eliminates the inter-stage pause
+  provider2?: AIProvider,   // second provider for ProbabilityModel; eliminates the inter-stage pause
+  providers?: AIProvider[], // multi-provider parallel solve for Sentiment stage (ensemble)
 ): Promise<PipelineState> {
   const cycleId = ++cycleCounter
   const cycleStartedAt = new Date().toISOString()
@@ -64,7 +65,10 @@ export async function runAgentPipeline(
   // ── Stage 2: Price Feed ────────────────────────────────────────────────
   const pfResult = runPriceFeed(quote, mdResult.output.strikePrice)
 
-  // ── Stage 3: Sentiment Agent (lighter mode) ────────────────────────────
+  // ── Stage 3: Sentiment Agent (lighter mode, optionally multi-provider) ──
+  // When `providers` contains multiple entries, the Python service runs each
+  // provider's ROMA solve in parallel and merges the answers — richer signal diversity.
+  const sentProviders = providers && providers.length > 1 ? providers : undefined
   const sentResult = await runSentiment(
     quote,
     mdResult.output.strikePrice,
@@ -74,13 +78,15 @@ export async function runAgentPipeline(
     orderbook,
     provider,
     sentMode,
+    sentProviders,
   )
 
   // Pause only when both stages share the same provider (shared per-minute token budget).
   // Reduced from 8s→4s when stages use different modes (lighter sentiment = fewer tokens used).
-  // Split-provider skips entirely — different providers have independent rate limits.
+  // Split-provider (provider2 set) or multi-provider (providers set) skips the pause entirely.
   const probProvider = provider2 ?? provider
-  if (probProvider === provider) {
+  const usingSplitProvider = provider2 !== undefined || (providers && providers.length > 1)
+  if (!usingSplitProvider && probProvider === provider) {
     const pauseMs = sentMode === probMode ? 8_000 : 4_000
     await new Promise(r => setTimeout(r, pauseMs))
   }

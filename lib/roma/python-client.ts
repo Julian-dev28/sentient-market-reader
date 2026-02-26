@@ -32,14 +32,16 @@ export async function callPythonRoma(
   maxDepth = 1,
   maxRetries = 2,
   modeOverride?: string,
-  provider?: string,  // overrides AI_PROVIDER in the Python service for this request
+  provider?: string,           // single provider override
+  providers?: string[],        // multi-provider parallel solve (takes precedence over provider)
 ): Promise<PythonRomaResponse> {
   const romaMode = modeOverride ?? process.env.ROMA_MODE ?? 'smart'
   let lastErr: unknown
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       const body: Record<string, unknown> = { goal, context, max_depth: maxDepth, roma_mode: romaMode }
-      if (provider) body.provider = provider
+      if (providers && providers.length > 0) body.providers = providers
+      else if (provider) body.provider = provider
       const res = await fetch(`${PYTHON_ROMA_URL}/analyze`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

@@ -21,16 +21,17 @@ export default function BotPanel({
   const mins = Math.floor(nextCycleIn / 60)
   const secs = Math.floor(nextCycleIn % 60)
 
-  const accentCol = liveMode ? 'var(--green)' : 'var(--amber)'
-  const accentDark = liveMode ? 'var(--green-dark)' : '#b87a20'
-  const accentPale = liveMode ? 'var(--green-pale)' : 'rgba(212,135,44,0.1)'
-  const accentBdr  = liveMode ? '#9ecfb8' : '#d4a060'
+  // Always navy-blue themed (ROMA brand color) — live adds a green glow when active
+  const accentCol  = active && liveMode ? 'var(--green)'    : 'var(--blue)'
+  const accentDark = active && liveMode ? 'var(--green-dark)': '#2e5f82'
+  const accentPale = active && liveMode ? 'var(--green-pale)': 'rgba(74,127,165,0.08)'
+  const accentBdr  = active && liveMode ? '#9ecfb8'          : '#8ab4cf'
 
   return (
     <div className="card bracket-card" style={{
       padding: '14px 16px',
-      border: active ? `1.5px solid ${accentBdr}` : '1px solid var(--border)',
-      background: active ? accentPale : 'white',
+      border: active ? `1.5px solid ${accentBdr}` : '1.5px solid #8ab4cf',
+      background: active ? accentPale : 'rgba(74,127,165,0.04)',
       transition: 'all 0.3s ease',
     }}>
       {/* Header row */}
@@ -46,13 +47,13 @@ export default function BotPanel({
             fontSize: 10, fontWeight: 800, letterSpacing: '0.07em', textTransform: 'uppercase',
             color: active ? accentDark : 'var(--text-muted)',
           }}>
-            Trade Bot
+            Trade Agent
           </span>
           <span style={{
             fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 4,
-            background: active ? (liveMode ? 'var(--green-pale)' : 'rgba(212,135,44,0.15)') : 'var(--bg-secondary)',
-            border: `1px solid ${active ? accentBdr : 'var(--border)'}`,
-            color: active ? accentDark : 'var(--text-muted)',
+            background: active && liveMode ? 'var(--green-pale)' : 'rgba(74,127,165,0.12)',
+            border: `1px solid ${active ? accentBdr : '#8ab4cf'}`,
+            color: active ? accentDark : 'var(--blue)',
           }}>
             {active ? (liveMode ? 'LIVE' : 'PAPER') : 'OFF'}
           </span>
@@ -71,18 +72,16 @@ export default function BotPanel({
       {!active ? (
         <button onClick={onStart} style={{
           width: '100%', padding: '12px 0', borderRadius: 9, cursor: 'pointer',
-          border: liveMode ? '1px solid var(--green-dark)' : '1px solid var(--brown)',
-          background: liveMode
-            ? 'linear-gradient(135deg, var(--green-dark) 0%, var(--green) 100%)'
-            : 'linear-gradient(135deg, #7a5c32 0%, var(--brown) 100%)',
+          border: '1px solid #2e5f82',
+          background: 'linear-gradient(135deg, #2e5f82 0%, var(--blue) 100%)',
           fontSize: 13, fontWeight: 800, color: '#fff', letterSpacing: '0.03em',
-          boxShadow: liveMode ? '0 2px 12px rgba(74,148,112,0.35)' : '0 2px 8px rgba(139,111,71,0.3)',
+          boxShadow: '0 2px 12px rgba(74,127,165,0.35)',
           transition: 'all 0.15s',
         }}
           onMouseEnter={e => { e.currentTarget.style.opacity = '0.88' }}
           onMouseLeave={e => { e.currentTarget.style.opacity = '1' }}
         >
-          ▶ Start Bot · $100 / trade
+          ▶ Start Agent · $100 / trade
         </button>
       ) : (
         <button onClick={onStop} style={{
@@ -94,7 +93,7 @@ export default function BotPanel({
           onMouseEnter={e => { e.currentTarget.style.background = 'var(--pink)'; e.currentTarget.style.color = '#fff' }}
           onMouseLeave={e => { e.currentTarget.style.background = 'var(--pink-pale)'; e.currentTarget.style.color = 'var(--pink)' }}
         >
-          ■ Stop Bot
+          ■ Stop Agent
         </button>
       )}
 

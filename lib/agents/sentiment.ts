@@ -11,6 +11,7 @@ export async function runSentiment(
   orderbook: KalshiOrderbook | null,
   provider: AIProvider,
   romaMode?: string,
+  providers?: AIProvider[],  // multi-provider parallel solve
 ): Promise<AgentResult<SentimentOutput>> {
   const start = Date.now()
 
@@ -40,7 +41,8 @@ export async function runSentiment(
   ].join('\n')
 
   // blitz: maxDepth=0 forces atomic (1 executor, no planning) — ~3 LLM calls instead of ~6
-  const romaResult = await callPythonRoma(goal, context, romaMode === 'blitz' ? 0 : 1, 2, romaMode, provider)
+  // Multi-provider: parallel solves run simultaneously, merged answer enriches extraction
+  const romaResult = await callPythonRoma(goal, context, romaMode === 'blitz' ? 0 : 1, 2, romaMode, provider, providers)
   const romaTrace  = formatRomaTrace(romaResult)
 
   // Use fast tier (grok-3-mini) — extraction is simple JSON parsing, no need for the

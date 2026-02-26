@@ -43,7 +43,14 @@ function simulateOutcome(trade: TradeRecord, settlementPrice: number): TradeReco
  * SAFETY: live orders are ONLY placed when `autoTrade=true` (bot is running).
  * Manual "Run Cycle" calls never place real orders regardless of liveMode.
  */
-export function usePipeline(liveMode: boolean, romaMode: string = 'smart', autoTrade: boolean = false, aiRisk: boolean = false) {
+export function usePipeline(
+  liveMode: boolean,
+  romaMode: string = 'smart',
+  autoTrade: boolean = false,
+  aiRisk: boolean = false,
+  provider2?: string,   // split-provider for ProbabilityModel
+  providers?: string[], // multi-provider parallel for Sentiment
+) {
   const [pipeline, setPipeline]     = useState<PipelineState | null>(null)
   const [trades, setTrades]         = useState<TradeRecord[]>([])
   const [isRunning, setIsRunning]   = useState(false)
@@ -60,6 +67,8 @@ export function usePipeline(liveMode: boolean, romaMode: string = 'smart', autoT
     try {
       const params = new URLSearchParams({ mode: romaMode })
       if (aiRisk) params.set('aiRisk', 'true')
+      if (provider2) params.set('provider2', provider2)
+      if (providers && providers.length > 1) params.set('providers', providers.join(','))
       const res = await fetch(`/api/pipeline?${params}`, { cache: 'no-store' })
       if (!res.ok) {
         if (res.status === 503) throw new Error('No active KXBTC15M market — trading hours are ~11:30 AM–midnight ET weekdays')
@@ -74,7 +83,7 @@ export function usePipeline(liveMode: boolean, romaMode: string = 'smart', autoT
       const prob = data.agents.probability.output
 
       if (exec.action !== 'PASS' && exec.side && exec.limitPrice && md.activeMarket) {
-        // Bot: fixed $100 trade. Manual analysis: use agent's contract count.
+        // Agent: fixed $100 trade. Manual analysis: use agent's contract count.
         const contracts    = autoTrade
           ? Math.max(1, Math.floor(BOT_TRADE_DOLLARS / (exec.limitPrice / 100)))
           : exec.contracts
@@ -82,7 +91,7 @@ export function usePipeline(liveMode: boolean, romaMode: string = 'smart', autoT
 
         let liveOrderId: string | undefined
 
-        // ── Real order: ONLY when bot is active ──────────────────────────────
+        // ── Real order: ONLY when Agent is active ──────────────────────────────
         if (autoTrade && liveMode) {
           try {
             const orderRes = await fetch('/api/place-order', {
@@ -140,7 +149,7 @@ export function usePipeline(liveMode: boolean, romaMode: string = 'smart', autoT
       lastCycleRef.current = Date.now()
       setNextCycleIn(CYCLE_INTERVAL_MS / 1000)
     }
-  }, [liveMode, romaMode, autoTrade, aiRisk])
+  }, [liveMode, romaMode, autoTrade, aiRisk, provider2, providers])
 
   // Keep ref current so auto-interval always calls latest version
   useEffect(() => { runCycleRef.current = runCycle }, [runCycle])
