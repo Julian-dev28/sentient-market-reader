@@ -18,8 +18,8 @@ async function callPythonRoma(goal: string, context: string): Promise<PythonRoma
   const res = await fetch(`${PYTHON_ROMA_URL}/analyze`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ goal, context }),
-    signal: AbortSignal.timeout(120_000),  // 2 min timeout
+    body: JSON.stringify({ goal, context, max_depth: 1 }),
+    signal: AbortSignal.timeout(90_000),  // 90s — depth-1 ROMA typically completes in ~50s
   })
   if (!res.ok) {
     const text = await res.text().catch(() => '')
