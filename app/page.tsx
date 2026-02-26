@@ -406,7 +406,7 @@ export default function Home() {
           </div>
 
           {/* ─── CENTER ─── */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
 
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
