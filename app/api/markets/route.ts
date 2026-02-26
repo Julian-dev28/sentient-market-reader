@@ -24,6 +24,12 @@ function getCurrentEventTicker(): string {
   return `KXBTC15M-${yy}${mon}${dd}${hh}${mm}`
 }
 
+/** A market is still tradeable: window hasn't closed and prices are live (not 0 or 100 = settled extremes) */
+function isTradeable(m: { yes_ask: number; close_time?: string }): boolean {
+  if (m.close_time && new Date(m.close_time).getTime() <= Date.now()) return false
+  return m.yes_ask > 1 && m.yes_ask < 99
+}
+
 export async function GET() {
   // ── Attempt 1: query by current event_ticker (most precise) ──────────────
   try {
@@ -35,7 +41,7 @@ export async function GET() {
     })
     if (res.ok) {
       const data = await res.json()
-      const active = (data.markets ?? []).filter((m: { yes_ask: number }) => m.yes_ask > 0)
+      const active = (data.markets ?? []).filter(isTradeable)
       if (active.length > 0) return NextResponse.json({ ...data, markets: active })
     }
   } catch { /* fall through */ }
@@ -49,11 +55,11 @@ export async function GET() {
     })
     if (res.ok) {
       const data = await res.json()
-      const active = (data.markets ?? []).filter((m: { yes_ask: number }) => m.yes_ask > 0)
+      const active = (data.markets ?? []).filter(isTradeable)
       if (active.length > 0) return NextResponse.json({ ...data, markets: active })
     }
   } catch { /* fall through */ }
 
-  // Both Kalshi queries failed
+  // Both Kalshi queries failed or no tradeable markets yet (between windows)
   return NextResponse.json({ error: 'No active KXBTC15M markets found', markets: [] }, { status: 503 })
 }

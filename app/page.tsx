@@ -36,8 +36,13 @@ export default function Home() {
     md?.activeMarket?.ticker ?? null,
   )
 
-  // Merge: live tick overrides stale pipeline values
-  const activeMarket    = liveMarket   ?? md?.activeMarket   ?? null
+  // Merge: live tick overrides stale pipeline values.
+  // Don't fall back to pipeline market if its close_time is already in the past.
+  const mdMarket = md?.activeMarket ?? null
+  const mdMarketExpired = mdMarket?.close_time
+    ? new Date(mdMarket.close_time).getTime() < Date.now()
+    : false
+  const activeMarket = liveMarket ?? (mdMarketExpired ? null : mdMarket)
   const currentBTCPrice = liveBTCPrice ?? pf?.currentPrice   ?? 0
   const priceHistory    = livePriceHistory
 

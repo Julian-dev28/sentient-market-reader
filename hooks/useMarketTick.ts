@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import type { KalshiMarket, PricePoint } from '@/lib/types'
 
-const TICK_MS = 2_000  // 2-second refresh
+const TICK_MS = 2_000  // 2-second BTC price refresh (always)
 
 interface MarketTick {
   liveMarket: KalshiMarket | null   // fresh bid/ask/volume
@@ -13,9 +13,9 @@ interface MarketTick {
 }
 
 /**
- * Polls /api/markets and /api/btc-price every 2 seconds.
- * Builds its own price history from live ticks — does NOT seed from pipeline
- * data to avoid contamination from stale/mock pipeline prices.
+ * Polls /api/btc-price every 2 seconds.
+ * Polls /api/markets with exponential backoff — stays at 2s during live windows,
+ * backs off to ~60s during off-hours (persistent 503s) to reduce console noise.
  *
  * @param ticker  Active market ticker — used to filter the market list.
  *                Pass null until known; polling still fetches BTC + auto-picks market.
@@ -41,8 +41,12 @@ export function useMarketTick(ticker: string | null): MarketTick {
   useEffect(() => {
     let mounted = true
 
+    // Exponential backoff for market polls: 0 ticks to skip → 1 → 3 → 7 → 15 → 30 (max ~60s)
+    let marketBackoff = 0   // ticks to skip between market fetches
+    let marketSkip   = 0   // ticks skipped so far in current window
+
     async function tick() {
-      // ── BTC price ──────────────────────────────────────────────────────
+      // ── BTC price (always, every tick) ───────────────────────────────────
       try {
         const res = await fetch('/api/btc-price', { cache: 'no-store' })
         if (res.ok) {
@@ -65,20 +69,37 @@ export function useMarketTick(ticker: string | null): MarketTick {
         }
       } catch { /* network blip — keep previous value */ }
 
-      // ── Market bid/ask ─────────────────────────────────────────────────
-      // When ticker is known, filter to it. Otherwise auto-pick the first
-      // actively-trading market so data populates before the pipeline runs.
+      // ── Market bid/ask (with backoff during off-hours) ───────────────────
+      // When no active window exists the API returns 503 — back off exponentially
+      // so the console doesn't spam. Resets to 2s instantly when a live market appears.
+      if (marketSkip < marketBackoff) {
+        marketSkip++
+        return
+      }
+      marketSkip = 0
+
       try {
         const res = await fetch('/api/markets', { cache: 'no-store' })
-        if (res.ok) {
-          const data = await res.json()
-          const markets = data.markets as KalshiMarket[] | undefined
-          const market = ticker
-            ? markets?.find(m => m.ticker === ticker)
-            : markets?.find(m => (m.yes_ask ?? 0) > 0)
-          if (mounted && market) setLiveMarket(market)
+        const data = await res.json().catch(() => ({ markets: [] }))
+        const markets: KalshiMarket[] = res.ok ? (data.markets ?? []) : []
+
+        if (!res.ok) {
+          // Back off: 0→1→3→7→15→30 (max 30 ticks × 2s = 60s between attempts)
+          marketBackoff = Math.min(marketBackoff * 2 + 1, 30)
+        } else {
+          marketBackoff = 0  // live market found — resume 2s polling
         }
-      } catch { /* keep previous value */ }
+
+        const isLive = (m: KalshiMarket) => (m.yes_ask ?? 0) > 1 && (m.yes_ask ?? 100) < 99
+        const byTicker = ticker ? markets.find(m => m.ticker === ticker) : undefined
+        // If the known ticker's market is settled, fall back to auto-discovery
+        const market = (byTicker && isLive(byTicker))
+          ? byTicker
+          : markets.find(m => isLive(m))
+        if (mounted) setLiveMarket(market ?? null)
+      } catch {
+        marketBackoff = Math.min(marketBackoff * 2 + 1, 30)
+      }
     }
 
     tickRef.current = tick

@@ -46,9 +46,16 @@ export async function GET(_req: NextRequest) {
       { headers: { ...buildKalshiHeaders('GET', eventPath), Accept: 'application/json' }, cache: 'no-store' }
     ).catch(() => null)
 
+    // Only accept markets that are genuinely open for trading:
+    // close_time must be in the future, and prices must be live (not 0 or 100 = settled extremes)
+    const now = Date.now()
+    const isTradeable = (m: KalshiMarket) =>
+      (m.close_time ? new Date(m.close_time).getTime() > now : true) &&
+      m.yes_ask > 1 && m.yes_ask < 99
+
     if (eventRes?.ok) {
       const data = await eventRes.json()
-      markets = (data.markets ?? []).filter((m: KalshiMarket) => m.yes_ask > 0)
+      markets = (data.markets ?? []).filter(isTradeable)
     }
 
     // Fallback: query recent series markets without status filter
@@ -60,7 +67,7 @@ export async function GET(_req: NextRequest) {
       ).catch(() => null)
       if (fallbackRes?.ok) {
         const data = await fallbackRes.json()
-        markets = (data.markets ?? []).filter((m: KalshiMarket) => m.yes_ask > 0)
+        markets = (data.markets ?? []).filter(isTradeable)
       }
     }
 
