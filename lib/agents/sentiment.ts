@@ -39,7 +39,8 @@ export async function runSentiment(
     `Orderbook NO depth:  ${obNo}`,
   ].join('\n')
 
-  const romaResult = await callPythonRoma(goal, context, 1, 2, romaMode)
+  // blitz: maxDepth=0 forces atomic (1 executor, no planning) — ~3 LLM calls instead of ~6
+  const romaResult = await callPythonRoma(goal, context, romaMode === 'blitz' ? 0 : 1, 2, romaMode)
   const romaTrace  = formatRomaTrace(romaResult)
 
   // Use fast tier (grok-3-mini) — extraction is simple JSON parsing, no need for the
@@ -53,7 +54,7 @@ export async function runSentiment(
   }>({
     provider,
     tier: 'fast',
-    maxTokens: 512,
+    maxTokens: romaMode === 'blitz' ? 256 : 512,
     toolName: 'output_sentiment',
     toolDescription: 'Extract structured BTC sentiment data from ROMA analysis output',
     schema: {
