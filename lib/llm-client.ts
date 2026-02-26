@@ -14,55 +14,82 @@ import Anthropic from '@anthropic-ai/sdk'
 import OpenAI from 'openai'
 
 export type AIProvider = 'anthropic' | 'openai' | 'grok' | 'openrouter'
+export type RomaMode = 'keen' | 'smart' | 'deep'
+
+// ── ROMA Mode ────────────────────────────────────────────────────────────────
+// ROMA_MODE controls which model tier every agent uses across the pipeline:
+//
+//   keen  — all agents forced to the fast model (~15–25s pipeline)
+//            best for tight 5-min cycles or high-frequency signal checks
+//
+//   smart — fast agents use fast model, smart agents use smart model (~30–60s)
+//            default; balanced cost/quality for 15-min prediction markets
+//
+//   deep  — all agents forced to the deep (frontier/reasoning) model (~60–120s)
+//            best for longer-horizon research, not real-time trading
+//
+export const ROMA_MODE: RomaMode = (() => {
+  const m = process.env.ROMA_MODE ?? 'smart'
+  if (m === 'keen' || m === 'smart' || m === 'deep') return m
+  console.warn(`[llm-client] Unknown ROMA_MODE "${m}", falling back to "smart"`)
+  return 'smart'
+})()
 
 // ── Model mapping ────────────────────────────────────────────────────────────
 // All model IDs can be overridden via environment variables — see .env.local.
 //
-// Latest model recommendations (as of Feb 2026):
+// Speed reference per provider (single call, p50):
 //
 // ANTHROPIC
-//   fast:  claude-haiku-4-5-20251001  — current default, still best fast option
-//   smart: claude-sonnet-4-6          — current default; claude-opus-4-6 is available
-//                                       for max intelligence (higher cost)
+//   fast:  claude-haiku-4-5-20251001  ~2–5s   — best fast option
+//   smart: claude-sonnet-4-6          ~10–20s  — default smart
+//   deep:  claude-opus-4-6            ~20–40s  — max intelligence
 //
 // OPENAI
-//   fast:  gpt-4o-mini                — current default; gpt-5-mini available if you
-//                                       have access (faster, cheaper than gpt-5)
-//   smart: gpt-4o                     — current default; gpt-5 / gpt-5.2 available
-//                                       for access-approved accounts
+//   fast:  gpt-4o-mini                ~3–8s   — best fast option
+//   smart: gpt-4o                     ~10–20s  — default smart
+//   deep:  gpt-4o                     ~10–20s  — swap to o3-mini for reasoning
 //
 // GROK (xAI)
-//   fast:  grok-3-fast                — current default; grok-4-1-fast-non-reasoning
-//                                       reported available with 2M context window
-//   smart: grok-3                     — current default; grok-4-0709 / grok-4-1-fast-reasoning
-//                                       available for latest frontier performance
+//   fast:  grok-3-fast                ~5–10s  — best fast option
+//   smart: grok-4-0709                ~15–30s  — default smart
+//   deep:  grok-4-0709                ~15–30s  — swap to grok-4-1-fast-reasoning if available
 //
-// For openrouter: set OPENROUTER_MODEL (smart) and optionally OPENROUTER_FAST_MODEL.
-export const PROVIDER_MODELS: Record<AIProvider, { fast: string; smart: string; label: string }> = {
+// For openrouter: set OPENROUTER_MODEL (smart/deep) and optionally OPENROUTER_FAST_MODEL.
+export const PROVIDER_MODELS: Record<AIProvider, { fast: string; smart: string; deep: string; label: string }> = {
   anthropic: {
     fast:  process.env.ANTHROPIC_FAST_MODEL  ?? 'claude-haiku-4-5-20251001',
     smart: process.env.ANTHROPIC_SMART_MODEL ?? 'claude-sonnet-4-6',
+    deep:  process.env.ANTHROPIC_DEEP_MODEL  ?? 'claude-opus-4-6',
     label: 'Claude',
   },
   openai: {
     fast:  process.env.OPENAI_FAST_MODEL  ?? 'gpt-4o-mini',
     smart: process.env.OPENAI_SMART_MODEL ?? 'gpt-4o',
+    deep:  process.env.OPENAI_DEEP_MODEL  ?? 'gpt-4o',   // override to o3-mini if you have access
     label: 'GPT-4o',
   },
   grok: {
     fast:  process.env.GROK_FAST_MODEL  ?? 'grok-3-fast',
-    smart: process.env.GROK_SMART_MODEL ?? 'grok-3',
+    smart: process.env.GROK_SMART_MODEL ?? 'grok-4-0709',
+    deep:  process.env.GROK_DEEP_MODEL  ?? 'grok-4-0709', // override to grok-4-1-fast-reasoning if available
     label: 'Grok',
   },
   openrouter: {
     fast:  process.env.OPENROUTER_FAST_MODEL  ?? process.env.OPENROUTER_MODEL ?? 'anthropic/claude-haiku-4-5-20251001',
     smart: process.env.OPENROUTER_MODEL       ?? 'anthropic/claude-sonnet-4-6',
+    deep:  process.env.OPENROUTER_DEEP_MODEL  ?? process.env.OPENROUTER_MODEL ?? 'anthropic/claude-opus-4-6',
     label: 'OpenRouter',
   },
 }
 
+// Remaps the requested tier based on the active ROMA_MODE:
+//   ultra-fast → always fast
+//   normal     → pass-through (fast stays fast, smart stays smart)
+//   deep       → always deep
 export function resolveModel(tier: 'fast' | 'smart', provider: AIProvider): string {
-  return PROVIDER_MODELS[provider][tier]
+  const effectiveTier = ROMA_MODE === 'keen' ? 'fast' : ROMA_MODE === 'deep' ? 'deep' : tier
+  return PROVIDER_MODELS[provider][effectiveTier]
 }
 
 // ── Singleton clients ────────────────────────────────────────────────────────

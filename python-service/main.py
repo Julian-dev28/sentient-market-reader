@@ -46,7 +46,7 @@ app.add_middleware(
 
 # ── LLM configuration ────────────────────────────────────────────────────────
 
-def build_llm_config() -> tuple[LLMConfig, str]:
+def build_llm_config(roma_mode: str = "normal") -> tuple[LLMConfig, str]:
     """
     Build an LLMConfig from environment variables.
     Mirrors the TypeScript llm-client providers exactly:
@@ -54,6 +54,12 @@ def build_llm_config() -> tuple[LLMConfig, str]:
       openai     → OPENAI_API_KEY
       grok       → XAI_API_KEY → api.x.ai/v1
       openrouter → OPENROUTER_API_KEY + OPENROUTER_MODEL
+
+    roma_mode is passed from the Next.js request body (not read from env),
+    so only the root .env.local needs to be edited.
+      ultra-fast → fast model
+      normal     → smart model
+      deep       → deep model
     Returns (llm_config, provider_label).
     """
     provider = os.getenv("AI_PROVIDER", "grok")
@@ -62,25 +68,42 @@ def build_llm_config() -> tuple[LLMConfig, str]:
         api_key = os.getenv("ANTHROPIC_API_KEY")
         if not api_key:
             raise ValueError("ANTHROPIC_API_KEY not set")
+        if roma_mode == "keen":
+            model = os.getenv("ANTHROPIC_FAST_MODEL", "claude-haiku-4-5-20251001")
+        elif roma_mode == "deep":
+            model = os.getenv("ANTHROPIC_DEEP_MODEL", "claude-opus-4-6")
+        else:  # smart
+            model = os.getenv("ANTHROPIC_SMART_MODEL", "claude-sonnet-4-6")
         return (
-            LLMConfig(model="anthropic/claude-sonnet-4-5", api_key=api_key),
-            "anthropic",
+            LLMConfig(model=f"anthropic/{model}", api_key=api_key),
+            f"anthropic/{model}",
         )
 
     if provider == "openai":
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
             raise ValueError("OPENAI_API_KEY not set")
+        if roma_mode == "keen":
+            model = os.getenv("OPENAI_FAST_MODEL", "gpt-4o-mini")
+        elif roma_mode == "deep":
+            model = os.getenv("OPENAI_DEEP_MODEL", "gpt-4o")
+        else:  # smart
+            model = os.getenv("OPENAI_SMART_MODEL", "gpt-4o")
         return (
-            LLMConfig(model="openai/gpt-4o", api_key=api_key),
-            "openai",
+            LLMConfig(model=f"openai/{model}", api_key=api_key),
+            f"openai/{model}",
         )
 
     if provider == "grok":
         api_key = os.getenv("XAI_API_KEY")
         if not api_key:
             raise ValueError("XAI_API_KEY not set")
-        model = os.getenv("GROK_SMART_MODEL", "grok-3")
+        if roma_mode == "keen":
+            model = os.getenv("GROK_FAST_MODEL", "grok-3-fast")
+        elif roma_mode == "deep":
+            model = os.getenv("GROK_DEEP_MODEL", os.getenv("GROK_SMART_MODEL", "grok-4-0709"))
+        else:  # smart
+            model = os.getenv("GROK_SMART_MODEL", "grok-4-0709")
         return (
             LLMConfig(
                 model=f"openai/{model}",
@@ -136,9 +159,9 @@ def build_roma_config(llm: LLMConfig) -> ROMAConfig:
     )
 
 
-# Build LLM config on startup (used as a module-level cache)
+# Build LLM config on startup using default mode — each /analyze call rebuilds with the request's roma_mode
 try:
-    _llm_config, _provider_label = build_llm_config()
+    _llm_config, _provider_label = build_llm_config("normal")
     # Also configure global DSPy LM for any direct dspy.predict() calls
     dspy.configure(lm=dspy.LM(
         _llm_config.model,
@@ -159,6 +182,7 @@ class AnalyzeRequest(BaseModel):
     goal: str
     context: str
     max_depth: Optional[int] = 1
+    roma_mode: Optional[str] = "smart"  # keen | smart | deep — passed from Next.js root .env.local
 
 
 class SubtaskResult(BaseModel):
@@ -205,6 +229,10 @@ def analyze(req: AnalyzeRequest):
     if _llm_config is None:
         raise HTTPException(status_code=503, detail="LLM not configured — check env vars")
 
+    # Rebuild LLM config using the mode sent by the caller (not env)
+    roma_mode = req.roma_mode or "normal"
+    llm_config, provider_label = build_llm_config(roma_mode)
+
     start = time.time()
 
     full_prompt = f"""{req.goal}
@@ -214,7 +242,7 @@ Market context:
 
     try:
         # ── THE REAL THING: actual roma-dspy solve() call ─────────────────────
-        config = build_roma_config(_llm_config)
+        config = build_roma_config(llm_config)
         result = solve(full_prompt, max_depth=req.max_depth, config=config)
         # ─────────────────────────────────────────────────────────────────────
 
@@ -245,7 +273,7 @@ Market context:
             was_atomic=was_atomic,
             subtasks=subtasks,
             duration_ms=duration_ms,
-            provider=_provider_label,
+            provider=provider_label,
         )
 
     except Exception as e:
