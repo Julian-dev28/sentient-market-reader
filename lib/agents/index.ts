@@ -33,6 +33,13 @@ import { runExecution } from './execution'
 
 let cycleCounter = 0
 
+// ── Per-stage mode defaults ──────────────────────────────────────────────────
+// Sentiment uses a lighter mode than probability by default:
+//   blitz → blitz/blitz  |  sharp → sharp/sharp  |  keen → sharp/keen  |  smart → keen/smart
+// This lets the simpler sentiment signal pass through faster without sacrificing
+// the quality of the probability estimate (the critical decision-making step).
+const SENT_MODE_MAP: Record<string, string> = { blitz: 'blitz', sharp: 'sharp', keen: 'sharp', smart: 'keen' }
+
 export async function runAgentPipeline(
   markets: KalshiMarket[],
   quote: BTCQuote,
@@ -40,9 +47,16 @@ export async function runAgentPipeline(
   provider: AIProvider = 'grok',
   romaMode?: string,
   aiRisk: boolean = false,
+  provider2?: AIProvider,  // second provider for ProbabilityModel; eliminates the inter-stage pause
 ): Promise<PipelineState> {
   const cycleId = ++cycleCounter
   const cycleStartedAt = new Date().toISOString()
+  const mode = romaMode ?? 'keen'
+
+  // Per-stage mode: sentiment runs one tier lighter (faster, fewer tokens),
+  // probability runs at the full selected quality tier.
+  const sentMode = SENT_MODE_MAP[mode] ?? mode
+  const probMode = mode
 
   // ── Stage 1: Market Discovery ──────────────────────────────────────────
   const mdResult = await runMarketDiscovery(markets)
@@ -50,7 +64,7 @@ export async function runAgentPipeline(
   // ── Stage 2: Price Feed ────────────────────────────────────────────────
   const pfResult = runPriceFeed(quote, mdResult.output.strikePrice)
 
-  // ── Stage 3: Sentiment Agent ───────────────────────────────────────────
+  // ── Stage 3: Sentiment Agent (lighter mode) ────────────────────────────
   const sentResult = await runSentiment(
     quote,
     mdResult.output.strikePrice,
@@ -59,21 +73,27 @@ export async function runAgentPipeline(
     mdResult.output.activeMarket,
     orderbook,
     provider,
-    romaMode,
+    sentMode,
   )
 
-  // Pause between the two roma-dspy calls to give Grok's per-minute token budget breathing room.
-  await new Promise(r => setTimeout(r, 8_000))
+  // Pause only when both stages share the same provider (shared per-minute token budget).
+  // Reduced from 8s→4s when stages use different modes (lighter sentiment = fewer tokens used).
+  // Split-provider skips entirely — different providers have independent rate limits.
+  const probProvider = provider2 ?? provider
+  if (probProvider === provider) {
+    const pauseMs = sentMode === probMode ? 8_000 : 4_000
+    await new Promise(r => setTimeout(r, pauseMs))
+  }
 
-  // ── Stage 4: Probability Model (roma-dspy Python service) ────────────────
+  // ── Stage 4: Probability Model (full quality mode) ────────────────────
   const probResult = await runProbabilityModel(
     sentResult.output.score,
     sentResult.output.signals,
     pfResult.output.distanceFromStrikePct,
     mdResult.output.minutesUntilExpiry,
     mdResult.output.activeMarket,
-    provider,
-    romaMode,
+    probProvider,
+    probMode,
   )
 
   // ── Stage 5: Risk Manager ──────────────────────────────────────────────

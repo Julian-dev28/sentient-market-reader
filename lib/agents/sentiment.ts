@@ -40,7 +40,7 @@ export async function runSentiment(
   ].join('\n')
 
   // blitz: maxDepth=0 forces atomic (1 executor, no planning) — ~3 LLM calls instead of ~6
-  const romaResult = await callPythonRoma(goal, context, romaMode === 'blitz' ? 0 : 1, 2, romaMode)
+  const romaResult = await callPythonRoma(goal, context, romaMode === 'blitz' ? 0 : 1, 2, romaMode, provider)
   const romaTrace  = formatRomaTrace(romaResult)
 
   // Use fast tier (grok-3-mini) — extraction is simple JSON parsing, no need for the
