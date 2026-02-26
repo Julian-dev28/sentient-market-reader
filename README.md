@@ -148,7 +148,7 @@ Risk Manager and Execution Agent are intentionally **not LLM-powered** — safet
 | **AI — Claude** | Anthropic claude-sonnet-4-6 / claude-haiku-4-5 via `@anthropic-ai/sdk` |
 | **AI — GPT** | OpenAI gpt-4o / gpt-4o-mini via `openai` SDK |
 | **AI — OpenRouter** | Any model via OpenRouter API with configurable smart/fast model env vars |
-| **Multi-Agent** | Custom ROMA engine (`lib/roma/`) — Atomizer → Planner → Executors → Aggregator |
+| **Multi-Agent** | Official Sentient `roma-dspy` Python SDK — all AI reasoning routes through `python-service/` |
 | **Prediction Markets** | Kalshi Trade API v2 (KXBTC15M series) |
 | **Price Data** | CoinMarketCap Pro API |
 | **Auth** | RSA-PSS request signing (`crypto.createSign`) for Kalshi |
@@ -245,13 +245,8 @@ The pipeline fires automatically on page load. Hit **Run Cycle** to trigger a ma
 │
 ├── lib/
 │   ├── llm-client.ts               # Unified LLM interface (Grok / Claude / OpenAI / OpenRouter)
-│   ├── roma/                       # ROMA multi-agent engine
-│   │   ├── atomizer.ts             # [fast] atomic or decompose?
-│   │   ├── planner.ts              # [smart] generate subtasks
-│   │   ├── executor.ts             # [fast] execute one atomic task
-│   │   ├── aggregator.ts           # [smart] synthesize results
-│   │   ├── solve.ts                # Recursive solve loop w/ Promise.all
-│   │   └── index.ts                # Trading wrapper + structured extraction
+│   ├── roma/
+│   │   └── python-client.ts        # Shared roma-dspy service client (callPythonRoma, formatRomaTrace)
 │   ├── agents/
 │   │   ├── market-discovery.ts     # Kalshi KXBTC15M market scanner
 │   │   ├── price-feed.ts           # CoinMarketCap BTC price + history

@@ -6,7 +6,7 @@
  *
  * Pipeline DAG:
  *   MarketDiscovery ──┐
- *   PriceFeed ─────────┼──► SentimentAgent ──► ProbabilityModelAgent (ROMA) ──► RiskManager ──► Execution
+ *   PriceFeed ─────────┼──► SentimentAgent (roma-dspy) ──► ProbabilityModelAgent (roma-dspy) ──► RiskManager ──► Execution
  *   (Orderbook) ───────┘
  */
 
@@ -59,7 +59,7 @@ export async function runAgentPipeline(
     provider,
   )
 
-  // ── Stage 4: Probability Model (ROMA recursive solve) ──────────────────
+  // ── Stage 4: Probability Model (roma-dspy Python service) ────────────────
   const probResult = await runProbabilityModel(
     sentResult.output.score,
     sentResult.output.signals,
