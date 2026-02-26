@@ -33,7 +33,8 @@ function getCurrentEventTicker(): string {
 
 export async function GET(_req: NextRequest) {
   const p = process.env.AI_PROVIDER ?? 'grok'
-  const provider: AIProvider = (p === 'grok' || p === 'openai') ? p : 'anthropic'
+  const validProviders = ['anthropic', 'openai', 'grok', 'openrouter'] as const
+  const provider: AIProvider = (validProviders as readonly string[]).includes(p) ? p as AIProvider : 'grok'
   try {
     // Try to fetch the currently active market using computed event_ticker
     let markets: KalshiMarket[] = []
