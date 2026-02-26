@@ -17,6 +17,7 @@ import os
 import time
 import traceback
 from typing import Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import dspy
 from fastapi import FastAPI, HTTPException
@@ -241,9 +242,10 @@ class AnalyzeRequest(BaseModel):
     goal: str
     context: str
     max_depth: Optional[int] = 1
-    roma_mode: Optional[str] = "keen"   # blitz | sharp | keen | smart — analysis model tier
-    orch_mode: Optional[str] = None     # orchestration model tier (atomizer/planner); defaults to one tier below roma_mode
-    provider: Optional[str] = None      # overrides AI_PROVIDER env for this request (split-provider support)
+    roma_mode: Optional[str] = "keen"      # blitz | sharp | keen | smart — analysis model tier
+    orch_mode: Optional[str] = None        # orchestration model tier (atomizer/planner); defaults to one tier below roma_mode
+    provider: Optional[str] = None         # overrides AI_PROVIDER env (single-provider support)
+    providers: Optional[list[str]] = None  # multi-provider parallel solve — runs each provider simultaneously and merges answers
 
 
 class SubtaskResult(BaseModel):
@@ -301,7 +303,10 @@ def analyze(req: AnalyzeRequest):
     orch_mode = req.orch_mode or _orch_tier_map.get(roma_mode, "sharp")
     orchestration_llm, _ = build_llm_config(orch_mode, req.provider)
 
-    print(f"[ROMA] /analyze  mode={roma_mode}  orch={orch_mode}  provider={provider_label}  model={analysis_llm.model}")
+    # Multi-provider mode: providers list takes precedence over single provider
+    active_providers = req.providers if req.providers and len(req.providers) > 0 else [req.provider or os.getenv("AI_PROVIDER", "grok")]
+
+    print(f"[ROMA] /analyze  mode={roma_mode}  orch={orch_mode}  providers={active_providers}  model={analysis_llm.model}")
 
     start = time.time()
 
@@ -310,42 +315,81 @@ def analyze(req: AnalyzeRequest):
 Market context:
 {req.context}"""
 
-    try:
-        # ── THE REAL THING: actual roma-dspy solve() call ─────────────────────
-        # Use tiered config: fast models for orchestration, quality for analysis
-        config = build_roma_config_tiered(analysis_llm, orchestration_llm)
-        result = solve(full_prompt, max_depth=req.max_depth, config=config)
-        # ─────────────────────────────────────────────────────────────────────
+    def run_single_solve(prov: str) -> tuple[str, object]:
+        """Run one ROMA solve for a given provider; returns (provider_label, result)."""
+        a_llm, p_label = build_llm_config(roma_mode, prov)
+        o_llm, _       = build_llm_config(orch_mode, prov)
+        cfg = build_roma_config_tiered(a_llm, o_llm)
+        return p_label, solve(full_prompt, max_depth=req.max_depth, config=cfg)
 
-        duration_ms = int((time.time() - start) * 1000)
-        print(f"[ROMA] done  model={llm_config.model}  duration={duration_ms}ms")
-
+    def extract_answer(result: object) -> tuple[str, bool, list]:
+        """Extract answer string, was_atomic flag, and subtasks from a solve result."""
         if isinstance(result, str):
-            answer = result
-            was_atomic = True
-            subtasks = []
+            return result, True, []
+        answer = str(result.result or result.goal or result)
+        node_type_str = str(getattr(result, "node_type", "")).upper()
+        was_atomic = "PLAN" not in node_type_str
+        children = getattr(result, "children", []) or []
+        subtasks = [
+            SubtaskResult(
+                id=str(getattr(c, "task_id", f"t{i+1}"))[:8],
+                goal=str(getattr(c, "goal", "")),
+                result=str(getattr(c, "result", "") or ""),
+            )
+            for i, c in enumerate(children)
+        ]
+        return answer, was_atomic, subtasks
+
+    try:
+        if len(active_providers) == 1:
+            # ── Single-provider solve (standard path) ─────────────────────────
+            prov_label, result = run_single_solve(active_providers[0])
+            answer, was_atomic, subtasks = extract_answer(result)
+            duration_ms = int((time.time() - start) * 1000)
+            print(f"[ROMA] done  provider={prov_label}  duration={duration_ms}ms")
+
         else:
-            # roma-dspy returns a TaskNode — extract the answer text from .result
-            answer = str(result.result or result.goal or result)
-            # node_type EXECUTE = atomic (no planning step); PLAN = decomposed
-            node_type_str = str(getattr(result, "node_type", "")).upper()
-            was_atomic = "PLAN" not in node_type_str
-            children = getattr(result, "children", []) or []
-            subtasks = [
-                SubtaskResult(
-                    id=str(getattr(c, "task_id", f"t{i+1}"))[:8],
-                    goal=str(getattr(c, "goal", "")),
-                    result=str(getattr(c, "result", "") or ""),
-                )
-                for i, c in enumerate(children)
-            ]
+            # ── Multi-provider parallel solve ─────────────────────────────────
+            # Each provider runs its full ROMA solve concurrently.
+            # Answers are concatenated with a separator so the TypeScript
+            # extractor gets richer, multi-perspective context.
+            print(f"[ROMA] parallel solve across {len(active_providers)} providers")
+            results_map: dict[str, tuple[str, object]] = {}
+
+            with ThreadPoolExecutor(max_workers=len(active_providers)) as ex:
+                future_to_prov = {ex.submit(run_single_solve, p): p for p in active_providers}
+                for future in as_completed(future_to_prov):
+                    prov = future_to_prov[future]
+                    try:
+                        prov_label, res = future.result()
+                        results_map[prov] = (prov_label, res)
+                    except Exception as e:
+                        print(f"[ROMA] provider {prov} failed: {e}")
+
+            if not results_map:
+                raise RuntimeError("All providers failed in parallel solve")
+
+            # Merge: concatenate each provider's answer with a labeled separator
+            parts = []
+            all_subtasks: list[SubtaskResult] = []
+            for prov, (prov_label, res) in results_map.items():
+                ans, atomic, subs = extract_answer(res)
+                parts.append(f"[{prov_label}]\n{ans}")
+                all_subtasks.extend(subs)
+
+            answer     = "\n\n---\n\n".join(parts)
+            was_atomic = len(all_subtasks) == 0
+            subtasks   = all_subtasks
+            prov_label = " + ".join(pl for _, (pl, _) in results_map.items())
+            duration_ms = int((time.time() - start) * 1000)
+            print(f"[ROMA] parallel done  providers={prov_label}  duration={duration_ms}ms")
 
         return AnalyzeResponse(
             answer=answer,
             was_atomic=was_atomic,
             subtasks=subtasks,
             duration_ms=duration_ms,
-            provider=provider_label,
+            provider=prov_label,
         )
 
     except Exception as e:

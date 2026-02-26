@@ -149,12 +149,18 @@ export async function GET(req: NextRequest) {
     const romaMode = req.nextUrl.searchParams.get('mode') ?? process.env.ROMA_MODE ?? 'smart'
     const aiRisk   = req.nextUrl.searchParams.get('aiRisk') === 'true'
 
-    // Split-provider: provider2 can come from ?provider2= query param or AI_PROVIDER2 env
+    // Split-provider: provider2 for ProbabilityModel stage (eliminates inter-stage pause)
     const p2raw    = req.nextUrl.searchParams.get('provider2') ?? process.env.AI_PROVIDER2
     const provider2: AIProvider | undefined =
       p2raw && (validProviders as readonly string[]).includes(p2raw) ? p2raw as AIProvider : undefined
 
-    const pipeline = await runAgentPipeline(markets, quote, orderbook, provider, romaMode, aiRisk, provider2)
+    // Multi-provider parallel: comma-separated ?providers=grok,huggingface for Sentiment ensemble
+    const providersRaw = req.nextUrl.searchParams.get('providers') ?? process.env.AI_PROVIDERS ?? ''
+    const providers: AIProvider[] | undefined = providersRaw
+      ? (providersRaw.split(',').filter(p => (validProviders as readonly string[]).includes(p)) as AIProvider[])
+      : undefined
+
+    const pipeline = await runAgentPipeline(markets, quote, orderbook, provider, romaMode, aiRisk, provider2, providers)
     return NextResponse.json(pipeline)
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 })

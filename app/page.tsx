@@ -21,11 +21,21 @@ export default function Home() {
   const [botActive, setBotActive]         = useState(false)
   const [showBotWarning, setShowBotWarning] = useState(false)
   const [aiRisk, setAiRisk]               = useState(false)
+  // Provider split config
+  type ProviderKey = 'grok' | 'anthropic' | 'openai' | 'huggingface' | 'openrouter'
+  const ALL_PROVIDERS: ProviderKey[] = ['grok', 'anthropic', 'openai', 'huggingface', 'openrouter']
+  const [sentProviders, setSentProviders] = useState<ProviderKey[]>(['grok'])  // Sentiment: multi-provider ensemble
+  const [probProvider2, setProbProvider2] = useState<ProviderKey | ''>('')     // Probability: split provider (empty = same as primary)
+
   // Sync from localStorage after hydration (client-only)
   useEffect(() => {
     if (localStorage.getItem('sentient-live-mode') === 'true') setLiveMode(true)
     const m = localStorage.getItem('sentient-roma-mode')
     if (m === 'blitz' || m === 'sharp' || m === 'keen' || m === 'smart') setRomaMode(m)
+    const sp = localStorage.getItem('sentient-sent-providers')
+    if (sp) { try { setSentProviders(JSON.parse(sp)) } catch { /* ignore */ } }
+    const pp = localStorage.getItem('sentient-prob-provider2')
+    if (pp) setProbProvider2(pp as ProviderKey | '')
   }, [])
 
   function handleModeChange(m: 'blitz' | 'sharp' | 'keen' | 'smart') {
@@ -33,7 +43,11 @@ export default function Home() {
     localStorage.setItem('sentient-roma-mode', m)
   }
 
-  const { pipeline, trades, isRunning, nextCycleIn, error, stats, runCycle } = usePipeline(liveMode, romaMode, botActive, aiRisk)
+  const { pipeline, trades, isRunning, nextCycleIn, error, stats, runCycle } = usePipeline(
+    liveMode, romaMode, botActive, aiRisk,
+    probProvider2 || undefined,
+    sentProviders.length > 1 ? sentProviders : undefined,
+  )
 
   // ── Trade alert pop-up ─────────────────────────────────────────────────────
   type TradeAlert = { action: string; side: 'yes' | 'no'; limitPrice: number; ticker: string; edge: number; pModel: number }
@@ -195,7 +209,7 @@ export default function Home() {
           <div className="card animate-fade-in" style={{ maxWidth: 420, width: '90%', padding: '28px 28px' }}>
             <div style={{ fontSize: 22, marginBottom: 10 }}>🤖</div>
             <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-primary)', marginBottom: 8 }}>
-              Start Trade Bot?
+              Start Trading Agent?
             </div>
             <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 20 }}>
               The bot will run a pipeline cycle every <strong>5 minutes</strong> and automatically place a <strong>$100 {liveMode ? 'live' : 'paper'} order</strong> when the agent approves a trade.
@@ -228,7 +242,7 @@ export default function Home() {
                   boxShadow: liveMode ? '0 2px 10px rgba(78,138,94,0.35)' : '0 2px 8px rgba(139,111,71,0.3)',
                 }}
               >
-                ▶ Start Bot
+                ▶ Start Agent
               </button>
             </div>
           </div>
@@ -465,14 +479,65 @@ export default function Home() {
             <PriceChart priceHistory={priceHistory} strikePrice={strikePrice} currentPrice={currentBTCPrice} />
             <AgentPipeline pipeline={pipeline} isRunning={isRunning} />
 
-            {/* Architecture note */}
+            {/* Provider config */}
             <div className="card" style={{ padding: '11px 15px', background: 'rgba(255,255,255,0.6)', backdropFilter: 'blur(8px)' }}>
-              <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--brown)', marginBottom: 5, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
-                ROMA DAG — Multi-Agent Pipeline
+              <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--blue)', marginBottom: 8, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+                Provider Split Config
               </div>
-              <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 9, color: 'var(--text-muted)', lineHeight: 1.9 }}>
-                MarketDiscovery → PriceFeed ──┬──▶ Sentiment → ProbabilityModel → RiskManager → Execution<br />
-                &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└──▶ Orderbook&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;↑ KXBTC15M · CF Benchmarks
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                {/* Sentiment: multi-provider ensemble */}
+                <div>
+                  <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 5, fontWeight: 600 }}>Sentiment (ensemble)</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                    {ALL_PROVIDERS.map(p => {
+                      const active = sentProviders.includes(p)
+                      return (
+                        <button key={p} onClick={() => {
+                          const next = active
+                            ? sentProviders.filter(x => x !== p).length > 0 ? sentProviders.filter(x => x !== p) : sentProviders
+                            : [...sentProviders, p]
+                          setSentProviders(next)
+                          localStorage.setItem('sentient-sent-providers', JSON.stringify(next))
+                        }} style={{
+                          padding: '2px 7px', borderRadius: 5, fontSize: 9, fontWeight: 700, cursor: 'pointer',
+                          border: active ? '1px solid var(--blue)' : '1px solid var(--border)',
+                          background: active ? 'rgba(74,127,165,0.12)' : 'transparent',
+                          color: active ? 'var(--blue)' : 'var(--text-muted)',
+                          transition: 'all 0.12s', textTransform: 'capitalize',
+                        }}>
+                          {p === 'huggingface' ? 'hf' : p}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+                {/* Probability: split provider */}
+                <div>
+                  <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 5, fontWeight: 600 }}>Probability (split)</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                    <button onClick={() => { setProbProvider2(''); localStorage.setItem('sentient-prob-provider2', '') }}
+                      style={{ padding: '2px 7px', borderRadius: 5, fontSize: 9, fontWeight: 700, cursor: 'pointer',
+                        border: !probProvider2 ? '1px solid var(--blue)' : '1px solid var(--border)',
+                        background: !probProvider2 ? 'rgba(74,127,165,0.12)' : 'transparent',
+                        color: !probProvider2 ? 'var(--blue)' : 'var(--text-muted)', transition: 'all 0.12s' }}>
+                      same
+                    </button>
+                    {ALL_PROVIDERS.map(p => (
+                      <button key={p} onClick={() => { setProbProvider2(p); localStorage.setItem('sentient-prob-provider2', p) }}
+                        style={{ padding: '2px 7px', borderRadius: 5, fontSize: 9, fontWeight: 700, cursor: 'pointer',
+                          border: probProvider2 === p ? '1px solid var(--amber)' : '1px solid var(--border)',
+                          background: probProvider2 === p ? 'rgba(212,135,44,0.12)' : 'transparent',
+                          color: probProvider2 === p ? 'var(--amber)' : 'var(--text-muted)', transition: 'all 0.12s',
+                          textTransform: 'capitalize' }}>
+                        {p === 'huggingface' ? 'hf' : p}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 9, color: 'var(--text-muted)', marginTop: 8, lineHeight: 1.9 }}>
+                Sent: {sentProviders.join('+')} ({sentProviders.length > 1 ? 'parallel ensemble' : 'single'}) · Prob: {probProvider2 || 'same provider'}
+                {(!probProvider2 && sentProviders.length === 1) ? ' · 4s pause' : ' · no pause'}
               </div>
             </div>
           </div>

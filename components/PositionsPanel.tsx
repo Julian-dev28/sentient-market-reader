@@ -92,13 +92,15 @@ export default function PositionsPanel({ liveMode }: { liveMode: boolean }) {
   // inOrders = capital committed to resting orders (calculate from orders we have)
   const availableCash  = balance ? balance.balance / 100 : null
   const positionsValue = balance ? balance.portfolio_value / 100 : null
+  // inOrders is informational only — Kalshi deducts order cost from balance immediately,
+  // so balance already excludes it. Adding it again would double-count.
   const inOrdersCents  = orders.reduce((sum, ord) => {
     const price = ord.side === 'yes' ? ord.yes_price : ord.no_price
     return sum + price * ord.remaining_count
   }, 0)
   const inOrders = inOrdersCents / 100
   const totalEquity = availableCash !== null && positionsValue !== null
-    ? availableCash + positionsValue + inOrders
+    ? availableCash + positionsValue
     : null
 
   return (
