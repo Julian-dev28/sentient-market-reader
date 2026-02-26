@@ -418,66 +418,6 @@ export default function Home() {
 
           {/* ─── CENTER ─── */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                5-min cycles · 3 signals per 15-min window · CF Benchmarks settlement
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                {/* AI Risk checkbox */}
-                <label style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontSize: 11, fontWeight: 700, color: aiRisk ? 'var(--brown)' : 'var(--text-muted)', userSelect: 'none' }}
-                  title="Use ROMA AI risk manager instead of deterministic Kelly + limits">
-                  <input
-                    type="checkbox"
-                    checked={aiRisk}
-                    onChange={e => setAiRisk(e.target.checked)}
-                    style={{ accentColor: 'var(--brown)', width: 13, height: 13, cursor: 'pointer' }}
-                  />
-                  AI Risk
-                </label>
-
-                {/* ROMA mode selector */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 3, background: 'var(--bg-secondary)', borderRadius: 8, padding: '3px 4px', border: '1px solid var(--border)' }}>
-                  {(['blitz', 'sharp', 'keen', 'smart'] as const).map(m => (
-                    <button key={m} onClick={() => handleModeChange(m)}
-                      title={m === 'blitz' ? 'grok-3-mini-fast — faster inference infra (~5–15s)' : m === 'sharp' ? 'grok-3-mini (~10–20s)' : m === 'keen' ? 'grok-3-fast (~20–40s)' : 'grok-3 (~40–70s)'}
-                      style={{
-                        padding: '3px 10px', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer',
-                        border: romaMode === m ? '1px solid var(--brown)' : '1px solid transparent',
-                        background: romaMode === m ? 'var(--brown)' : 'transparent',
-                        color: romaMode === m ? '#fff' : 'var(--text-muted)',
-                        transition: 'all 0.15s', textTransform: 'capitalize',
-                      }}>
-                      {m}
-                    </button>
-                  ))}
-                </div>
-                <button
-                  onClick={runCycle}
-                  disabled={isRunning}
-                  style={{
-                    padding: '7px 18px', borderRadius: 9,
-                    background: isRunning
-                      ? 'var(--cream-dark)'
-                      : 'linear-gradient(135deg, var(--green-dark) 0%, var(--green) 100%)',
-                    border: isRunning ? '1px solid var(--border)' : '1px solid var(--green-dark)',
-                    color: isRunning ? 'var(--text-muted)' : '#fff',
-                    cursor: isRunning ? 'not-allowed' : 'pointer',
-                    fontSize: 12, fontWeight: 700,
-                    display: 'flex', alignItems: 'center', gap: 6,
-                    boxShadow: isRunning ? 'none' : '0 2px 10px rgba(74,148,112,0.3)',
-                    transition: 'all 0.2s',
-                    letterSpacing: '0.02em',
-                  }}
-                >
-                  {isRunning
-                    ? <><span style={{ animation: 'spin-slow 1s linear infinite', display: 'inline-block' }}>◌</span> Running...</>
-                    : '▶ Run Cycle'}
-                </button>
-              </div>
-            </div>
-
-            <PriceChart priceHistory={priceHistory} strikePrice={strikePrice} currentPrice={currentBTCPrice} />
-            <AgentPipeline pipeline={pipeline} isRunning={isRunning} />
 
             {/* Provider config */}
             <div className="card" style={{ padding: '11px 15px', background: 'rgba(255,255,255,0.6)', backdropFilter: 'blur(8px)' }}>
@@ -540,6 +480,67 @@ export default function Home() {
                 {(!probProvider2 && sentProviders.length === 1) ? ' · 4s pause' : ' · no pause'}
               </div>
             </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                5-min cycles · 3 signals per 15-min window · CF Benchmarks settlement
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                {/* AI Risk checkbox */}
+                <label style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontSize: 11, fontWeight: 700, color: aiRisk ? 'var(--brown)' : 'var(--text-muted)', userSelect: 'none' }}
+                  title="Use ROMA AI risk manager instead of deterministic Kelly + limits">
+                  <input
+                    type="checkbox"
+                    checked={aiRisk}
+                    onChange={e => setAiRisk(e.target.checked)}
+                    style={{ accentColor: 'var(--brown)', width: 13, height: 13, cursor: 'pointer' }}
+                  />
+                  AI Risk
+                </label>
+
+                {/* ROMA mode selector */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 3, background: 'var(--bg-secondary)', borderRadius: 8, padding: '3px 4px', border: '1px solid var(--border)' }}>
+                  {(['blitz', 'sharp', 'keen', 'smart'] as const).map(m => (
+                    <button key={m} onClick={() => handleModeChange(m)}
+                      title={m === 'blitz' ? 'grok-3-mini-fast — faster inference infra (~5–15s)' : m === 'sharp' ? 'grok-3-mini (~10–20s)' : m === 'keen' ? 'grok-3-fast (~20–40s)' : 'grok-3 (~40–70s)'}
+                      style={{
+                        padding: '3px 10px', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                        border: romaMode === m ? '1px solid var(--brown)' : '1px solid transparent',
+                        background: romaMode === m ? 'var(--brown)' : 'transparent',
+                        color: romaMode === m ? '#fff' : 'var(--text-muted)',
+                        transition: 'all 0.15s', textTransform: 'capitalize',
+                      }}>
+                      {m}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  onClick={runCycle}
+                  disabled={isRunning}
+                  style={{
+                    padding: '7px 18px', borderRadius: 9,
+                    background: isRunning
+                      ? 'var(--cream-dark)'
+                      : 'linear-gradient(135deg, var(--green-dark) 0%, var(--green) 100%)',
+                    border: isRunning ? '1px solid var(--border)' : '1px solid var(--green-dark)',
+                    color: isRunning ? 'var(--text-muted)' : '#fff',
+                    cursor: isRunning ? 'not-allowed' : 'pointer',
+                    fontSize: 12, fontWeight: 700,
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    boxShadow: isRunning ? 'none' : '0 2px 10px rgba(74,148,112,0.3)',
+                    transition: 'all 0.2s',
+                    letterSpacing: '0.02em',
+                  }}
+                >
+                  {isRunning
+                    ? <><span style={{ animation: 'spin-slow 1s linear infinite', display: 'inline-block' }}>◌</span> Running...</>
+                    : '▶ Run Cycle'}
+                </button>
+              </div>
+            </div>
+
+            <PriceChart priceHistory={priceHistory} strikePrice={strikePrice} currentPrice={currentBTCPrice} />
+            <AgentPipeline pipeline={pipeline} isRunning={isRunning} />
           </div>
 
           {/* ─── RIGHT ─── */}

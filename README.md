@@ -1,12 +1,13 @@
 # Sentient Market Reader
 
-> **Live Kalshi prediction market algotrader powered by the Sentient ROMA multi-agent framework — swap between Grok, Claude, GPT-4o, or OpenRouter with a single env var.**
+> **Live Kalshi prediction market algotrader powered by the Sentient ROMA multi-agent framework — swap between Grok, Claude, GPT-4o, HuggingFace, or OpenRouter with a single env var. Multi-provider parallel ensemble and split-stage routing for maximum speed.**
 
 ![Next.js](https://img.shields.io/badge/Next.js_16-black?style=flat-square&logo=next.js)
 ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white)
 ![xAI Grok](https://img.shields.io/badge/xAI_Grok--3-000000?style=flat-square&logo=x&logoColor=white)
 ![Anthropic](https://img.shields.io/badge/Claude_Sonnet_4.6-D97706?style=flat-square&logo=anthropic&logoColor=white)
 ![OpenAI](https://img.shields.io/badge/GPT--4o-412991?style=flat-square&logo=openai&logoColor=white)
+![HuggingFace](https://img.shields.io/badge/HuggingFace-FFD21E?style=flat-square&logo=huggingface&logoColor=black)
 ![OpenRouter](https://img.shields.io/badge/OpenRouter-6366F1?style=flat-square)
 ![Kalshi](https://img.shields.io/badge/Kalshi_API-1a1a2e?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)
@@ -20,15 +21,15 @@ Sentient Market Reader connects to [Kalshi](https://kalshi.com)'s live KXBTC15M 
 Every 5 minutes the system runs a full 6-agent reasoning loop:
 
 1. **MarketDiscovery** — scans Kalshi for the active KXBTC15M window, extracts strike price and time to expiry
-2. **PriceFeed** — pulls live BTC/USD from CoinMarketCap, builds rolling price history
-3. **SentimentAgent** — ROMA solve via the roma-dspy Python service, directional sentiment analysis
-4. **ProbabilityModelAgent** — ROMA recursive solve: decomposes the trading question into parallel sub-analyses, executes them concurrently, aggregates a calibrated P(YES) estimate
-5. **RiskManager** — deterministic Kelly-based position sizing, daily loss cap, drawdown limits
+2. **PriceFeed** — pulls live BTC/USD from Coinbase (CoinGecko / Jupiter fallback), builds rolling price history
+3. **SentimentAgent** — ROMA solve via the roma-dspy Python service; supports multi-provider parallel ensemble
+4. **ProbabilityModelAgent** — ROMA recursive solve: decomposes the trading question into parallel sub-analyses, executes them concurrently, aggregates a calibrated P(YES) estimate; supports split-provider routing
+5. **RiskManager** — deterministic Kelly-based position sizing with optional ROMA AI risk assessment
 6. **Execution** — generates a BUY YES / BUY NO / PASS signal, optionally places a live Kalshi order
 
 Between pipeline cycles, bid/ask prices and BTC price refresh **every 2 seconds** via an independent polling hook so the dashboard always shows fresh market data.
 
-The entire LLM layer is **provider-agnostic** — one env var to switch between Grok, Claude, GPT-4o, or any OpenRouter model.
+The entire LLM layer is **provider-agnostic** — one env var to switch between Grok, Claude, GPT-4o, HuggingFace, or any OpenRouter model. The **Provider Split Config** panel lets you run different providers per pipeline stage for maximum throughput.
 
 ---
 
@@ -40,7 +41,7 @@ The entire LLM layer is **provider-agnostic** — one env var to switch between 
 ├───────────────────────────────────────────────────────────────────┤
 │                                                                   │
 │  ┌─────────────┐   ┌──────────────┐                              │
-│  │   Kalshi    │   │CoinMarketCap │   External data sources       │
+│  │   Kalshi    │   │   Coinbase   │   External data sources       │
 │  │  KXBTC15M   │   │   BTC/USD    │                              │
 │  └──────┬──────┘   └──────┬───────┘                              │
 │         └────────┬─────────┘                                     │
@@ -56,27 +57,30 @@ The entire LLM layer is **provider-agnostic** — one env var to switch between 
 │                  │                                                │
 │  ┌───────────────▼──────────────────────────────────────────┐    │
 │  │  Stage 3 · SentimentAgent         (ROMA — roma-dspy)     │    │
-│  │  Python service solve → score [-1,+1], label, signals    │    │
+│  │  Multi-provider ensemble: parallel solve across N models  │    │
+│  │  Answers merged and passed to Probability stage           │    │
 │  └───────────────┬──────────────────────────────────────────┘    │
 │                  │                                                │
 │  ┌───────────────▼──────────────────────────────────────────┐    │
 │  │  Stage 4 · ProbabilityModelAgent  (ROMA recursive solve) │    │
+│  │  Optional split provider (different from Sentiment)       │    │
 │  │                                                           │    │
 │  │   solve(goal, context, provider)                         │    │
-│  │     ├─ ◎ ATOMIZER  ── atomic or decompose?               │    │
-│  │     ├─ ◉ PLANNER   ── generate 3–5 subtasks              │    │
-│  │     ├─ ▶ EXECUTORS ── Promise.all(subtasks)              │    │
+│  │     ├─ ◎ ATOMIZER  ── atomic or decompose?  (fast LLM)  │    │
+│  │     ├─ ◉ PLANNER   ── generate 3–5 subtasks (fast LLM)  │    │
+│  │     ├─ ▶ EXECUTORS ── Promise.all(subtasks) (quality LLM)│   │
 │  │     │     ├─ "What does 1h momentum signal?"             │    │
 │  │     │     ├─ "What does the Kalshi orderbook reveal?"    │    │
 │  │     │     ├─ "P(BTC above strike) given time decay?"     │    │
 │  │     │     └─ "Is there edge vs market-implied prob?"     │    │
-│  │     └─ ⬟ AGGREGATOR ── unified market thesis             │    │
+│  │     └─ ⬟ AGGREGATOR ── unified market thesis (quality)   │    │
 │  │                                                           │    │
 │  └───────────────┬──────────────────────────────────────────┘    │
 │                  │                                                │
 │  ┌───────────────▼──────────────────────────────────────────┐    │
-│  │  Stage 5 · RiskManagerAgent       (deterministic)        │    │
-│  │  Kelly sizing · $150 daily cap · 15% drawdown limit      │    │
+│  │  Stage 5 · RiskManagerAgent                              │    │
+│  │  Deterministic Kelly sizing · optional ROMA AI risk      │    │
+│  │  $150 daily cap · 15% drawdown limit · 48 trades/day     │    │
 │  └───────────────┬──────────────────────────────────────────┘    │
 │  ┌───────────────▼──────────────────────────────────────────┐    │
 │  │  Stage 6 · ExecutionAgent         (deterministic)        │    │
@@ -87,46 +91,71 @@ The entire LLM layer is **provider-agnostic** — one env var to switch between 
 
 ---
 
-## ROMA Mode Selector
+## ROMA Mode & Speed
 
-Every pipeline cycle runs at the speed you choose. The mode selector sits next to the **Run Cycle** button and persists across sessions.
+Every pipeline cycle runs at the speed you choose. The mode selector sits in the center panel and persists across sessions.
 
 | Mode | Model (Grok default) | Pipeline speed |
 |---|---|---|
-| **sharp** | `grok-3-mini` | ~10–20s — fastest, lowest cost |
-| **keen** | `grok-3-fast` | ~20–40s — balanced (default) |
+| **blitz** | `grok-3-mini-fast` | ~5–15s — absolute fastest |
+| **sharp** | `grok-3-mini` | ~10–20s |
+| **keen** | `grok-3-fast` | ~20–40s |
 | **smart** | `grok-3` | ~40–70s — highest quality |
 
-Switch provider and all three tiers remap automatically:
+Default is **blitz**. Set `ROMA_MODE` in `.env.local` to change the server-side default.
 
-| Tier | Grok | Claude | GPT |
-|---|---|---|---|
-| sharp (fast) | `grok-3-mini` | `claude-haiku-4-5-20251001` | `gpt-4o-mini` |
-| keen (mid) | `grok-3-fast` | `claude-haiku-4-5-20251001` | `gpt-4o-mini` |
-| smart | `grok-3` | `claude-sonnet-4-6` | `gpt-4o` |
+### Tiered ROMA Agents
 
-Set `ROMA_MODE` in `.env.local` to change the server-side default. The UI mode selector overrides it per-cycle.
+Within each solve, orchestration tasks (Atomizer + Planner) use the model one tier below the selected mode — they're lightweight decomposition calls. Executor + Aggregator use the full selected model for quality reasoning. This cuts 30–50% off wall time vs using a single model tier for all agents.
 
 ---
 
-## Provider-Agnostic LLM Layer
+## Provider Split Config
 
-Every LLM call flows through `lib/llm-client.ts` and `python-service/main.py`. Switch the entire pipeline with one env var:
+The **Provider Split Config** card (center column, top) lets you route different pipeline stages to different LLM providers simultaneously — eliminating inter-stage rate-limit pauses and maximizing throughput.
 
-```env
-AI_PROVIDER=grok        # → Grok 3 family
-AI_PROVIDER=anthropic   # → Claude Sonnet / Haiku
-AI_PROVIDER=openai      # → GPT-4o / GPT-4o-mini
-AI_PROVIDER=openrouter  # → any model via OPENROUTER_MODEL
-```
+### Sentiment Ensemble
+Run multiple providers in parallel for the Sentiment stage. Each provider runs its full ROMA solve concurrently; answers are merged before passing to Probability. Default: **grok + huggingface**.
 
-All model IDs are overridable per tier:
+### Probability Split
+Run the Probability stage on a different provider than Sentiment. Since different providers have independent rate-limit buckets, the 4–8s inter-stage pause is eliminated. Default: **huggingface**.
 
-```env
-GROK_FAST_MODEL=grok-3-mini
-GROK_MID_MODEL=grok-3-fast
-GROK_SMART_MODEL=grok-3
-```
+**Configuration is persisted to localStorage and survives page reloads.**
+
+| Config | Behavior |
+|---|---|
+| Single provider, same for both | 4–8s pause between Sentiment → Probability |
+| Split provider (Probability ≠ Sentiment) | No pause — different rate-limit buckets |
+| Ensemble (multiple Sentiment providers) | Parallel solve, merged answer, richer context |
+| Blitz + grok ensemble + hf split | ~15–20s wall-clock target (default) |
+
+---
+
+## Provider Support
+
+Switch the entire pipeline with one env var. All tiers remap automatically:
+
+| Tier | Grok | Claude | GPT | HuggingFace |
+|---|---|---|---|---|
+| blitz | `grok-3-mini-fast` | `claude-haiku-4-5-20251001` | `gpt-4o-mini` | `Qwen2.5-1.5B` |
+| sharp | `grok-3-mini` | `claude-haiku-4-5-20251001` | `gpt-4o-mini` | `Llama-3.2-3B` |
+| keen | `grok-3-fast` | `claude-haiku-4-5-20251001` | `gpt-4o-mini` | `Llama-3.1-8B` |
+| smart | `grok-3` | `claude-sonnet-4-6` | `gpt-4o` | `Llama-3.3-70B` |
+
+All model IDs are overridable via env vars. HuggingFace uses the serverless Inference API router at `https://router.huggingface.co/v1` by default; set `HF_BASE_URL` to point at a dedicated Inference Endpoint.
+
+---
+
+## Trading Bot
+
+The **BotPanel** (right column) runs the pipeline autonomously every 5 minutes and places $100 paper or live orders when the execution agent approves a trade.
+
+- **Paper mode** (default) — simulates trades, tracks P&L, no real money
+- **Live mode** — places real Kalshi orders using your API key (requires Live Trading toggle in header)
+- **Start / Stop** — explicit confirmation required before the bot activates
+- **Safety gate** — manual "Run Cycle" clicks never place real orders, regardless of live mode; only the bot does
+
+Risk controls enforced on every bot trade: 3% minimum edge · $150 daily loss cap · 15% max drawdown · 48 trades/day max.
 
 ---
 
@@ -146,14 +175,7 @@ solve(goal, context):
     return aggregator.synthesize(results)
 ```
 
-**What each module does in the trading context:**
-
-- **Atomizer** — fast binary gate: is the trading question simple enough to answer directly, or does it need decomposition?
-- **Planner** — dynamically generates 3–5 independent analytical subtasks from the live market snapshot
-- **Executors** — each subtask runs in parallel. Every executor answers one focused question using the full market context
-- **Aggregator** — synthesizes all executor answers into a unified market thesis with a directional view and calibrated confidence
-
-Risk Manager and Execution Agent are intentionally **not LLM-powered** — safety-critical rules should be deterministic and auditable.
+Risk Manager and Execution Agent are intentionally **deterministic** — safety-critical rules should be auditable. An optional **AI Risk** checkbox routes the risk stage through ROMA for qualitative assessment layered on top of the hard circuit breakers.
 
 ---
 
@@ -166,10 +188,11 @@ Risk Manager and Execution Agent are intentionally **not LLM-powered** — safet
 | **AI — Grok** | xAI Grok-3 family via `openai` SDK (custom baseURL) |
 | **AI — Claude** | Anthropic claude-sonnet-4-6 / claude-haiku-4-5 via `@anthropic-ai/sdk` |
 | **AI — GPT** | OpenAI gpt-4o / gpt-4o-mini via `openai` SDK |
+| **AI — HuggingFace** | Llama / Qwen via HF serverless Inference API (OpenAI-compatible) |
 | **AI — OpenRouter** | Any model via OpenRouter API |
 | **Multi-Agent** | Official Sentient `roma-dspy` Python SDK via FastAPI microservice |
 | **Prediction Markets** | Kalshi Trade API v2 (KXBTC15M series) |
-| **Price Data** | CoinMarketCap Pro API |
+| **Price Data** | Coinbase spot API (CoinGecko / Jupiter DEX fallback) |
 | **Auth** | RSA-PSS request signing (`crypto.createSign`) for Kalshi |
 | **Charts** | Recharts |
 | **Styling** | CSS design tokens (Sentient Foundation palette) |
@@ -179,19 +202,20 @@ Risk Manager and Execution Agent are intentionally **not LLM-powered** — safet
 ## Features
 
 - **Full ROMA pipeline via roma-dspy** — genuine multi-agent AI reasoning on every cycle via the official Python SDK
-- **3-mode speed selector** — sharp / keen / smart buttons in the UI; each maps to a different model tier across all providers
-- **Provider-agnostic** — one env var to switch the entire pipeline between Grok, Claude, GPT-4o, or OpenRouter
-- **2-second live refresh** — `useMarketTick` hook polls bid/ask, BTC price, and portfolio every 2 seconds
-- **Kalshi-style unified trade box** — single YES/NO card with live ask prices in the pill tabs, typeable quantity input, inline cost display
-- **500-contract paper trades** — risk manager sizes paper positions at 500 contracts (Kelly floor)
-- **Auto-run on load** — pipeline fires immediately on page load so signals appear without a manual trigger
+- **4-mode speed selector** — blitz / sharp / keen / smart buttons; each maps to a different model tier across all providers
+- **Provider Split Config** — route Sentiment and Probability stages to different providers; ensemble multiple providers in parallel for Sentiment
+- **Tiered ROMA agents** — Atomizer + Planner use fast model; Executor + Aggregator use quality model; cuts 30–50% overhead
+- **HuggingFace provider** — Llama and Qwen models via the serverless Inference API router
+- **Trading bot** — autonomous $100/trade agent, 5-min cycle, paper or live, explicit start/stop with confirmation
+- **AI Risk Manager** — optional ROMA-powered risk assessment in addition to deterministic Kelly limits
+- **2-second live refresh** — `useMarketTick` hook polls bid/ask, BTC price, and orderbook every 2 seconds
+- **Live orderbook depth** — visualized bid/ask ladder with toggle
 - **Live + Paper mode** — toggle between real Kalshi order placement and simulated paper trading
-- **Real-time 3-column dashboard** — market card + signal panel | BTC chart + ROMA pipeline visualizer | paper trade performance + trade log
-- **Animated UI** — number count-up animations, shimmer bars, SVG countdown rings for expiry and cycle timer
-- **RSA-PSS authentication** — proper Kalshi API signing with millisecond timestamps, correct padding and salt length
+- **Real-time 3-column dashboard** — market card + signal panel | provider config + BTC chart + ROMA pipeline | bot + positions + performance
+- **Kalshi live account panel** — balance, open positions, resting orders, cancel buttons (15s refresh)
+- **RSA-PSS authentication** — proper Kalshi API signing with millisecond timestamps
 - **Kelly position sizing** — half-Kelly contract sizing derived from model edge and contract odds
 - **Risk controls** — $150 daily loss limit · 15% max drawdown · 48 trades/day cap · 3% minimum edge threshold
-- **Live Kalshi account panel** — balance, open positions, resting orders, recent fills, cancel buttons
 
 ---
 
@@ -202,8 +226,7 @@ Risk Manager and Execution Agent are intentionally **not LLM-powered** — safet
 - Node.js 18+
 - Python 3.10+ (for the roma-dspy microservice)
 - A [Kalshi](https://kalshi.com) account with API access and RSA key pair from account settings
-- API key for at least one LLM provider: [xAI](https://console.x.ai) · [Anthropic](https://console.anthropic.com) · [OpenAI](https://platform.openai.com) · [OpenRouter](https://openrouter.ai)
-- A [CoinMarketCap Pro API key](https://pro.coinmarketcap.com)
+- API key for at least one LLM provider: [xAI](https://console.x.ai) · [Anthropic](https://console.anthropic.com) · [OpenAI](https://platform.openai.com) · [HuggingFace](https://huggingface.co/settings/tokens) · [OpenRouter](https://openrouter.ai)
 
 ### Install
 
@@ -225,22 +248,27 @@ pip install -r requirements.txt
 # .env.local
 
 # ── LLM Provider ────────────────────────────────────────────────────
-AI_PROVIDER=grok          # anthropic | grok | openai | openrouter
-ROMA_MODE=keen            # sharp | keen | smart  (default: keen)
+AI_PROVIDER=grok          # anthropic | grok | openai | huggingface | openrouter
+ROMA_MODE=blitz           # blitz | sharp | keen | smart  (default: blitz)
 
-XAI_API_KEY=xai-...       # required if AI_PROVIDER=grok
-# ANTHROPIC_API_KEY=sk-ant-...      # required if AI_PROVIDER=anthropic
-# OPENAI_API_KEY=sk-...             # required if AI_PROVIDER=openai
-# OPENROUTER_API_KEY=sk-or-...      # required if AI_PROVIDER=openrouter
-# OPENROUTER_MODEL=anthropic/claude-sonnet-4-6
+XAI_API_KEY=xai-...
+# ANTHROPIC_API_KEY=sk-ant-...
+# OPENAI_API_KEY=sk-...
+# HUGGINGFACE_API_KEY=hf_...
+# OPENROUTER_API_KEY=sk-or-...
+# OPENROUTER_MODEL=x-ai/grok-3
 
 # ── Model overrides (optional) ──────────────────────────────────────
+GROK_BLITZ_MODEL=grok-3-mini-fast
 GROK_FAST_MODEL=grok-3-mini
 GROK_MID_MODEL=grok-3-fast
 GROK_SMART_MODEL=grok-3
 
-# ── Market Data ─────────────────────────────────────────────────────
-CMC_API_KEY=your-coinmarketcap-key
+HF_BLITZ_MODEL=Qwen/Qwen2.5-1.5B-Instruct
+HF_FAST_MODEL=meta-llama/Llama-3.2-3B-Instruct
+HF_MID_MODEL=meta-llama/Llama-3.1-8B-Instruct
+HF_SMART_MODEL=meta-llama/Llama-3.3-70B-Instruct
+# HF_BASE_URL=https://router.huggingface.co/v1  # default
 
 # ── Kalshi ──────────────────────────────────────────────────────────
 KALSHI_API_KEY=your-kalshi-api-key-id
@@ -255,10 +283,6 @@ Place your Kalshi RSA private key at `./kalshi_private_key.pem` (already `.gitig
 ### Run
 
 ```bash
-# Start both servers at once
-./restart.sh
-
-# Or manually:
 # Terminal 1 — Python roma-dspy service
 cd python-service && source .venv/bin/activate
 python3 -m uvicorn main:app --port 8001 --host 0.0.0.0
@@ -268,7 +292,7 @@ npm run dev
 # → http://localhost:3000
 ```
 
-The pipeline fires automatically on page load. Hit **Run Cycle** to trigger a manual analysis. Use the **sharp / keen / smart** buttons to control model speed. Bid/ask and BTC price refresh every 2 seconds. Paper mode is the default — no real orders are placed unless you toggle Live Trading and confirm.
+The pipeline fires automatically on page load. Hit **Run Cycle** to trigger a manual analysis. Use the mode buttons to control speed. Configure provider routing in the **Provider Split Config** card. Bid/ask and BTC price refresh every 2 seconds. Paper mode is the default — no real orders are placed unless you toggle Live Trading and confirm.
 
 ---
 
@@ -278,7 +302,7 @@ The pipeline fires automatically on page load. Hit **Run Cycle** to trigger a ma
 ├── app/
 │   ├── api/
 │   │   ├── pipeline/route.ts       # ROMA pipeline endpoint (maxDuration: 180s)
-│   │   ├── btc-price/              # CoinMarketCap BTC price proxy
+│   │   ├── btc-price/              # BTC price proxy (Coinbase → CoinGecko → Jupiter)
 │   │   ├── markets/                # Kalshi market list proxy
 │   │   ├── orderbook/[ticker]/     # Kalshi orderbook depth proxy
 │   │   ├── place-order/            # Kalshi order placement
@@ -286,18 +310,18 @@ The pipeline fires automatically on page load. Hit **Run Cycle** to trigger a ma
 │   │   ├── positions/              # Open positions + fills
 │   │   └── cancel-order/[id]/      # Order cancellation
 │   ├── globals.css                 # Design tokens + keyframe animations
-│   └── page.tsx                    # 3-column dashboard + mode selector
+│   └── page.tsx                    # 3-column dashboard + provider split config
 │
 ├── lib/
-│   ├── llm-client.ts               # Unified LLM interface — sharp/keen/smart tiers
+│   ├── llm-client.ts               # Unified LLM interface — blitz/sharp/keen/smart tiers
 │   ├── roma/
 │   │   └── python-client.ts        # roma-dspy service client (callPythonRoma)
 │   ├── agents/
 │   │   ├── market-discovery.ts     # Kalshi KXBTC15M market scanner
-│   │   ├── price-feed.ts           # CoinMarketCap BTC price + history
-│   │   ├── sentiment.ts            # ROMA sentiment agent
-│   │   ├── probability-model.ts    # ROMA probability agent
-│   │   ├── risk-manager.ts         # Kelly sizing + deterministic risk rules
+│   │   ├── price-feed.ts           # BTC price + history
+│   │   ├── sentiment.ts            # ROMA sentiment agent (multi-provider ensemble)
+│   │   ├── probability-model.ts    # ROMA probability agent (split-provider support)
+│   │   ├── risk-manager.ts         # Kelly sizing + deterministic rules + ROMA AI risk
 │   │   ├── execution.ts            # Order generation
 │   │   └── index.ts                # 6-stage pipeline orchestrator
 │   ├── kalshi-auth.ts              # RSA-PSS request signing
@@ -306,22 +330,24 @@ The pipeline fires automatically on page load. Hit **Run Cycle** to trigger a ma
 │
 ├── components/
 │   ├── AgentPipeline.tsx           # ROMA pipeline grid + loading animation
-│   ├── MarketCard.tsx              # Live market data + unified TradeBox
+│   ├── BotPanel.tsx                # Autonomous trading bot — start/stop, status, stats
+│   ├── MarketCard.tsx              # Live market data + orderbook depth
 │   ├── PriceChart.tsx              # BTC/USD area chart with strike price line
 │   ├── SignalPanel.tsx             # Edge %, probability bars, sentiment meter
-│   ├── PositionsPanel.tsx          # Live Kalshi account (live mode, 2s refresh)
-│   ├── TradeLog.tsx                # Trade history with animated P&L rows
-│   ├── PerformancePanel.tsx        # Paper trade performance — win rate, equity curve
-│   ├── Header.tsx                  # Live/Paper toggle, SVG cycle ring, UTC clock
+│   ├── PositionsPanel.tsx          # Live Kalshi account (live mode, 15s refresh)
+│   ├── TradeLog.tsx                # Trade history with P&L rows
+│   ├── PerformancePanel.tsx        # Paper trade stats — win rate, equity curve
+│   ├── Header.tsx                  # Live/Paper toggle, cycle ring, UTC clock
 │   └── FloatingBackground.tsx      # CSS blobs + dot grid
 │
 ├── hooks/
-│   ├── usePipeline.ts              # 5-min polling, trade recording, settlement sim
+│   ├── usePipeline.ts              # 5-min polling, bot auto-cycle, trade recording
 │   ├── useMarketTick.ts            # 2-second bid/ask + BTC price + orderbook refresh
 │   └── useCountUp.ts               # RAF ease-out number animation
 │
 └── python-service/
     ├── main.py                     # FastAPI wrapper for roma-dspy solve()
+    │                               # Tiered agents, multi-provider parallel solve
     ├── requirements.txt
     └── .env                        # Mirrors root .env.local (model vars)
 ```
@@ -336,6 +362,7 @@ The pipeline fires automatically on page load. Hit **Run Cycle** to trigger a ma
 - **RSA padding:** `RSA_PKCS1_PSS_PADDING` with `RSA_PSS_SALTLEN_DIGEST`
 - **Market discovery:** `?event_ticker=KXBTC15M-{YY}{MON}{DD}{HHMM}` in US Eastern Time
 - **Active markets:** `yes_ask > 0`; `floor_strike` = BTC price to beat; use `close_time` for countdown (not `expiration_time`)
+- **Trading hours:** ~11:30 AM – midnight ET weekdays
 
 ---
 
@@ -343,17 +370,23 @@ The pipeline fires automatically on page load. Hit **Run Cycle** to trigger a ma
 
 | Variable | Required | Description |
 |---|---|---|
-| `AI_PROVIDER` | Yes | `grok` \| `anthropic` \| `openai` \| `openrouter` |
-| `ROMA_MODE` | No | `sharp` \| `keen` \| `smart` — default `keen` |
+| `AI_PROVIDER` | Yes | `grok` \| `anthropic` \| `openai` \| `huggingface` \| `openrouter` |
+| `ROMA_MODE` | No | `blitz` \| `sharp` \| `keen` \| `smart` — default `blitz` |
 | `XAI_API_KEY` | If Grok | xAI API key |
 | `ANTHROPIC_API_KEY` | If Claude | Anthropic API key |
 | `OPENAI_API_KEY` | If OpenAI | OpenAI API key |
+| `HUGGINGFACE_API_KEY` | If HuggingFace | HuggingFace access token |
+| `HF_BASE_URL` | No | HF Inference API base URL (default: serverless router) |
 | `OPENROUTER_API_KEY` | If OpenRouter | OpenRouter API key |
 | `OPENROUTER_MODEL` | If OpenRouter | Smart-tier model slug |
+| `GROK_BLITZ_MODEL` | No | Override blitz-tier Grok model |
 | `GROK_FAST_MODEL` | No | Override sharp-tier Grok model |
 | `GROK_MID_MODEL` | No | Override keen-tier Grok model |
 | `GROK_SMART_MODEL` | No | Override smart-tier Grok model |
-| `CMC_API_KEY` | Yes | CoinMarketCap Pro API key |
+| `HF_BLITZ_MODEL` | No | Override blitz-tier HF model |
+| `HF_FAST_MODEL` | No | Override sharp-tier HF model |
+| `HF_MID_MODEL` | No | Override keen-tier HF model |
+| `HF_SMART_MODEL` | No | Override smart-tier HF model |
 | `KALSHI_API_KEY` | Yes | Kalshi API key ID (UUID) |
 | `KALSHI_PRIVATE_KEY_PATH` | Yes | Path to RSA private key PEM |
 | `PYTHON_ROMA_URL` | No | roma-dspy service URL (default `http://localhost:8001`) |

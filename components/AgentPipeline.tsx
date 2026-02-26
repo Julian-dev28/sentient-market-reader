@@ -188,6 +188,23 @@ const AGENTS = [
   { key: 'execution'       as const, label: 'Execution',        short: 'EXEC',     icon: '▶', desc: 'Paper order',       color: 'var(--green)',  rgb: '74,148,112',  bg: 'var(--green-pale)', border: '#9ecfb8' },
 ]
 
+/** Abbreviate provider/model strings for compact display */
+function shortenProvider(raw: string): string {
+  const cleaned = raw.replace(/^roma-dspy\s*[·•]\s*/i, '')
+  return cleaned.split('+').map(p => {
+    p = p.trim()
+    if (p.startsWith('huggingface/')) {
+      const model = p.replace('huggingface/', '').split('/').pop() ?? p
+      return 'hf/' + model.replace(/-Instruct$/i, '').replace(/-\d{8,}$/, '')
+    }
+    if (p.startsWith('grok/'))       return p.replace('grok/', '')
+    if (p.startsWith('anthropic/'))  return p.replace('anthropic/', 'claude-').replace('claude-claude-', 'claude-').replace(/-\d{8,}$/, '')
+    if (p.startsWith('openai/'))     return p.replace('openai/', '')
+    if (p.startsWith('openrouter/')) return p.replace('openrouter/', '').split('/').pop() ?? p
+    return p
+  }).join(' + ')
+}
+
 function Bullet({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
     <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 4 }}>
@@ -225,7 +242,7 @@ function AgentBullets({ agentKey, output, color }: { agentKey: string; output: a
     <>
       <Bullet label="Score"   value={output.score != null ? output.score.toFixed(3) : '—'} color={color} />
       <Bullet label="Label"   value={output.label?.replace(/_/g, ' ') ?? '—'} />
-      <Bullet label="Model"   value={output.provider ?? '—'} />
+      <Bullet label="Model"   value={output.provider ? shortenProvider(output.provider) : '—'} />
       {(output.signals ?? []).slice(0, 3).map((s: string, i: number) => (
         <div key={i} style={{ fontSize: 10, color: 'var(--text-secondary)', lineHeight: 1.5, paddingLeft: 10, marginBottom: 2 }}>
           · {s.length > 55 ? s.slice(0, 55) + '…' : s}
@@ -241,6 +258,7 @@ function AgentBullets({ agentKey, output, color }: { agentKey: string; output: a
       <Bullet label="Edge"      value={output.edgePct != null ? `${output.edgePct >= 0 ? '+' : ''}${output.edgePct.toFixed(1)}%` : '—'} color={output.edgePct >= 0 ? 'var(--green)' : 'var(--pink)'} />
       <Bullet label="Rec"       value={output.recommendation ?? '—'} color={output.recommendation === 'YES' ? 'var(--green)' : output.recommendation === 'NO' ? 'var(--pink)' : 'var(--text-muted)'} />
       <Bullet label="Conf"      value={output.confidence ?? '—'} />
+      {output.provider && <Bullet label="Model" value={shortenProvider(output.provider)} />}
     </>
   )
 
@@ -329,10 +347,9 @@ function AgentCard({
             color: active ? 'var(--text-muted)' : 'var(--text-primary)',
             lineHeight: 1.2, marginBottom: 3,
           }}>{agent.label}</div>
-          <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-muted)' }}>
-            {/* For roma-dspy agents, show the actual provider from agentName (e.g. "roma-dspy · grok") */}
+          <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-muted)', wordBreak: 'break-word' }}>
             {result?.agentName?.includes('roma-dspy')
-              ? result.agentName.replace(/^.*?\(/, '').replace(/\)$/, '')
+              ? shortenProvider(result.agentName.replace(/^.*?\(/, '').replace(/\)$/, ''))
               : agent.desc}
           </div>
         </div>
