@@ -6,7 +6,7 @@ import type { AIProvider } from '@/lib/llm-client'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
-export const maxDuration = 300  // allow up to 5 min for ROMA multi-agent loop
+export const maxDuration = 300  // allow up to 5 min for full pipeline + roma-dspy service calls
 
 /** Compute the current active KXBTC15M event_ticker using ET timezone
  *  Format: KXBTC15M-{YY}{MON}{DD}{HHMM} — date/time in US Eastern Time
