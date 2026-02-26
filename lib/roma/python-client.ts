@@ -39,7 +39,7 @@ export async function callPythonRoma(
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ goal, context, max_depth: maxDepth }),
-        signal: AbortSignal.timeout(180_000),  // 180s — depth=2 parallel subtasks on Grok take ~120s+
+        signal: AbortSignal.timeout(220_000),  // 220s — depth=2 on Grok: sentiment ~120s, probability ~190s
       })
       if (!res.ok) {
         const text = await res.text().catch(() => '')
