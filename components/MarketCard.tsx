@@ -64,35 +64,38 @@ function AnimatedBar({ value, color }: { value: number; color: string }) {
 
 type OrderState = { status: 'idle' } | { status: 'placing' } | { status: 'ok'; orderId: string; fillCount: number } | { status: 'err'; message: string }
 
-/** Unified YES / NO trade box — Kalshi-style single card */
+const QUICK_AMTS = [10, 20, 50]
+
+/** Unified YES / NO trade box — dollar-amount based */
 function TradeBox({ yesBid, yesAsk, noBid, noAsk, ticker, liveMode }: {
   yesBid: number; yesAsk: number
   noBid: number;  noAsk: number
   ticker: string
   liveMode: boolean
 }) {
-  const [side, setSide]       = useState<'yes' | 'no'>('yes')
-  const [countStr, setCountStr] = useState('1')   // raw input string so user can clear and retype
-  const [order, setOrder]     = useState<OrderState>({ status: 'idle' })
-
-  const count = Math.max(1, Math.min(500, parseInt(countStr, 10) || 1))
+  const [side, setSide]     = useState<'yes' | 'no'>('yes')
+  const [amtStr, setAmtStr] = useState('10')   // dollar amount as string
+  const [order, setOrder]   = useState<OrderState>({ status: 'idle' })
 
   const isYes  = side === 'yes'
   const bid    = isYes ? yesBid  : noBid
   const ask    = isYes ? yesAsk  : noAsk
-  const cost   = ((ask / 100) * count).toFixed(2)
-  const profit = (count * (1 - ask / 100)).toFixed(2)
   const col    = isYes ? 'var(--green)' : 'var(--pink)'
   const colBdr = isYes ? '#9ecfb8'      : '#e0b0bf'
   const colBg  = isYes ? 'var(--green-pale)' : 'var(--pink-pale)'
 
-  function handleCount(raw: string) {
-    // Allow empty string while typing; clamp happens on blur and when count is used
-    if (raw === '' || /^\d+$/.test(raw)) setCountStr(raw)
-  }
+  // Derive contracts from dollar amount: floor($ / price_per_contract)
+  const amt       = Math.max(0.01, parseFloat(amtStr) || 0.01)
+  const contracts = Math.max(1, Math.floor(amt / (ask / 100)))
+  const actualCost = (contracts * ask / 100).toFixed(2)
+  const profit     = (contracts * (1 - ask / 100)).toFixed(2)
 
-  function handleCountBlur() {
-    setCountStr(String(count))  // snap to clamped value on blur
+  function handleAmt(raw: string) {
+    if (raw === '' || /^\d*\.?\d*$/.test(raw)) setAmtStr(raw)
+  }
+  function handleAmtBlur() {
+    const v = parseFloat(amtStr)
+    setAmtStr(isNaN(v) || v <= 0 ? '1' : String(v))
   }
 
   async function placeIt() {
@@ -100,7 +103,7 @@ function TradeBox({ yesBid, yesAsk, noBid, noAsk, ticker, liveMode }: {
     setOrder({ status: 'placing' })
     try {
       const body = {
-        ticker, side, count,
+        ticker, side, count: contracts,
         ...(side === 'yes' ? { yesPrice: ask } : { noPrice: ask }),
         clientOrderId: `manual-${side}-${Date.now()}`,
       }
@@ -164,22 +167,45 @@ function TradeBox({ yesBid, yesAsk, noBid, noAsk, ticker, liveMode }: {
         </div>
         <AnimatedBar value={ask / 2} color={col} />
 
-        {/* Qty input */}
-        <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'nowrap' }}>
-          <span style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', flexShrink: 0 }}>Qty</span>
+        {/* Quick-buy buttons */}
+        <div style={{ marginTop: 10, display: 'flex', gap: 5 }}>
+          {QUICK_AMTS.map(q => (
+            <button key={q} onClick={() => { setAmtStr(String(q)); setOrder({ status: 'idle' }) }}
+              style={{
+                flex: 1, padding: '5px 0', borderRadius: 7,
+                border: amtStr === String(q) ? `1.5px solid ${col}` : '1px solid var(--border)',
+                background: amtStr === String(q) ? colBg : 'var(--bg-secondary)',
+                fontSize: 11, fontWeight: 700,
+                color: amtStr === String(q) ? col : 'var(--text-muted)',
+                cursor: 'pointer', transition: 'all 0.15s',
+                fontFamily: 'var(--font-geist-mono)',
+              }}>
+              ${q}
+            </button>
+          ))}
+        </div>
+
+        {/* Dollar amount input */}
+        <div style={{ marginTop: 7, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'nowrap' }}>
+          <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-secondary)', flexShrink: 0 }}>$</span>
           <input
-            type="text" inputMode="numeric" value={countStr}
-            onChange={e => handleCount(e.target.value)}
-            onBlur={handleCountBlur}
+            type="text" inputMode="decimal" value={amtStr}
+            onChange={e => handleAmt(e.target.value)}
+            onBlur={handleAmtBlur}
             onFocus={e => e.target.select()}
             style={{
               flex: 1, minWidth: 0, textAlign: 'center', fontFamily: 'var(--font-geist-mono)',
-              fontSize: 13, fontWeight: 800, color: 'var(--text-primary)',
-              border: '1px solid var(--border)', borderRadius: 6, padding: '3px 6px',
+              fontSize: 15, fontWeight: 800, color: 'var(--text-primary)',
+              border: '1px solid var(--border)', borderRadius: 6, padding: '5px 8px',
               background: 'white', outline: 'none',
             }}
           />
-          <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', fontFamily: 'var(--font-geist-mono)', flexShrink: 0, whiteSpace: 'nowrap' }}>${cost}</span>
+        </div>
+
+        {/* Contracts + payout breakdown */}
+        <div style={{ marginTop: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{contracts} contract{contracts !== 1 ? 's' : ''} · cost ${actualCost}</span>
+          <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--green-dark)', fontFamily: 'var(--font-geist-mono)' }}>+${profit} if wins</span>
         </div>
 
         {/* Action states */}
@@ -197,7 +223,7 @@ function TradeBox({ yesBid, yesAsk, noBid, noAsk, ticker, liveMode }: {
             onMouseEnter={e => { if (liveMode) { e.currentTarget.style.background = col; e.currentTarget.style.color = '#fff' } }}
             onMouseLeave={e => { if (liveMode) { e.currentTarget.style.background = colBg; e.currentTarget.style.color = col } }}
           >
-            {liveMode ? `BUY ${isYes ? 'YES' : 'NO'} @ ${ask}¢` : `Paper only · ${isYes ? 'YES' : 'NO'} @ ${ask}¢`}
+            {liveMode ? `BUY ${isYes ? 'YES' : 'NO'} · $${actualCost}` : `Paper only · ${isYes ? 'YES' : 'NO'} @ ${ask}¢`}
           </button>
         )}
 
