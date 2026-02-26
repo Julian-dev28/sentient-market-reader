@@ -73,7 +73,6 @@ export interface PriceFeedOutput {
   aboveStrike: boolean
   distanceFromStrike: number
   distanceFromStrikePct: number
-  priceHistory: PricePoint[]
 }
 
 export interface PricePoint {

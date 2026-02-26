@@ -182,8 +182,8 @@ function RomaLoader({ elapsed }: { elapsed: number }) {
 const AGENTS = [
   { key: 'marketDiscovery' as const, label: 'Market Discovery', short: 'MARKET',   icon: '◎', desc: 'KXBTC15M scan',     color: 'var(--brown)',  rgb: '125,112,96',  bg: 'var(--brown-pale)', border: '#cbc6be' },
   { key: 'priceFeed'       as const, label: 'Price Feed',       short: 'PRICE',    icon: '◈', desc: 'CMC BTC feed',      color: 'var(--green)',  rgb: '74,148,112',  bg: 'var(--green-pale)', border: '#9ecfb8' },
-  { key: 'sentiment'       as const, label: 'Sentiment',        short: 'SENTIMENT',icon: '◉', desc: 'ROMA sentiment',    color: 'var(--blue)',   rgb: '74,127,165',  bg: 'var(--blue-pale)',  border: '#a8cce0' },
-  { key: 'probability'     as const, label: 'Probability',      short: 'PROB',     icon: '⬟', desc: 'ROMA probability',  color: 'var(--amber)',  rgb: '160,120,64',  bg: 'var(--amber-pale)', border: '#d0b888' },
+  { key: 'sentiment'       as const, label: 'Sentiment',        short: 'SENTIMENT',icon: '◉', desc: 'roma-dspy',         color: 'var(--blue)',   rgb: '74,127,165',  bg: 'var(--blue-pale)',  border: '#a8cce0' },
+  { key: 'probability'     as const, label: 'Probability',      short: 'PROB',     icon: '⬟', desc: 'roma-dspy',         color: 'var(--amber)',  rgb: '160,120,64',  bg: 'var(--amber-pale)', border: '#d0b888' },
   { key: 'risk'            as const, label: 'Risk Manager',     short: 'RISK',     icon: '⬡', desc: 'Kelly + limits',    color: 'var(--brown)',  rgb: '125,112,96',  bg: 'var(--brown-pale)', border: '#cbc6be' },
   { key: 'execution'       as const, label: 'Execution',        short: 'EXEC',     icon: '▶', desc: 'Paper order',       color: 'var(--green)',  rgb: '74,148,112',  bg: 'var(--green-pale)', border: '#9ecfb8' },
 ]
@@ -251,7 +251,12 @@ function AgentCard({
             color: active ? 'var(--text-muted)' : 'var(--text-primary)',
             lineHeight: 1.2, marginBottom: 3,
           }}>{agent.label}</div>
-          <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-muted)' }}>{agent.desc}</div>
+          <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-muted)' }}>
+            {/* For roma-dspy agents, show the actual provider from agentName (e.g. "roma-dspy · grok") */}
+            {result?.agentName?.includes('roma-dspy')
+              ? result.agentName.replace(/^.*?\(/, '').replace(/\)$/, '')
+              : agent.desc}
+          </div>
         </div>
         {done    && <span style={{ fontSize: 14, color: agent.color, flexShrink: 0, marginRight: 20, animation: 'tickPop 0.3s cubic-bezier(0.34,1.56,0.64,1) forwards' }}>✓</span>}
         {skipped && <span style={{ fontSize: 12, color: 'var(--amber)', flexShrink: 0, marginRight: 20 }}>—</span>}
