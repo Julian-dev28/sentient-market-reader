@@ -9,7 +9,7 @@ interface SignalPanelProps {
 }
 
 /** Bar that animates from 0 → target on mount / value change */
-function AnimatedBar({ label, value, color, bg }: { label: string; value: number; color: string; bg: string }) {
+function AnimatedBar({ label, sublabel, value, color, bg }: { label: string; sublabel: string; value: number; color: string; bg: string }) {
   const pct = Math.round(value * 100)
   const [width, setWidth] = useState(0)
 
@@ -20,8 +20,11 @@ function AnimatedBar({ label, value, color, bg }: { label: string; value: number
 
   return (
     <div style={{ marginBottom: 12 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5, alignItems: 'center' }}>
-        <span style={{ fontSize: 11, color: 'var(--text-secondary)', fontWeight: 500 }}>{label}</span>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, alignItems: 'baseline' }}>
+        <div>
+          <span style={{ fontSize: 11, color: 'var(--text-secondary)', fontWeight: 600 }}>{label}</span>
+          <span style={{ fontSize: 9, color: 'var(--text-light)', marginLeft: 5 }}>{sublabel}</span>
+        </div>
         <span style={{
           fontFamily: 'var(--font-geist-mono)', fontSize: 12, fontWeight: 800, color,
           animation: width > 0 ? 'numberPop 0.4s cubic-bezier(0.34,1.56,0.64,1)' : 'none',
@@ -36,7 +39,6 @@ function AnimatedBar({ label, value, color, bg }: { label: string; value: number
           transition: 'width 0.8s cubic-bezier(0.34,1.56,0.64,1)',
           position: 'relative',
         }}>
-          {/* Shimmer sweep */}
           <div style={{
             position: 'absolute', inset: 0,
             background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.4) 50%, transparent 100%)',
@@ -140,8 +142,37 @@ export default function SignalPanel({ probability, sentiment }: SignalPanelProps
             </div>
           </div>
 
-          <AnimatedBar label="Model P(YES)"  value={probability.pModel}  color="var(--brown)"   bg="var(--amber-pale)" />
-          <AnimatedBar label="Market P(YES)" value={probability.pMarket} color="var(--pink)"    bg="var(--pink-pale)" />
+          <AnimatedBar
+            label="ROMA Forecast"
+            sublabel="AI win probability"
+            value={probability.pModel}
+            color="var(--brown)"
+            bg="var(--amber-pale)"
+          />
+          <AnimatedBar
+            label="Kalshi Implied"
+            sublabel="crowd odds · YES ask"
+            value={probability.pMarket}
+            color="var(--pink)"
+            bg="var(--pink-pale)"
+          />
+          {/* Delta row */}
+          {(() => {
+            const delta = Math.round((probability.pModel - probability.pMarket) * 100)
+            const pos = delta > 0
+            return (
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: -6, marginBottom: 10 }}>
+                <span style={{
+                  fontSize: 9, fontFamily: 'var(--font-geist-mono)', fontWeight: 700,
+                  color: pos ? 'var(--green-dark)' : 'var(--pink)',
+                  background: pos ? 'var(--green-pale)' : 'var(--pink-pale)',
+                  padding: '1px 6px', borderRadius: 4,
+                }}>
+                  {pos ? '+' : ''}{delta}pp gap
+                </span>
+              </div>
+            )
+          })()}
         </>
       ) : (
         <div style={{ padding: '20px 0', textAlign: 'center' }}>

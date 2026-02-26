@@ -26,16 +26,26 @@ async function resetCircuitBreakers(): Promise<void> {
  * If a "Circuit breaker is open" error is detected, resets the breaker first.
  * Callers decide the fallback after all retries are exhausted.
  */
+// Per-mode fetch timeout — must be slightly longer than the Python-side solve timeout
+// so the 504 error response makes it back before the AbortSignal fires.
+const FETCH_TIMEOUTS: Record<string, number> = {
+  blitz: 45_000,   // Python: 35s → give 10s buffer
+  sharp: 65_000,   // Python: 55s → give 10s buffer
+  keen:  95_000,   // Python: 85s → give 10s buffer
+  smart: 130_000,  // Python: 120s → give 10s buffer
+}
+
 export async function callPythonRoma(
   goal: string,
   context: string,
   maxDepth = 1,
-  maxRetries = 2,
+  maxRetries = 1,              // single attempt — retrying a timed-out solve doubles wait time
   modeOverride?: string,
-  provider?: string,           // single provider override
-  providers?: string[],        // multi-provider parallel solve (takes precedence over provider)
+  provider?: string,
+  providers?: string[],
 ): Promise<PythonRomaResponse> {
   const romaMode = modeOverride ?? process.env.ROMA_MODE ?? 'smart'
+  const timeoutMs = FETCH_TIMEOUTS[romaMode] ?? 95_000
   let lastErr: unknown
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
@@ -46,12 +56,11 @@ export async function callPythonRoma(
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(120_000),  // 120s — depth=1 on Grok typically completes in ~30-60s
+        signal: AbortSignal.timeout(timeoutMs),
       })
       if (!res.ok) {
         const text = await res.text().catch(() => '')
         const err = new Error(`roma-dspy service ${res.status}: ${text}`)
-        // Circuit breaker tripped — reset it so the next attempt goes through
         if (text.includes('Circuit breaker is open')) {
           await resetCircuitBreakers()
         }
@@ -61,7 +70,6 @@ export async function callPythonRoma(
     } catch (err) {
       lastErr = err
       if (attempt < maxRetries) {
-        // Exponential backoff: 2s, 4s between retries
         await new Promise(r => setTimeout(r, 2_000 * attempt))
       }
     }

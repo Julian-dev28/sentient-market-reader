@@ -83,6 +83,43 @@ export async function placeOrder(params: PlaceOrderParams): Promise<PlaceOrderRe
   }
 }
 
+export interface SellOrderParams {
+  ticker: string
+  side: 'yes' | 'no'
+  count: number
+}
+
+/** Market-sell contracts at the best available price (price=1 accepts any bid). */
+export async function sellOrder(params: SellOrderParams): Promise<PlaceOrderResult> {
+  const path = '/trade-api/v2/portfolio/orders'
+  const body = {
+    ticker: params.ticker,
+    side: params.side,
+    action: 'sell',
+    count: params.count,
+    // Price of 1¢ means "accept any bid" — effectively a market sell
+    ...(params.side === 'yes' ? { yes_price: 1 } : { no_price: 1 }),
+    time_in_force: 'immediate_or_cancel',
+  }
+
+  try {
+    const headers = buildKalshiHeaders('POST', path)
+    if (!headers['KALSHI-ACCESS-KEY']) {
+      return { ok: false, error: 'Missing Kalshi credentials' }
+    }
+    const res = await fetch(`${KALSHI_BASE}/portfolio/orders`, {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const data = await res.json()
+    if (!res.ok) return { ok: false, error: extractError(data, res.status) }
+    return { ok: true, order: data.order as KalshiOrder }
+  } catch (err) {
+    return { ok: false, error: String(err) }
+  }
+}
+
 export async function cancelOrder(orderId: string): Promise<{ ok: boolean; error?: string }> {
   const path = `/trade-api/v2/portfolio/orders/${orderId}`
   try {
