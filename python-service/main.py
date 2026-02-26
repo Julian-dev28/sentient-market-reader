@@ -23,6 +23,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from roma_dspy.core.engine.solve import solve, ROMAConfig
+from roma_dspy.resilience.circuit_breaker import module_circuit_breaker
 from roma_dspy.config.schemas.base import RuntimeConfig, LLMConfig
 from roma_dspy.config.schemas.agents import AgentConfig, AgentsConfig
 from dotenv import load_dotenv
@@ -174,6 +175,13 @@ class AnalyzeResponse(BaseModel):
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
+
+@app.post("/reset")
+def reset_breakers():
+    """Reset all circuit breakers — call after a transient failure to unblock future solves."""
+    module_circuit_breaker.reset_all()
+    return {"status": "reset", "message": "All circuit breakers reset to CLOSED"}
+
 
 @app.get("/health")
 def health():

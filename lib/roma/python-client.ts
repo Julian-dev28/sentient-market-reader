@@ -15,16 +15,22 @@ export interface PythonRomaResponse {
   provider: string
 }
 
+/** Reset the circuit breakers in the Python service after a transient failure. */
+async function resetCircuitBreakers(): Promise<void> {
+  await fetch(`${PYTHON_ROMA_URL}/reset`, { method: 'POST' }).catch(() => {/* best-effort */})
+}
+
 /**
  * Call the official Sentient roma-dspy service.
  * Retries up to `maxRetries` times with exponential backoff before throwing.
+ * If a "Circuit breaker is open" error is detected, resets the breaker first.
  * Callers decide the fallback after all retries are exhausted.
  */
 export async function callPythonRoma(
   goal: string,
   context: string,
-  maxDepth = 2,
-  maxRetries = 3,
+  maxDepth = 1,
+  maxRetries = 2,
 ): Promise<PythonRomaResponse> {
   let lastErr: unknown
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -33,11 +39,16 @@ export async function callPythonRoma(
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ goal, context, max_depth: maxDepth }),
-        signal: AbortSignal.timeout(90_000),
+        signal: AbortSignal.timeout(45_000),  // 45s — enough for a real solve, fast failure on rate limits
       })
       if (!res.ok) {
         const text = await res.text().catch(() => '')
-        throw new Error(`roma-dspy service ${res.status}: ${text}`)
+        const err = new Error(`roma-dspy service ${res.status}: ${text}`)
+        // Circuit breaker tripped — reset it so the next attempt goes through
+        if (text.includes('Circuit breaker is open')) {
+          await resetCircuitBreakers()
+        }
+        throw err
       }
       return await res.json()
     } catch (err) {
