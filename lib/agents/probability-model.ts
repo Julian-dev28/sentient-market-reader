@@ -1,6 +1,6 @@
 import type { AgentResult, ProbabilityOutput, KalshiMarket } from '../types'
 import { llmToolCall, type AIProvider } from '../llm-client'
-import { solve } from '../roma/solve'
+import { callPythonRoma, formatRomaTrace } from '../roma/python-client'
 
 export async function runProbabilityModel(
   sentimentScore: number,
@@ -32,11 +32,39 @@ export async function runProbabilityModel(
     `(3) time decay with ${minutesUntilExpiry.toFixed(1)} min left, (4) whether model edge vs ` +
     `market-implied ${(pMarket * 100).toFixed(1)}% justifies trading YES, NO, or standing aside.`
 
-  try {
-    // ROMA recursive solve: Atomizer → Planner → parallel Executors → Aggregator
-    const romaResult = await solve(goal, context, provider)
+  // ── Primary path: official Sentient roma-dspy service ────────────────────────
+  let romaAnswer: string | null = null
+  let agentLabel = 'ProbabilityModelAgent (roma-dspy)'
+  let romaTrace  = ''
 
-    // Structured extraction from ROMA's qualitative reasoning
+  try {
+    const pythonResult = await callPythonRoma(goal, context)
+    romaAnswer = pythonResult.answer
+    agentLabel = `ProbabilityModelAgent (roma-dspy · ${pythonResult.provider})`
+    romaTrace  = formatRomaTrace(pythonResult)
+  } catch (err) {
+    // roma-dspy service unavailable — skip LLM reasoning, go straight to rule-based
+    const timeWeight = Math.max(0, 1 - minutesUntilExpiry / 15)
+    const logit  = sentimentScore * 3.0 + (distanceFromStrikePct / 0.5) * timeWeight * 2.0
+    const pModel = 1 / (1 + Math.exp(-logit))
+    const edge   = pModel - pMarket
+    const edgePct = edge * 100
+    const recommendation: ProbabilityOutput['recommendation'] =
+      edge > spread + 0.02 ? 'YES' : edge < -(spread + 0.02) ? 'NO' : 'NO_TRADE'
+    const confidence: ProbabilityOutput['confidence'] =
+      Math.abs(edge) > 0.1 ? 'high' : Math.abs(edge) > 0.04 ? 'medium' : 'low'
+    return {
+      agentName: 'ProbabilityModelAgent (rule-based · roma-dspy unavailable)',
+      status: 'done',
+      output: { pModel, pMarket, edge, edgePct, recommendation, confidence },
+      reasoning: `[rule-based fallback: roma-dspy unavailable — ${String(err)}]\nP(model)=${(pModel * 100).toFixed(1)}%`,
+      durationMs: Date.now() - start,
+      timestamp: new Date().toISOString(),
+    }
+  }
+
+  // ── Structured extraction from ROMA's natural-language answer ────────────────
+  try {
     const extracted = await llmToolCall<{
       pModel: number
       recommendation: ProbabilityOutput['recommendation']
@@ -50,12 +78,12 @@ export async function runProbabilityModel(
       schema: {
         properties: {
           pModel:         { type: 'number', description: 'Estimated P(YES) 0.0–1.0 that BTC ends above strike' },
-          recommendation: { type: 'string', enum: ['YES', 'NO', 'NO_TRADE'], description: `YES = buy YES contracts. NO = buy NO contracts. NO_TRADE = edge < ${((spread + 0.02) * 100).toFixed(1)}¢` },
+          recommendation: { type: 'string', enum: ['YES', 'NO', 'NO_TRADE'], description: `YES = buy YES. NO = buy NO. NO_TRADE = edge < ${((spread + 0.02) * 100).toFixed(1)}¢` },
           confidence:     { type: 'string', enum: ['high', 'medium', 'low'] },
         },
         required: ['pModel', 'recommendation', 'confidence'],
       },
-      prompt: `Extract the probability estimate and trade recommendation from this ROMA analysis:\n\n${romaResult.answer}\n\nMarket-implied P(YES): ${(pMarket * 100).toFixed(1)}%`,
+      prompt: `Extract the probability estimate and trade recommendation from this ROMA analysis:\n\n${romaAnswer}\n\nMarket-implied P(YES): ${(pMarket * 100).toFixed(1)}%`,
     })
 
     const pModel  = Math.max(0, Math.min(1, extracted.pModel))
@@ -63,35 +91,29 @@ export async function runProbabilityModel(
     const edgePct = edge * 100
 
     return {
-      agentName: 'ProbabilityModelAgent (ROMA)',
+      agentName: agentLabel,
       status: 'done',
       output: { pModel, pMarket, edge, edgePct, recommendation: extracted.recommendation, confidence: extracted.confidence },
-      reasoning:
-        romaResult.wasAtomic
-          ? `[ROMA atomic] ${romaResult.answer}`
-          : `[ROMA: ${romaResult.subtasks.length} subtasks]\n` +
-            romaResult.subtasks.map(t => `• ${t.id}: ${t.goal}\n  → ${t.result}`).join('\n') +
-            `\n\n[Answer] ${romaResult.answer}` +
-            `\n\nP(model)=${(pModel * 100).toFixed(1)}% vs P(market)=${(pMarket * 100).toFixed(1)}% — edge: ${edgePct >= 0 ? '+' : ''}${edgePct.toFixed(1)}%. Rec: ${extracted.recommendation} (${extracted.confidence})`,
+      reasoning: romaTrace + `\n\nP(model)=${(pModel * 100).toFixed(1)}% vs P(market)=${(pMarket * 100).toFixed(1)}% — edge: ${edgePct >= 0 ? '+' : ''}${edgePct.toFixed(1)}%. Rec: ${extracted.recommendation} (${extracted.confidence})`,
       durationMs: Date.now() - start,
       timestamp: new Date().toISOString(),
     }
-  } catch (err) {
-    // Rule-based fallback using sigmoid
+  } catch (extractErr) {
+    // Extraction failed — rule-based sigmoid using ROMA's qualitative output as context
     const timeWeight = Math.max(0, 1 - minutesUntilExpiry / 15)
-    const logit = sentimentScore * 3.0 + (distanceFromStrikePct / 0.5) * timeWeight * 2.0
+    const logit  = sentimentScore * 3.0 + (distanceFromStrikePct / 0.5) * timeWeight * 2.0
     const pModel = 1 / (1 + Math.exp(-logit))
-    const edge = pModel - pMarket
+    const edge   = pModel - pMarket
     const edgePct = edge * 100
     const recommendation: ProbabilityOutput['recommendation'] =
       edge > spread + 0.02 ? 'YES' : edge < -(spread + 0.02) ? 'NO' : 'NO_TRADE'
     const confidence: ProbabilityOutput['confidence'] =
       Math.abs(edge) > 0.1 ? 'high' : Math.abs(edge) > 0.04 ? 'medium' : 'low'
     return {
-      agentName: 'ProbabilityModelAgent (ROMA)',
+      agentName: `${agentLabel} (rule-based extraction)`,
       status: 'done',
       output: { pModel, pMarket, edge, edgePct, recommendation, confidence },
-      reasoning: `[rule-based fallback: ${String(err)}] P(model)=${(pModel * 100).toFixed(1)}% vs P(market)=${(pMarket * 100).toFixed(1)}%`,
+      reasoning: romaTrace + `\n\n[rule-based extraction: ${String(extractErr)}]\nP(model)=${(pModel * 100).toFixed(1)}%`,
       durationMs: Date.now() - start,
       timestamp: new Date().toISOString(),
     }
