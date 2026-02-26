@@ -28,7 +28,7 @@ import { runMarketDiscovery } from './market-discovery'
 import { runPriceFeed } from './price-feed'
 import { runSentiment } from './sentiment'
 import { runProbabilityModel } from './probability-model'
-import { runRiskManager } from './risk-manager'
+import { runRiskManager, runRomaRiskManager } from './risk-manager'
 import { runExecution } from './execution'
 
 let cycleCounter = 0
@@ -39,6 +39,7 @@ export async function runAgentPipeline(
   orderbook: KalshiOrderbook | null,
   provider: AIProvider = 'grok',
   romaMode?: string,
+  aiRisk: boolean = false,
 ): Promise<PipelineState> {
   const cycleId = ++cycleCounter
   const cycleStartedAt = new Date().toISOString()
@@ -83,12 +84,23 @@ export async function runAgentPipeline(
         ? mdResult.output.activeMarket.yes_ask
         : mdResult.output.activeMarket.no_ask
       : 50
-  const riskResult = runRiskManager(
-    probResult.output.edgePct,
-    probResult.output.pModel,
-    probResult.output.recommendation,
-    limitPrice,
-  )
+  const riskResult = aiRisk
+    ? await runRomaRiskManager(
+        probResult.output.edgePct,
+        probResult.output.pModel,
+        probResult.output.recommendation,
+        limitPrice,
+        mdResult.output.minutesUntilExpiry,
+        sentResult.output.signals,
+        provider,
+        romaMode,
+      )
+    : runRiskManager(
+        probResult.output.edgePct,
+        probResult.output.pModel,
+        probResult.output.recommendation,
+        limitPrice,
+      )
 
   // ── Stage 6: Execution ─────────────────────────────────────────────────
   const execResult = runExecution(

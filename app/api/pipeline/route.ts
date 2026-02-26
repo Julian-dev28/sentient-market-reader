@@ -147,7 +147,8 @@ export async function GET(req: NextRequest) {
     }
 
     const romaMode = req.nextUrl.searchParams.get('mode') ?? process.env.ROMA_MODE ?? 'smart'
-    const pipeline = await runAgentPipeline(markets, quote, orderbook, provider, romaMode)
+    const aiRisk   = req.nextUrl.searchParams.get('aiRisk') === 'true'
+    const pipeline = await runAgentPipeline(markets, quote, orderbook, provider, romaMode, aiRisk)
     return NextResponse.json(pipeline)
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 })
