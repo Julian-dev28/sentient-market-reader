@@ -162,7 +162,7 @@ function TradeBox({ yesBid, yesAsk, noBid, noAsk, ticker, liveMode }: {
           <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Ask</span>
           <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>{ask}¢</span>
         </div>
-        <AnimatedBar value={ask} color={col} />
+        <AnimatedBar value={ask / 2} color={col} />
 
         {/* Qty input — always visible, always typeable */}
         <div style={{ marginTop: 12, padding: '10px 12px', borderRadius: 9, background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>

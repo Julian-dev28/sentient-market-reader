@@ -79,7 +79,7 @@ export default function PositionsPanel({ liveMode }: { liveMode: boolean }) {
   useEffect(() => {
     if (!liveMode) return
     fetchPortfolio()
-    const id = setInterval(fetchPortfolio, 15_000)
+    const id = setInterval(fetchPortfolio, 2_000)
     return () => clearInterval(id)
   }, [liveMode, fetchPortfolio])
 

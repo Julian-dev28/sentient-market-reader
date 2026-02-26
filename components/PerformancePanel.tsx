@@ -34,7 +34,7 @@ export default function PerformancePanel({ stats, trades }: { stats: Performance
 
   return (
     <div className="card">
-      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 12 }}>Session Performance</div>
+      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 12 }}>Paper Trade Performance</div>
 
       {/* P&L hero */}
       <div style={{
