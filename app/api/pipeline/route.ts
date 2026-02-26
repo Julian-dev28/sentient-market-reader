@@ -6,7 +6,7 @@ import type { AIProvider } from '@/lib/llm-client'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
-export const maxDuration = 420  // allow up to 7 min — depth=2 ROMA: ~120s sentiment + 30s pause + ~150s probability
+export const maxDuration = 180  // allow up to 3 min — depth=1 ROMA typically completes in ~60s
 
 /** Compute the current active KXBTC15M event_ticker using ET timezone
  *  Format: KXBTC15M-{YY}{MON}{DD}{HHMM} — date/time in US Eastern Time
@@ -35,7 +35,6 @@ export async function GET(req: NextRequest) {
   const p = process.env.AI_PROVIDER ?? 'grok'
   const validProviders = ['anthropic', 'openai', 'grok', 'openrouter'] as const
   const provider: AIProvider = (validProviders as readonly string[]).includes(p) ? p as AIProvider : 'grok'
-  const romaDepth = Math.min(2, Math.max(1, parseInt(req.nextUrl.searchParams.get('depth') ?? '2', 10) || 2))
   try {
     // Try to fetch the currently active market using computed event_ticker
     let markets: KalshiMarket[] = []
@@ -138,7 +137,7 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const pipeline = await runAgentPipeline(markets, quote, orderbook, provider, romaDepth)
+    const pipeline = await runAgentPipeline(markets, quote, orderbook, provider, 1)
     return NextResponse.json(pipeline)
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 })

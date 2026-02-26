@@ -41,7 +41,7 @@ function simulateOutcome(trade: TradeRecord, settlementPrice: number): TradeReco
   }
 }
 
-export function usePipeline(liveMode: boolean, romaDepth: number = 2) {
+export function usePipeline(liveMode: boolean) {
   const [pipeline, setPipeline] = useState<PipelineState | null>(null)
   const [trades, setTrades] = useState<TradeRecord[]>([])
   const [isRunning, setIsRunning] = useState(false)
@@ -54,7 +54,7 @@ export function usePipeline(liveMode: boolean, romaDepth: number = 2) {
     setIsRunning(true)
     setError(null)
     try {
-      const res = await fetch(`/api/pipeline?depth=${romaDepth}`, { cache: 'no-store' })
+      const res = await fetch(`/api/pipeline`, { cache: 'no-store' })
       if (!res.ok) {
         if (res.status === 503) throw new Error('No active KXBTC15M market — trading hours are ~11:30 AM–midnight ET weekdays')
         throw new Error(`Pipeline error ${res.status}`)
@@ -133,7 +133,7 @@ export function usePipeline(liveMode: boolean, romaDepth: number = 2) {
       lastCycleRef.current = Date.now()
       setNextCycleIn(CYCLE_INTERVAL_MS / 1000)
     }
-  }, [liveMode, romaDepth])
+  }, [liveMode])
 
   // Manual-only — run cycle is triggered by the user clicking the button
 
