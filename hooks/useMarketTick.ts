@@ -1,15 +1,17 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
-import type { KalshiMarket, PricePoint } from '@/lib/types'
+import type { KalshiMarket, KalshiOrderbook, PricePoint } from '@/lib/types'
 
-const TICK_MS = 2_000  // 2-second BTC price refresh (always)
+const TICK_MS = 2_000       // 2-second BTC price + market bid/ask refresh
+const OB_TICK_MS = 4_000    // 4-second orderbook depth refresh
 
 interface MarketTick {
-  liveMarket: KalshiMarket | null   // fresh bid/ask/volume
-  liveBTCPrice: number | null       // fresh BTC price
-  livePriceHistory: PricePoint[]    // built from live Binance/CMC ticks only
-  refresh: () => void               // trigger an immediate tick
+  liveMarket: KalshiMarket | null       // fresh bid/ask/volume
+  liveOrderbook: KalshiOrderbook | null // fresh depth levels
+  liveBTCPrice: number | null           // fresh BTC price
+  livePriceHistory: PricePoint[]        // built from live ticks
+  refresh: () => void                   // trigger an immediate tick
 }
 
 /**
@@ -22,15 +24,17 @@ interface MarketTick {
  */
 export function useMarketTick(ticker: string | null): MarketTick {
   const [liveMarket,       setLiveMarket]       = useState<KalshiMarket | null>(null)
+  const [liveOrderbook,    setLiveOrderbook]    = useState<KalshiOrderbook | null>(null)
   const [liveBTCPrice,     setLiveBTCPrice]     = useState<number | null>(null)
   const [livePriceHistory, setLivePriceHistory] = useState<PricePoint[]>([])
 
-  // Track ticker changes — reset live market + price history so stale data doesn't linger
+  // Track ticker changes — reset live market + orderbook + price history so stale data doesn't linger
   const prevTickerRef = useRef(ticker)
   useEffect(() => {
     if (ticker !== prevTickerRef.current) {
       prevTickerRef.current = ticker
       setLiveMarket(null)
+      setLiveOrderbook(null)
       setLivePriceHistory([])
     }
   }, [ticker])
@@ -105,8 +109,24 @@ export function useMarketTick(ticker: string | null): MarketTick {
     tickRef.current = tick
     tick()  // fire immediately
     const id = setInterval(tick, TICK_MS)
-    return () => { mounted = false; clearInterval(id); tickRef.current = null }
+
+    // ── Orderbook depth — independent 4s poll ────────────────────────────────
+    async function obTick() {
+      const t = prevTickerRef.current
+      if (!t) return
+      try {
+        const res = await fetch(`/api/orderbook/${encodeURIComponent(t)}`, { cache: 'no-store' })
+        if (res.ok && mounted) {
+          const data = await res.json()
+          if (data.orderbook) setLiveOrderbook(data.orderbook)
+        }
+      } catch { /* network blip */ }
+    }
+    obTick()  // fire immediately
+    const obId = setInterval(obTick, OB_TICK_MS)
+
+    return () => { mounted = false; clearInterval(id); clearInterval(obId); tickRef.current = null }
   }, [ticker])
 
-  return { liveMarket, liveBTCPrice, livePriceHistory, refresh }
+  return { liveMarket, liveOrderbook, liveBTCPrice, livePriceHistory, refresh }
 }

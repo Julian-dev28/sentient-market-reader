@@ -10,6 +10,7 @@ export async function runSentiment(
   market: KalshiMarket | null,
   orderbook: KalshiOrderbook | null,
   provider: AIProvider,
+  depth: number = 2,
 ): Promise<AgentResult<SentimentOutput>> {
   const start = Date.now()
 
@@ -38,65 +39,46 @@ export async function runSentiment(
     `Orderbook NO depth:  ${obNo}`,
   ].join('\n')
 
-  // ── Primary path: official Sentient roma-dspy service ────────────────────────
-  try {
-    const romaResult = await callPythonRoma(goal, context, 2)
-    const romaTrace  = formatRomaTrace(romaResult)
+  const romaResult = await callPythonRoma(goal, context, depth)
+  const romaTrace  = formatRomaTrace(romaResult)
 
-    // Structured extraction from ROMA's natural-language answer
-    const extracted = await llmToolCall<{
-      score: number
-      label: SentimentOutput['label']
-      momentum: number
-      orderbookSkew: number
-      signals: string[]
-    }>({
-      provider,
-      tier: 'fast',
-      maxTokens: 512,
-      toolName: 'output_sentiment',
-      toolDescription: 'Extract structured BTC sentiment data from ROMA analysis output',
-      schema: {
-        properties: {
-          score:         { type: 'number', description: 'Overall sentiment score: -1.0 = strongly bearish, +1.0 = strongly bullish' },
-          label:         { type: 'string', enum: ['strongly_bullish', 'bullish', 'neutral', 'bearish', 'strongly_bearish'] },
-          momentum:      { type: 'number', description: 'Short-term price momentum component: -1 to +1' },
-          orderbookSkew: { type: 'number', description: 'Kalshi orderbook/crowd sentiment skew: -1 to +1' },
-          signals:       { type: 'array', items: { type: 'string' }, description: '3-5 concise signals from the ROMA analysis' },
-        },
-        required: ['score', 'label', 'momentum', 'orderbookSkew', 'signals'],
+  const extracted = await llmToolCall<{
+    score: number
+    label: SentimentOutput['label']
+    momentum: number
+    orderbookSkew: number
+    signals: string[]
+  }>({
+    provider,
+    tier: 'fast',
+    maxTokens: 512,
+    toolName: 'output_sentiment',
+    toolDescription: 'Extract structured BTC sentiment data from ROMA analysis output',
+    schema: {
+      properties: {
+        score:         { type: 'number', description: 'Overall sentiment score: -1.0 = strongly bearish, +1.0 = strongly bullish' },
+        label:         { type: 'string', enum: ['strongly_bullish', 'bullish', 'neutral', 'bearish', 'strongly_bearish'] },
+        momentum:      { type: 'number', description: 'Short-term price momentum component: -1 to +1' },
+        orderbookSkew: { type: 'number', description: 'Kalshi orderbook/crowd sentiment skew: -1 to +1' },
+        signals:       { type: 'array', items: { type: 'string' }, description: '3-5 concise signals from the ROMA analysis' },
       },
-      prompt: `Extract structured sentiment data from this ROMA analysis:\n\n${romaResult.answer}`,
-    })
+      required: ['score', 'label', 'momentum', 'orderbookSkew', 'signals'],
+    },
+    prompt: `Extract structured sentiment data from this ROMA analysis:\n\n${romaResult.answer}`,
+  })
 
-    return {
-      agentName: `SentimentAgent (roma-dspy · ${romaResult.provider})`,
-      status: 'done',
-      output: {
-        score:         Math.max(-1, Math.min(1, extracted.score)),
-        label:         extracted.label,
-        momentum:      extracted.momentum,
-        orderbookSkew: extracted.orderbookSkew,
-        signals:       extracted.signals,
-      },
-      reasoning: romaTrace + `\n\nScore: ${extracted.score.toFixed(3)} (${extracted.label}) — ${extracted.signals.join(' | ')}`,
-      durationMs: Date.now() - start,
-      timestamp: new Date().toISOString(),
-    }
-  } catch {
-    // ── Rule-based fallback (roma-dspy service unavailable) ──────────────────
-    const raw   = (quote.percent_change_1h / 2) + (distanceFromStrikePct > 0 ? 0.1 : -0.1)
-    const score = Math.max(-1, Math.min(1, raw))
-    const label: SentimentOutput['label'] =
-      score > 0.4 ? 'strongly_bullish' : score > 0.1 ? 'bullish' :
-      score < -0.4 ? 'strongly_bearish' : score < -0.1 ? 'bearish' : 'neutral'
-    return {
-      agentName: 'SentimentAgent (rule-based · roma-dspy unavailable)',
-      status: 'done',
-      output: { score, label, momentum: score, orderbookSkew: 0, signals: ['[roma-dspy service unavailable — rule-based fallback active]'] },
-      reasoning: `[rule-based fallback] score=${score.toFixed(3)}`,
-      durationMs: Date.now() - start,
-      timestamp: new Date().toISOString(),
-    }
+  return {
+    agentName: `SentimentAgent (roma-dspy · ${romaResult.provider})`,
+    status: 'done',
+    output: {
+      score:         Math.max(-1, Math.min(1, extracted.score)),
+      label:         extracted.label,
+      momentum:      extracted.momentum,
+      orderbookSkew: extracted.orderbookSkew,
+      signals:       extracted.signals,
+    },
+    reasoning: romaTrace + `\n\nScore: ${extracted.score.toFixed(3)} (${extracted.label}) — ${extracted.signals.join(' | ')}`,
+    durationMs: Date.now() - start,
+    timestamp: new Date().toISOString(),
   }
 }

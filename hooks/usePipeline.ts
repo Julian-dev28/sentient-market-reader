@@ -41,7 +41,7 @@ function simulateOutcome(trade: TradeRecord, settlementPrice: number): TradeReco
   }
 }
 
-export function usePipeline(liveMode: boolean) {
+export function usePipeline(liveMode: boolean, romaDepth: number = 2) {
   const [pipeline, setPipeline] = useState<PipelineState | null>(null)
   const [trades, setTrades] = useState<TradeRecord[]>([])
   const [isRunning, setIsRunning] = useState(false)
@@ -54,9 +54,9 @@ export function usePipeline(liveMode: boolean) {
     setIsRunning(true)
     setError(null)
     try {
-      const res = await fetch('/api/pipeline', { cache: 'no-store' })
+      const res = await fetch(`/api/pipeline?depth=${romaDepth}`, { cache: 'no-store' })
       if (!res.ok) {
-        if (res.status === 503) throw new Error('No active market — waiting for next 15-min window')
+        if (res.status === 503) throw new Error('No active KXBTC15M market — trading hours are ~11:30 AM–midnight ET weekdays')
         throw new Error(`Pipeline error ${res.status}`)
       }
       const data: PipelineState = await res.json()
@@ -130,7 +130,7 @@ export function usePipeline(liveMode: boolean) {
       const msg = String(err)
       setError(msg)
       // Auto-retry once after 15s for non-market-window errors (e.g. transient service failure)
-      if (!msg.includes('waiting for next 15-min window')) {
+      if (!msg.includes('trading hours are')) {
         setTimeout(() => {
           setError(null)
           runCycle()
@@ -141,7 +141,7 @@ export function usePipeline(liveMode: boolean) {
       lastCycleRef.current = Date.now()
       setNextCycleIn(CYCLE_INTERVAL_MS / 1000)
     }
-  }, [liveMode])
+  }, [liveMode, romaDepth])
 
   // Auto-run once on mount so signals populate on first page load
   useEffect(() => { runCycle() }, []) // eslint-disable-line react-hooks/exhaustive-deps

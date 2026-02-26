@@ -16,14 +16,22 @@ import FloatingBackground from '@/components/FloatingBackground'
 export default function Home() {
   const [liveMode, setLiveMode] = useState(false)  // always false on SSR
   const [showLiveWarning, setShowLiveWarning] = useState(false)
+  const [romaDepth, setRomaDepth] = useState<1 | 2>(2)
   // Sync from localStorage after hydration (client-only)
   useEffect(() => {
     if (localStorage.getItem('sentient-live-mode') === 'true') {
       setLiveMode(true)
     }
+    const d = localStorage.getItem('sentient-roma-depth')
+    if (d === '1') setRomaDepth(1)
   }, [])
 
-  const { pipeline, trades, isRunning, nextCycleIn, error, stats, runCycle } = usePipeline(liveMode)
+  const { pipeline, trades, isRunning, nextCycleIn, error, stats, runCycle } = usePipeline(liveMode, romaDepth)
+
+  function handleDepthChange(d: 1 | 2) {
+    setRomaDepth(d)
+    localStorage.setItem('sentient-roma-depth', String(d))
+  }
 
   const md   = pipeline?.agents.marketDiscovery.output
   const pf   = pipeline?.agents.priceFeed.output
@@ -32,7 +40,7 @@ export default function Home() {
   const exec = pipeline?.agents.execution.output
 
   // Live 5-second tick — keeps bid/ask and BTC price fresh between pipeline cycles
-  const { liveMarket, liveBTCPrice, livePriceHistory, refresh: refreshMarket } = useMarketTick(
+  const { liveMarket, liveOrderbook, liveBTCPrice, livePriceHistory, refresh: refreshMarket } = useMarketTick(
     md?.activeMarket?.ticker ?? null,
   )
 
@@ -166,6 +174,7 @@ export default function Home() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <MarketCard
               market={activeMarket}
+              orderbook={liveOrderbook}
               strikePrice={strikePrice}
               currentBTCPrice={currentBTCPrice}
               secondsUntilExpiry={secondsUntilExpiry}
@@ -209,28 +218,46 @@ export default function Home() {
               <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
                 5-min cycles · 3 signals per 15-min window · CF Benchmarks settlement
               </div>
-              <button
-                onClick={runCycle}
-                disabled={isRunning}
-                style={{
-                  padding: '7px 18px', borderRadius: 9,
-                  background: isRunning
-                    ? 'var(--cream-dark)'
-                    : 'linear-gradient(135deg, var(--green-dark) 0%, var(--green) 100%)',
-                  border: isRunning ? '1px solid var(--border)' : '1px solid var(--green-dark)',
-                  color: isRunning ? 'var(--text-muted)' : '#fff',
-                  cursor: isRunning ? 'not-allowed' : 'pointer',
-                  fontSize: 12, fontWeight: 700,
-                  display: 'flex', alignItems: 'center', gap: 6,
-                  boxShadow: isRunning ? 'none' : '0 2px 10px rgba(74,148,112,0.3)',
-                  transition: 'all 0.2s',
-                  letterSpacing: '0.02em',
-                }}
-              >
-                {isRunning
-                  ? <><span style={{ animation: 'spin-slow 1s linear infinite', display: 'inline-block' }}>◌</span> Running...</>
-                  : '▶ Run Cycle'}
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                {/* ROMA depth toggle */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Depth</span>
+                  {([1, 2] as const).map(d => (
+                    <button key={d} onClick={() => handleDepthChange(d)} title={d === 1 ? 'Atomic — single LLM call (~10s)' : 'Full ROMA — Atomizer→Planner→Executors→Aggregator (~5min)'}
+                      style={{
+                        padding: '3px 9px', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                        border: romaDepth === d ? '1px solid var(--brown)' : '1px solid var(--border)',
+                        background: romaDepth === d ? 'var(--brown)' : 'var(--cream)',
+                        color: romaDepth === d ? '#fff' : 'var(--text-muted)',
+                        transition: 'all 0.15s',
+                      }}>
+                      {d}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  onClick={runCycle}
+                  disabled={isRunning}
+                  style={{
+                    padding: '7px 18px', borderRadius: 9,
+                    background: isRunning
+                      ? 'var(--cream-dark)'
+                      : 'linear-gradient(135deg, var(--green-dark) 0%, var(--green) 100%)',
+                    border: isRunning ? '1px solid var(--border)' : '1px solid var(--green-dark)',
+                    color: isRunning ? 'var(--text-muted)' : '#fff',
+                    cursor: isRunning ? 'not-allowed' : 'pointer',
+                    fontSize: 12, fontWeight: 700,
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    boxShadow: isRunning ? 'none' : '0 2px 10px rgba(74,148,112,0.3)',
+                    transition: 'all 0.2s',
+                    letterSpacing: '0.02em',
+                  }}
+                >
+                  {isRunning
+                    ? <><span style={{ animation: 'spin-slow 1s linear infinite', display: 'inline-block' }}>◌</span> Running...</>
+                    : '▶ Run Cycle'}
+                </button>
+              </div>
             </div>
 
             <PriceChart priceHistory={priceHistory} strikePrice={strikePrice} currentPrice={currentBTCPrice} />
