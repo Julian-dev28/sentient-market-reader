@@ -3,7 +3,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import type { PipelineState, TradeRecord, PerformanceStats } from '@/lib/types'
 
-const CYCLE_INTERVAL_MS = 5 * 60 * 1000  // 5-minute cycles — 3 signals per 15-min window
+const CYCLE_INTERVAL_MS = 5 * 60 * 1000  // 5-minute cycles
+const BOT_TRADE_DOLLARS = 100             // fixed $ size per bot trade
 
 function computeStats(trades: TradeRecord[]): PerformanceStats {
   const settled = trades.filter(t => t.outcome !== 'PENDING')
@@ -30,31 +31,36 @@ function simulateOutcome(trade: TradeRecord, settlementPrice: number): TradeReco
   const priceAboveStrike = settlementPrice > trade.strikePrice
   const win = trade.side === 'yes' ? priceAboveStrike : !priceAboveStrike
   const pnl = win
-    ? trade.contracts - trade.estimatedCost      // won: payout minus cost
-    : -trade.estimatedCost                         // lost: full cost
+    ? trade.contracts - trade.estimatedCost
+    : -trade.estimatedCost
 
-  return {
-    ...trade,
-    outcome: win ? 'WIN' : 'LOSS',
-    settlementPrice,
-    pnl,
-  }
+  return { ...trade, outcome: win ? 'WIN' : 'LOSS', settlementPrice, pnl }
 }
 
-export function usePipeline(liveMode: boolean, romaMode: string = 'smart') {
-  const [pipeline, setPipeline] = useState<PipelineState | null>(null)
-  const [trades, setTrades] = useState<TradeRecord[]>([])
-  const [isRunning, setIsRunning] = useState(false)
+/**
+ * usePipeline — drives the agent pipeline.
+ *
+ * SAFETY: live orders are ONLY placed when `autoTrade=true` (bot is running).
+ * Manual "Run Cycle" calls never place real orders regardless of liveMode.
+ */
+export function usePipeline(liveMode: boolean, romaMode: string = 'smart', autoTrade: boolean = false, aiRisk: boolean = false) {
+  const [pipeline, setPipeline]     = useState<PipelineState | null>(null)
+  const [trades, setTrades]         = useState<TradeRecord[]>([])
+  const [isRunning, setIsRunning]   = useState(false)
   const [nextCycleIn, setNextCycleIn] = useState(CYCLE_INTERVAL_MS / 1000)
-  const [error, setError] = useState<string | null>(null)
-  const lastCycleRef = useRef<number>(0)
-  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [error, setError]           = useState<string | null>(null)
+  const lastCycleRef                = useRef<number>(0)
+  const countdownRef                = useRef<ReturnType<typeof setInterval> | null>(null)
+  const autoIntervalRef             = useRef<ReturnType<typeof setInterval> | null>(null)
+  const runCycleRef                 = useRef<(() => Promise<void>) | null>(null)
 
   const runCycle = useCallback(async () => {
     setIsRunning(true)
     setError(null)
     try {
-      const res = await fetch(`/api/pipeline?mode=${romaMode}`, { cache: 'no-store' })
+      const params = new URLSearchParams({ mode: romaMode })
+      if (aiRisk) params.set('aiRisk', 'true')
+      const res = await fetch(`/api/pipeline?${params}`, { cache: 'no-store' })
       if (!res.ok) {
         if (res.status === 503) throw new Error('No active KXBTC15M market — trading hours are ~11:30 AM–midnight ET weekdays')
         throw new Error(`Pipeline error ${res.status}`)
@@ -63,15 +69,21 @@ export function usePipeline(liveMode: boolean, romaMode: string = 'smart') {
       setPipeline(data)
 
       const exec = data.agents.execution.output
-      const md = data.agents.marketDiscovery.output
-      const pf = data.agents.priceFeed.output
+      const md   = data.agents.marketDiscovery.output
+      const pf   = data.agents.priceFeed.output
       const prob = data.agents.probability.output
 
       if (exec.action !== 'PASS' && exec.side && exec.limitPrice && md.activeMarket) {
+        // Bot: fixed $100 trade. Manual analysis: use agent's contract count.
+        const contracts    = autoTrade
+          ? Math.max(1, Math.floor(BOT_TRADE_DOLLARS / (exec.limitPrice / 100)))
+          : exec.contracts
+        const estimatedCost = contracts * exec.limitPrice / 100
+
         let liveOrderId: string | undefined
 
-        // Place real order if in live mode
-        if (liveMode) {
+        // ── Real order: ONLY when bot is active ──────────────────────────────
+        if (autoTrade && liveMode) {
           try {
             const orderRes = await fetch('/api/place-order', {
               method: 'POST',
@@ -79,18 +91,16 @@ export function usePipeline(liveMode: boolean, romaMode: string = 'smart') {
               body: JSON.stringify({
                 ticker: exec.marketTicker,
                 side: exec.side,
-                count: exec.contracts,
+                count: contracts,
                 yesPrice: exec.side === 'yes' ? exec.limitPrice : (100 - exec.limitPrice),
-                clientOrderId: `sentient-${data.cycleId}-${Date.now()}`,
+                clientOrderId: `bot-${data.cycleId}-${Date.now()}`,
               }),
             })
             if (orderRes.ok) {
               const orderData = await orderRes.json()
               liveOrderId = orderData.order?.order_id
             }
-          } catch {
-            // Live order failed — still record as paper trade
-          }
+          } catch { /* live order failed — still record as paper */ }
         }
 
         const trade: TradeRecord = {
@@ -99,8 +109,8 @@ export function usePipeline(liveMode: boolean, romaMode: string = 'smart') {
           marketTicker: exec.marketTicker,
           side: exec.side,
           limitPrice: exec.limitPrice,
-          contracts: exec.contracts,
-          estimatedCost: exec.estimatedCost,
+          contracts,
+          estimatedCost,
           enteredAt: new Date().toISOString(),
           expiresAt: md.activeMarket.close_time,
           strikePrice: md.strikePrice,
@@ -110,18 +120,15 @@ export function usePipeline(liveMode: boolean, romaMode: string = 'smart') {
           pMarket: prob.pMarket,
           edge: prob.edge,
           liveOrderId,
-          liveMode,
+          liveMode: autoTrade && liveMode,
         }
         setTrades(prev => [...prev, trade])
       }
 
-      // Settle any pending trades that have expired
+      // Settle expired pending trades
       setTrades(prev => prev.map(t => {
-        if (t.outcome === 'PENDING') {
-          const expiryMs = new Date(t.expiresAt).getTime()
-          if (Date.now() >= expiryMs) {
-            return simulateOutcome(t, pf.currentPrice)
-          }
+        if (t.outcome === 'PENDING' && Date.now() >= new Date(t.expiresAt).getTime()) {
+          return simulateOutcome(t, pf.currentPrice)
         }
         return t
       }))
@@ -133,18 +140,26 @@ export function usePipeline(liveMode: boolean, romaMode: string = 'smart') {
       lastCycleRef.current = Date.now()
       setNextCycleIn(CYCLE_INTERVAL_MS / 1000)
     }
-  }, [liveMode, romaMode])
+  }, [liveMode, romaMode, autoTrade, aiRisk])
 
-  // Manual-only — run cycle is triggered by the user clicking the button
+  // Keep ref current so auto-interval always calls latest version
+  useEffect(() => { runCycleRef.current = runCycle }, [runCycle])
+
+  // Auto-cycle when bot is active — fires immediately, then every 5 min
+  useEffect(() => {
+    if (autoTrade) {
+      setTimeout(() => runCycleRef.current?.(), 50)
+      autoIntervalRef.current = setInterval(() => runCycleRef.current?.(), CYCLE_INTERVAL_MS)
+    }
+    return () => {
+      if (autoIntervalRef.current) { clearInterval(autoIntervalRef.current); autoIntervalRef.current = null }
+    }
+  }, [autoTrade])
 
   // Countdown timer
   useEffect(() => {
-    countdownRef.current = setInterval(() => {
-      setNextCycleIn(prev => Math.max(0, prev - 1))
-    }, 1000)
-    return () => {
-      if (countdownRef.current) clearInterval(countdownRef.current)
-    }
+    countdownRef.current = setInterval(() => setNextCycleIn(prev => Math.max(0, prev - 1)), 1000)
+    return () => { if (countdownRef.current) clearInterval(countdownRef.current) }
   }, [])
 
   const stats = computeStats(trades)

@@ -11,12 +11,16 @@ import SignalPanel from '@/components/SignalPanel'
 import TradeLog from '@/components/TradeLog'
 import PerformancePanel from '@/components/PerformancePanel'
 import PositionsPanel from '@/components/PositionsPanel'
+import BotPanel from '@/components/BotPanel'
 import FloatingBackground from '@/components/FloatingBackground'
 
 export default function Home() {
-  const [liveMode, setLiveMode] = useState(false)  // always false on SSR
+  const [liveMode, setLiveMode]           = useState(false)  // always false on SSR
   const [showLiveWarning, setShowLiveWarning] = useState(false)
-  const [romaMode, setRomaMode] = useState<'blitz' | 'sharp' | 'keen' | 'smart'>('keen')
+  const [romaMode, setRomaMode]           = useState<'blitz' | 'sharp' | 'keen' | 'smart'>('keen')
+  const [botActive, setBotActive]         = useState(false)
+  const [showBotWarning, setShowBotWarning] = useState(false)
+  const [aiRisk, setAiRisk]               = useState(false)
   // Sync from localStorage after hydration (client-only)
   useEffect(() => {
     if (localStorage.getItem('sentient-live-mode') === 'true') setLiveMode(true)
@@ -29,7 +33,7 @@ export default function Home() {
     localStorage.setItem('sentient-roma-mode', m)
   }
 
-  const { pipeline, trades, isRunning, nextCycleIn, error, stats, runCycle } = usePipeline(liveMode, romaMode)
+  const { pipeline, trades, isRunning, nextCycleIn, error, stats, runCycle } = usePipeline(liveMode, romaMode, botActive, aiRisk)
 
   // ── Trade alert pop-up ─────────────────────────────────────────────────────
   type TradeAlert = { action: string; side: 'yes' | 'no'; limitPrice: number; ticker: string; edge: number; pModel: number }
@@ -111,6 +115,19 @@ export default function Home() {
     localStorage.setItem('sentient-live-mode', 'true')
   }
 
+  function handleStartBot() {
+    setShowBotWarning(true)
+  }
+
+  function confirmStartBot() {
+    setShowBotWarning(false)
+    setBotActive(true)
+  }
+
+  function handleStopBot() {
+    setBotActive(false)
+  }
+
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg-primary)', position: 'relative' }}>
       <div className="noise-overlay" />
@@ -162,6 +179,56 @@ export default function Home() {
                 }}
               >
                 Enable Live Trading
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bot start confirmation modal */}
+      {showBotWarning && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 1000,
+          background: 'rgba(61,46,30,0.45)', backdropFilter: 'blur(6px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <div className="card animate-fade-in" style={{ maxWidth: 420, width: '90%', padding: '28px 28px' }}>
+            <div style={{ fontSize: 22, marginBottom: 10 }}>🤖</div>
+            <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-primary)', marginBottom: 8 }}>
+              Start Trade Bot?
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 20 }}>
+              The bot will run a pipeline cycle every <strong>5 minutes</strong> and automatically place a <strong>$100 {liveMode ? 'live' : 'paper'} order</strong> when the agent approves a trade.
+              {liveMode && (
+                <><br /><br /><span style={{ color: 'var(--pink)', fontWeight: 700 }}>⚠ Live mode is on — real money will be used.</span></>
+              )}
+              <br /><br />
+              Risk guards: 3% min edge · $150 daily loss cap · 15% drawdown limit · 48 trades/day max.
+            </div>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button
+                onClick={() => setShowBotWarning(false)}
+                style={{
+                  flex: 1, padding: '10px 0', borderRadius: 9, cursor: 'pointer',
+                  border: '1px solid var(--border-bright)', background: 'var(--cream)',
+                  fontSize: 13, fontWeight: 700, color: 'var(--text-secondary)',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmStartBot}
+                style={{
+                  flex: 1, padding: '10px 0', borderRadius: 9, cursor: 'pointer',
+                  border: liveMode ? '1px solid var(--green-dark)' : '1px solid var(--brown)',
+                  background: liveMode
+                    ? 'linear-gradient(135deg, var(--green-dark) 0%, var(--green) 100%)'
+                    : 'linear-gradient(135deg, #7a5c32 0%, var(--brown) 100%)',
+                  fontSize: 13, fontWeight: 700, color: '#fff',
+                  boxShadow: liveMode ? '0 2px 10px rgba(78,138,94,0.35)' : '0 2px 8px rgba(139,111,71,0.3)',
+                }}
+              >
+                ▶ Start Bot
               </button>
             </div>
           </div>
@@ -342,6 +409,18 @@ export default function Home() {
                 5-min cycles · 3 signals per 15-min window · CF Benchmarks settlement
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                {/* AI Risk checkbox */}
+                <label style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontSize: 11, fontWeight: 700, color: aiRisk ? 'var(--brown)' : 'var(--text-muted)', userSelect: 'none' }}
+                  title="Use ROMA AI risk manager instead of deterministic Kelly + limits">
+                  <input
+                    type="checkbox"
+                    checked={aiRisk}
+                    onChange={e => setAiRisk(e.target.checked)}
+                    style={{ accentColor: 'var(--brown)', width: 13, height: 13, cursor: 'pointer' }}
+                  />
+                  AI Risk
+                </label>
+
                 {/* ROMA mode selector */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 3, background: 'var(--bg-secondary)', borderRadius: 8, padding: '3px 4px', border: '1px solid var(--border)' }}>
                   {(['blitz', 'sharp', 'keen', 'smart'] as const).map(m => (
@@ -400,6 +479,18 @@ export default function Home() {
 
           {/* ─── RIGHT ─── */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <BotPanel
+              active={botActive}
+              liveMode={liveMode}
+              isRunning={isRunning}
+              nextCycleIn={nextCycleIn}
+              lastAction={exec?.action ?? null}
+              lastSide={(exec?.side as 'yes' | 'no' | null) ?? null}
+              lastPrice={exec?.limitPrice ?? null}
+              tradeCount={trades.length}
+              onStart={handleStartBot}
+              onStop={handleStopBot}
+            />
             <PositionsPanel liveMode={liveMode} />
             <PerformancePanel stats={stats} trades={trades} />
             <TradeLog trades={trades} />
