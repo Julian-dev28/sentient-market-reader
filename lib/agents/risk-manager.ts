@@ -1,10 +1,21 @@
 import type { AgentResult, RiskOutput } from '../types'
 
-// In-memory session risk state
+// In-memory session risk state — resets automatically at midnight ET
 const sessionState = {
   dailyPnl: 0,
   tradeCount: 0,
   peakPnl: 0,
+}
+let lastResetDate = new Date().toDateString()
+
+function checkDailyReset(): void {
+  const today = new Date().toDateString()
+  if (today !== lastResetDate) {
+    lastResetDate = today
+    sessionState.dailyPnl  = 0
+    sessionState.tradeCount = 0
+    sessionState.peakPnl   = 0
+  }
 }
 
 const RISK_PARAMS = {
@@ -33,6 +44,7 @@ export function runRiskManager(
   limitPrice: number       // cents (Kalshi price of the side to buy)
 ): AgentResult<RiskOutput> {
   const start = Date.now()
+  checkDailyReset()
 
   const drawdownPct =
     sessionState.peakPnl > 0

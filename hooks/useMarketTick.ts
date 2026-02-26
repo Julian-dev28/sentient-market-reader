@@ -25,12 +25,13 @@ export function useMarketTick(ticker: string | null): MarketTick {
   const [liveBTCPrice,     setLiveBTCPrice]     = useState<number | null>(null)
   const [livePriceHistory, setLivePriceHistory] = useState<PricePoint[]>([])
 
-  // Track ticker changes — reset live market so stale data doesn't linger
+  // Track ticker changes — reset live market + price history so stale data doesn't linger
   const prevTickerRef = useRef(ticker)
   useEffect(() => {
     if (ticker !== prevTickerRef.current) {
       prevTickerRef.current = ticker
       setLiveMarket(null)
+      setLivePriceHistory([])
     }
   }, [ticker])
 

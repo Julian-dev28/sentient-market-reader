@@ -1,15 +1,11 @@
-import type { AgentResult, PriceFeedOutput, PricePoint, BTCQuote } from '../types'
-
-// Rolling in-memory price history (shared across calls on the server)
-const priceHistory: PricePoint[] = []
-const MAX_HISTORY = 180  // 3 hours at 1-min resolution
+import type { AgentResult, PriceFeedOutput, BTCQuote } from '../types'
 
 /**
  * PriceFeedAgent
  * ──────────────
- * Consumes the CoinMarketCap BTC quote.
- * Maintains rolling price history.
+ * Consumes the BTC quote.
  * Computes distance from the Kalshi strike price.
+ * Price history is maintained client-side by useMarketTick (Binance ticks).
  */
 export function runPriceFeed(
   quote: BTCQuote,
@@ -20,10 +16,6 @@ export function runPriceFeed(
   const currentPrice = quote.price
   const priceChange1h = currentPrice * (quote.percent_change_1h / 100)
   const priceChangePct1h = quote.percent_change_1h
-
-  // Append to rolling history
-  priceHistory.push({ timestamp: Date.now(), price: currentPrice })
-  if (priceHistory.length > MAX_HISTORY) priceHistory.shift()
 
   const aboveStrike = strikePrice > 0 ? currentPrice > strikePrice : true
   const distanceFromStrike = strikePrice > 0 ? currentPrice - strikePrice : 0
@@ -37,7 +29,6 @@ export function runPriceFeed(
     aboveStrike,
     distanceFromStrike,
     distanceFromStrikePct,
-    priceHistory: [...priceHistory],
   }
 
   const direction = aboveStrike ? 'ABOVE' : 'BELOW'
@@ -57,6 +48,3 @@ export function runPriceFeed(
   }
 }
 
-export function getPriceHistory(): PricePoint[] {
-  return [...priceHistory]
-}

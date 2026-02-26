@@ -39,7 +39,7 @@ export default function Home() {
   // Merge: live tick overrides stale pipeline values
   const activeMarket    = liveMarket   ?? md?.activeMarket   ?? null
   const currentBTCPrice = liveBTCPrice ?? pf?.currentPrice   ?? 0
-  const priceHistory    = livePriceHistory.length > 0 ? livePriceHistory : (pf?.priceHistory ?? [])
+  const priceHistory    = livePriceHistory
 
   // Derive strike + expiry directly from live market so they show before pipeline runs
   const strikePrice = md?.strikePrice

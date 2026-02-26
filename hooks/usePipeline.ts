@@ -55,7 +55,10 @@ export function usePipeline(liveMode: boolean) {
     setError(null)
     try {
       const res = await fetch('/api/pipeline', { cache: 'no-store' })
-      if (!res.ok) throw new Error(`Pipeline API ${res.status}`)
+      if (!res.ok) {
+        if (res.status === 503) throw new Error('No active market — waiting for next 15-min window')
+        throw new Error(`Pipeline error ${res.status}`)
+      }
       const data: PipelineState = await res.json()
       setPipeline(data)
 

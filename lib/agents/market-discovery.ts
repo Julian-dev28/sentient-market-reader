@@ -43,7 +43,7 @@ export async function runMarketDiscovery(
 
   return {
     agentName: 'MarketDiscoveryAgent',
-    status: active ? 'done' : 'error',
+    status: active ? 'done' : 'skipped',
     output,
     reasoning,
     durationMs: Date.now() - start,
