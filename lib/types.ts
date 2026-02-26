@@ -14,7 +14,7 @@ export interface KalshiMarket {
   open_interest: number
   close_time: string   // ISO timestamp
   expiration_time: string
-  status: 'open' | 'active' | 'closed' | 'settled' | 'paused'
+  status: 'open' | 'active' | 'closed' | 'settled' | 'paused' | 'finalized' | 'initialized'
   result?: string
   settlement_value?: number
   // Real Kalshi fields
