@@ -43,5 +43,33 @@ export async function GET() {
     }
   } catch { /* fall through */ }
 
+  // ── Fallback 2: Jupiter DEX price API (Solana wBTC/USDC) ─────────────────
+  const jupKey = process.env.JUPITER_API_KEY
+  if (jupKey) {
+    try {
+      // wBTC on Solana (Wormhole): 9n4nbM75f5Ui33ZbPYXn59EwSgE8CGsHtAeTH5YFeJ9E
+      const res = await fetch(
+        'https://api.jup.ag/price/v2?ids=9n4nbM75f5Ui33ZbPYXn59EwSgE8CGsHtAeTH5YFeJ9E',
+        {
+          headers: { Authorization: `Bearer ${jupKey}`, Accept: 'application/json' },
+          cache: 'no-store',
+        }
+      )
+      if (res.ok) {
+        const data = await res.json()
+        const price = data?.data?.['9n4nbM75f5Ui33ZbPYXn59EwSgE8CGsHtAeTH5YFeJ9E']?.price
+        if (price > 0) {
+          return NextResponse.json({
+            price: parseFloat(price),
+            percent_change_1h:  0,
+            percent_change_24h: 0,
+            source: 'jupiter',
+            last_updated: new Date().toISOString(),
+          })
+        }
+      }
+    } catch { /* fall through */ }
+  }
+
   return NextResponse.json({ error: 'All BTC price sources failed' }, { status: 502 })
 }
