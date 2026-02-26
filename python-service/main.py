@@ -22,7 +22,9 @@ import dspy
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from roma_dspy.core.engine.solve import solve
+from roma_dspy.core.engine.solve import solve, ROMAConfig
+from roma_dspy.config.schemas.base import RuntimeConfig, LLMConfig
+from roma_dspy.config.schemas.agents import AgentConfig, AgentsConfig
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -43,53 +45,111 @@ app.add_middleware(
 
 # ── LLM configuration ────────────────────────────────────────────────────────
 
-def configure_lm():
-    """Configure DSPy LM from environment variables."""
+def build_llm_config() -> tuple[LLMConfig, str]:
+    """
+    Build an LLMConfig from environment variables.
+    Returns (llm_config, provider_label).
+    """
     provider = os.getenv("AI_PROVIDER", "openrouter")
 
     if provider == "anthropic":
         api_key = os.getenv("ANTHROPIC_API_KEY")
         if not api_key:
             raise ValueError("ANTHROPIC_API_KEY not set")
-        lm = dspy.LM("anthropic/claude-sonnet-4-5", api_key=api_key)
+        return (
+            LLMConfig(model="anthropic/claude-sonnet-4-5", api_key=api_key),
+            "anthropic",
+        )
 
-    elif provider == "openai":
+    if provider == "openai":
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
             raise ValueError("OPENAI_API_KEY not set")
-        lm = dspy.LM("openai/gpt-4o", api_key=api_key)
-
-    elif provider == "grok":
-        # xAI via OpenRouter
-        api_key = os.getenv("OPENROUTER_API_KEY") or os.getenv("XAI_API_KEY")
-        if not api_key:
-            raise ValueError("OPENROUTER_API_KEY or XAI_API_KEY not set for Grok")
-        lm = dspy.LM(
-            "openrouter/x-ai/grok-3",
-            api_key=api_key,
-            api_base="https://openrouter.ai/api/v1",
+        return (
+            LLMConfig(model="openai/gpt-4o", api_key=api_key),
+            "openai",
         )
 
-    else:
-        # Default: OpenRouter (most flexible — supports all models)
-        api_key = os.getenv("OPENROUTER_API_KEY")
-        if not api_key:
-            raise ValueError("OPENROUTER_API_KEY not set")
-        lm = dspy.LM(
-            "openrouter/anthropic/claude-sonnet-4-5",
+    if provider == "grok":
+        xai_key = os.getenv("XAI_API_KEY")
+        or_key = os.getenv("OPENROUTER_API_KEY")
+        if xai_key:
+            # Direct xAI API (OpenAI-compatible)
+            return (
+                LLMConfig(
+                    model="openai/grok-3",
+                    api_key=xai_key,
+                    base_url="https://api.x.ai/v1",
+                ),
+                "grok",
+            )
+        if or_key:
+            return (
+                LLMConfig(
+                    model="openrouter/x-ai/grok-3",
+                    api_key=or_key,
+                    base_url="https://openrouter.ai/api/v1",
+                ),
+                "grok-openrouter",
+            )
+        raise ValueError("XAI_API_KEY or OPENROUTER_API_KEY required for Grok")
+
+    # Default: OpenRouter
+    api_key = os.getenv("OPENROUTER_API_KEY")
+    if not api_key:
+        raise ValueError("OPENROUTER_API_KEY not set")
+    return (
+        LLMConfig(
+            model="openrouter/anthropic/claude-sonnet-4-5",
             api_key=api_key,
-            api_base="https://openrouter.ai/api/v1",
+            base_url="https://openrouter.ai/api/v1",
+        ),
+        "openrouter",
+    )
+
+
+def build_roma_config(llm: LLMConfig) -> ROMAConfig:
+    """
+    Build a ROMAConfig with the given LLMConfig for all agents.
+    runtime.timeout must be >= max agent LLM timeout (default 600s).
+    """
+    # Each agent gets the same LLM; preserve default temperatures/max_tokens
+    # by creating per-role copies with only model/key/base_url overridden.
+    def agent_llm(temperature: float = 0.5, max_tokens: int = 2000) -> LLMConfig:
+        return LLMConfig(
+            model=llm.model,
+            api_key=llm.api_key,
+            base_url=llm.base_url,
+            temperature=temperature,
+            max_tokens=max_tokens,
         )
 
-    dspy.configure(lm=lm)
-    return provider
+    agents = AgentsConfig(
+        atomizer=AgentConfig(llm=agent_llm(temperature=0.1, max_tokens=1000)),
+        planner=AgentConfig(llm=agent_llm(temperature=0.3, max_tokens=3000)),
+        executor=AgentConfig(llm=agent_llm(temperature=0.5, max_tokens=2000)),
+        aggregator=AgentConfig(llm=agent_llm(temperature=0.2, max_tokens=4000)),
+    )
+
+    return ROMAConfig(
+        runtime=RuntimeConfig(timeout=700),  # must be >= agent LLM timeout (600s)
+        agents=agents,
+    )
 
 
-# Configure on startup
+# Build LLM config on startup (used as a module-level cache)
 try:
-    _provider = configure_lm()
-    print(f"[ROMA] DSPy LM configured — provider: {_provider}")
+    _llm_config, _provider_label = build_llm_config()
+    # Also configure global DSPy LM for any direct dspy.predict() calls
+    dspy.configure(lm=dspy.LM(
+        _llm_config.model,
+        api_key=_llm_config.api_key,
+        api_base=_llm_config.base_url,
+    ))
+    print(f"[ROMA] LLM configured — provider: {_provider_label}, model: {_llm_config.model}")
 except Exception as e:
+    _llm_config = None
+    _provider_label = "unknown"
     print(f"[ROMA] Warning: LM configuration failed: {e}")
     print("[ROMA] Service will start but /analyze will fail until env vars are set.")
 
@@ -120,8 +180,12 @@ class AnalyzeResponse(BaseModel):
 
 @app.get("/health")
 def health():
-    provider = os.getenv("AI_PROVIDER", "openrouter")
-    return {"status": "ok", "provider": provider, "sdk": "roma-dspy"}
+    return {
+        "status": "ok",
+        "provider": _provider_label,
+        "model": _llm_config.model if _llm_config else "unconfigured",
+        "sdk": "roma-dspy",
+    }
 
 
 @app.post("/analyze", response_model=AnalyzeResponse)
@@ -132,9 +196,11 @@ def analyze(req: AnalyzeRequest):
     The goal and context are combined into a single rich prompt that ROMA
     decomposes into parallel analytical subtasks.
     """
+    if _llm_config is None:
+        raise HTTPException(status_code=503, detail="LLM not configured — check env vars")
+
     start = time.time()
 
-    # Combine goal + context into the full prompt ROMA will solve
     full_prompt = f"""{req.goal}
 
 Market context:
@@ -142,29 +208,30 @@ Market context:
 
     try:
         # ── THE REAL THING: actual roma-dspy solve() call ─────────────────────
-        result = solve(full_prompt)
+        config = build_roma_config(_llm_config)
+        result = solve(full_prompt, max_depth=req.max_depth, config=config)
         # ─────────────────────────────────────────────────────────────────────
 
         duration_ms = int((time.time() - start) * 1000)
-        provider = os.getenv("AI_PROVIDER", "openrouter")
 
-        # roma-dspy returns a string answer (or SolveResult depending on version)
         if isinstance(result, str):
             answer = result
             was_atomic = True
             subtasks = []
         else:
-            # SolveResult object (if the SDK exposes it)
-            answer = str(result.answer if hasattr(result, "answer") else result)
-            was_atomic = getattr(result, "was_atomic", True)
-            raw_subtasks = getattr(result, "subtasks", [])
+            # roma-dspy returns a TaskNode — extract the answer text from .result
+            answer = str(result.result or result.goal or result)
+            # node_type EXECUTE = atomic (no planning step); PLAN = decomposed
+            node_type_str = str(getattr(result, "node_type", "")).upper()
+            was_atomic = "PLAN" not in node_type_str
+            children = getattr(result, "children", []) or []
             subtasks = [
                 SubtaskResult(
-                    id=getattr(t, "id", f"t{i+1}"),
-                    goal=getattr(t, "goal", str(t)),
-                    result=str(getattr(t, "result", "")),
+                    id=str(getattr(c, "task_id", f"t{i+1}"))[:8],
+                    goal=str(getattr(c, "goal", "")),
+                    result=str(getattr(c, "result", "") or ""),
                 )
-                for i, t in enumerate(raw_subtasks)
+                for i, c in enumerate(children)
             ]
 
         return AnalyzeResponse(
@@ -172,7 +239,7 @@ Market context:
             was_atomic=was_atomic,
             subtasks=subtasks,
             duration_ms=duration_ms,
-            provider=provider,
+            provider=_provider_label,
         )
 
     except Exception as e:
