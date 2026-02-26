@@ -181,7 +181,7 @@ function RomaLoader({ elapsed }: { elapsed: number }) {
 // ── Agent cards (post-run results) ──────────────────────────────────────────
 const AGENTS = [
   { key: 'marketDiscovery' as const, label: 'Market Discovery', short: 'MARKET',   icon: '◎', desc: 'KXBTC15M scan',     color: 'var(--brown)',  rgb: '125,112,96',  bg: 'var(--brown-pale)', border: '#cbc6be' },
-  { key: 'priceFeed'       as const, label: 'Price Feed',       short: 'PRICE',    icon: '◈', desc: 'CMC BTC feed',      color: 'var(--green)',  rgb: '74,148,112',  bg: 'var(--green-pale)', border: '#9ecfb8' },
+  { key: 'priceFeed'       as const, label: 'Price Feed',       short: 'PRICE',    icon: '◈', desc: 'Coinbase BTC feed', color: 'var(--green)',  rgb: '74,148,112',  bg: 'var(--green-pale)', border: '#9ecfb8' },
   { key: 'sentiment'       as const, label: 'Sentiment',        short: 'SENTIMENT',icon: '◉', desc: 'roma-dspy',         color: 'var(--blue)',   rgb: '74,127,165',  bg: 'var(--blue-pale)',  border: '#a8cce0' },
   { key: 'probability'     as const, label: 'Probability',      short: 'PROB',     icon: '⬟', desc: 'roma-dspy',         color: 'var(--amber)',  rgb: '160,120,64',  bg: 'var(--amber-pale)', border: '#d0b888' },
   { key: 'risk'            as const, label: 'Risk Manager',     short: 'RISK',     icon: '⬡', desc: 'Kelly + limits',    color: 'var(--brown)',  rgb: '125,112,96',  bg: 'var(--brown-pale)', border: '#cbc6be' },
@@ -217,7 +217,7 @@ function AgentBullets({ agentKey, output, color }: { agentKey: string; output: a
     <>
       <Bullet label="BTC"      value={output.currentPrice ? `$${output.currentPrice.toLocaleString('en-US', { maximumFractionDigits: 2 })}` : '—'} color={color} />
       <Bullet label="vs Strike" value={output.distanceFromStrikePct != null ? `${output.distanceFromStrikePct >= 0 ? '+' : ''}${output.distanceFromStrikePct.toFixed(3)}%` : '—'} />
-      <Bullet label="1h"       value={output.change1h != null ? `${output.change1h >= 0 ? '+' : ''}${output.change1h.toFixed(3)}%` : '—'} />
+      <Bullet label="1h"       value={output.priceChangePct1h != null ? `${output.priceChangePct1h >= 0 ? '+' : ''}${output.priceChangePct1h.toFixed(3)}%` : '—'} />
     </>
   )
 

@@ -78,43 +78,39 @@ export async function GET(req: NextRequest) {
     // Fetch BTC price — Coinbase primary, CMC fallback
     let quote: BTCQuote | null = null
 
+    // ── Primary: Coinbase ────────────────────────────────────────────────────
     const cbRes = await fetch('https://api.coinbase.com/v2/prices/BTC-USD/spot', { cache: 'no-store' }).catch(() => null)
     if (cbRes?.ok) {
       const cb = await cbRes.json()
       const price = parseFloat(cb?.data?.amount)
-      if (price > 0) {
-        quote = {
-          price,
-          percent_change_1h:  0,
-          percent_change_24h: 0,
-          volume_24h:         0,
-          market_cap:         price * 19_700_000,
-          last_updated:       new Date().toISOString(),
-        }
+      if (price > 0) quote = { price, percent_change_1h: 0, percent_change_24h: 0, volume_24h: 0, market_cap: price * 19_700_000, last_updated: new Date().toISOString() }
+    }
+
+    // ── Fallback: CoinGecko (includes 24h change) ────────────────────────────
+    if (!quote) {
+      const cgRes = await fetch(
+        'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd&include_24hr_change=true',
+        { cache: 'no-store' }
+      ).catch(() => null)
+      if (cgRes?.ok) {
+        const data = await cgRes.json()
+        const price = data?.bitcoin?.usd
+        if (price > 0) quote = { price, percent_change_1h: 0, percent_change_24h: data?.bitcoin?.usd_24h_change ?? 0, volume_24h: 0, market_cap: price * 19_700_000, last_updated: new Date().toISOString() }
       }
     }
 
-    // CMC fallback
+    // ── Fallback 2: Jupiter DEX (wBTC on Solana) ─────────────────────────────
     if (!quote) {
-      const cmcKey = process.env.CMC_API_KEY ?? ''
-      if (cmcKey) {
-        const priceRes = await fetch(
-          'https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest?symbol=BTC&convert=USD',
-          { headers: { 'X-CMC_PRO_API_KEY': cmcKey, Accept: 'application/json' }, cache: 'no-store' }
+      const jupKey = process.env.JUPITER_API_KEY
+      if (jupKey) {
+        const jupRes = await fetch(
+          'https://api.jup.ag/price/v2?ids=9n4nbM75f5Ui33ZbPYXn59EwSgE8CGsHtAeTH5YFeJ9E',
+          { headers: { Authorization: `Bearer ${jupKey}`, Accept: 'application/json' }, cache: 'no-store' }
         ).catch(() => null)
-        if (priceRes?.ok) {
-          const data = await priceRes.json()
-          const q = data?.data?.BTC?.quote?.USD
-          if (q?.price > 0) {
-            quote = {
-              price: q.price,
-              percent_change_1h: q.percent_change_1h,
-              percent_change_24h: q.percent_change_24h,
-              volume_24h: q.volume_24h,
-              market_cap: q.market_cap,
-              last_updated: q.last_updated,
-            }
-          }
+        if (jupRes?.ok) {
+          const data = await jupRes.json()
+          const price = parseFloat(data?.data?.['9n4nbM75f5Ui33ZbPYXn59EwSgE8CGsHtAeTH5YFeJ9E']?.price)
+          if (price > 0) quote = { price, percent_change_1h: 0, percent_change_24h: 0, volume_24h: 0, market_cap: price * 19_700_000, last_updated: new Date().toISOString() }
         }
       }
     }
