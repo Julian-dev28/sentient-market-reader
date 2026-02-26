@@ -31,10 +31,11 @@ function getCurrentEventTicker(): string {
   return `KXBTC15M-${yy}${mon}${dd}${hh}${mm}`
 }
 
-export async function GET(_req: NextRequest) {
+export async function GET(req: NextRequest) {
   const p = process.env.AI_PROVIDER ?? 'grok'
   const validProviders = ['anthropic', 'openai', 'grok', 'openrouter'] as const
   const provider: AIProvider = (validProviders as readonly string[]).includes(p) ? p as AIProvider : 'grok'
+  const romaDepth = Math.min(2, Math.max(1, parseInt(req.nextUrl.searchParams.get('depth') ?? '2', 10) || 2))
   try {
     // Try to fetch the currently active market using computed event_ticker
     let markets: KalshiMarket[] = []
@@ -75,49 +76,45 @@ export async function GET(_req: NextRequest) {
       return NextResponse.json({ error: 'No active KXBTC15M markets found' }, { status: 503 })
     }
 
-    // Fetch BTC price — CMC first, Binance fallback
+    // Fetch BTC price — Coinbase primary, CMC fallback
     let quote: BTCQuote | null = null
 
-    const cmcKey = process.env.CMC_API_KEY ?? ''
-    if (cmcKey) {
-      const priceRes = await fetch(
-        'https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest?symbol=BTC&convert=USD',
-        { headers: { 'X-CMC_PRO_API_KEY': cmcKey, Accept: 'application/json' }, cache: 'no-store' }
-      ).catch(() => null)
-      if (priceRes?.ok) {
-        const data = await priceRes.json()
-        const q = data?.data?.BTC?.quote?.USD
-        if (q?.price > 0) {
-          quote = {
-            price: q.price,
-            percent_change_1h: q.percent_change_1h,
-            percent_change_24h: q.percent_change_24h,
-            volume_24h: q.volume_24h,
-            market_cap: q.market_cap,
-            last_updated: q.last_updated,
-          }
+    const cbRes = await fetch('https://api.coinbase.com/v2/prices/BTC-USD/spot', { cache: 'no-store' }).catch(() => null)
+    if (cbRes?.ok) {
+      const cb = await cbRes.json()
+      const price = parseFloat(cb?.data?.amount)
+      if (price > 0) {
+        quote = {
+          price,
+          percent_change_1h:  0,
+          percent_change_24h: 0,
+          volume_24h:         0,
+          market_cap:         price * 19_700_000,
+          last_updated:       new Date().toISOString(),
         }
       }
     }
 
-    // Binance fallback — free, real-time, no key required
+    // CMC fallback
     if (!quote) {
-      const [tickerRes, statsRes] = await Promise.all([
-        fetch('https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT', { cache: 'no-store' }).catch(() => null),
-        fetch('https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT',  { cache: 'no-store' }).catch(() => null),
-      ])
-      if (tickerRes?.ok && statsRes?.ok) {
-        const ticker = await tickerRes.json()
-        const stats  = await statsRes.json()
-        const price  = parseFloat(ticker.price)
-        if (price > 0) {
-          quote = {
-            price,
-            percent_change_1h: 0,
-            percent_change_24h: parseFloat(stats.priceChangePercent),
-            volume_24h: parseFloat(stats.quoteVolume),
-            market_cap: price * 19_700_000,
-            last_updated: new Date().toISOString(),
+      const cmcKey = process.env.CMC_API_KEY ?? ''
+      if (cmcKey) {
+        const priceRes = await fetch(
+          'https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest?symbol=BTC&convert=USD',
+          { headers: { 'X-CMC_PRO_API_KEY': cmcKey, Accept: 'application/json' }, cache: 'no-store' }
+        ).catch(() => null)
+        if (priceRes?.ok) {
+          const data = await priceRes.json()
+          const q = data?.data?.BTC?.quote?.USD
+          if (q?.price > 0) {
+            quote = {
+              price: q.price,
+              percent_change_1h: q.percent_change_1h,
+              percent_change_24h: q.percent_change_24h,
+              volume_24h: q.volume_24h,
+              market_cap: q.market_cap,
+              last_updated: q.last_updated,
+            }
           }
         }
       }
@@ -141,7 +138,7 @@ export async function GET(_req: NextRequest) {
       }
     }
 
-    const pipeline = await runAgentPipeline(markets, quote, orderbook, provider)
+    const pipeline = await runAgentPipeline(markets, quote, orderbook, provider, romaDepth)
     return NextResponse.json(pipeline)
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 })
