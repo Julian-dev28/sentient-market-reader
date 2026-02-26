@@ -16,22 +16,14 @@ import FloatingBackground from '@/components/FloatingBackground'
 export default function Home() {
   const [liveMode, setLiveMode] = useState(false)  // always false on SSR
   const [showLiveWarning, setShowLiveWarning] = useState(false)
-  const [romaDepth, setRomaDepth] = useState<1 | 2>(2)
   // Sync from localStorage after hydration (client-only)
   useEffect(() => {
     if (localStorage.getItem('sentient-live-mode') === 'true') {
       setLiveMode(true)
     }
-    const d = localStorage.getItem('sentient-roma-depth')
-    if (d === '1') setRomaDepth(1)
   }, [])
 
-  const { pipeline, trades, isRunning, nextCycleIn, error, stats, runCycle } = usePipeline(liveMode, romaDepth)
-
-  function handleDepthChange(d: 1 | 2) {
-    setRomaDepth(d)
-    localStorage.setItem('sentient-roma-depth', String(d))
-  }
+  const { pipeline, trades, isRunning, nextCycleIn, error, stats, runCycle } = usePipeline(liveMode)
 
   const md   = pipeline?.agents.marketDiscovery.output
   const pf   = pipeline?.agents.priceFeed.output
@@ -219,22 +211,6 @@ export default function Home() {
                 5-min cycles · 3 signals per 15-min window · CF Benchmarks settlement
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                {/* ROMA depth toggle */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Depth</span>
-                  {([1, 2] as const).map(d => (
-                    <button key={d} onClick={() => handleDepthChange(d)} title={d === 1 ? 'Atomic — single LLM call (~10s)' : 'Full ROMA — Atomizer→Planner→Executors→Aggregator (~5min)'}
-                      style={{
-                        padding: '3px 9px', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer',
-                        border: romaDepth === d ? '1px solid var(--brown)' : '1px solid var(--border)',
-                        background: romaDepth === d ? 'var(--brown)' : 'var(--cream)',
-                        color: romaDepth === d ? '#fff' : 'var(--text-muted)',
-                        transition: 'all 0.15s',
-                      }}>
-                      {d}
-                    </button>
-                  ))}
-                </div>
                 <button
                   onClick={runCycle}
                   disabled={isRunning}

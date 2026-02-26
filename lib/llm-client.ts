@@ -16,13 +16,45 @@ import OpenAI from 'openai'
 export type AIProvider = 'anthropic' | 'openai' | 'grok' | 'openrouter'
 
 // ── Model mapping ────────────────────────────────────────────────────────────
+// All model IDs can be overridden via environment variables — see .env.local.
+//
+// Latest model recommendations (as of Feb 2026):
+//
+// ANTHROPIC
+//   fast:  claude-haiku-4-5-20251001  — current default, still best fast option
+//   smart: claude-sonnet-4-6          — current default; claude-opus-4-6 is available
+//                                       for max intelligence (higher cost)
+//
+// OPENAI
+//   fast:  gpt-4o-mini                — current default; gpt-5-mini available if you
+//                                       have access (faster, cheaper than gpt-5)
+//   smart: gpt-4o                     — current default; gpt-5 / gpt-5.2 available
+//                                       for access-approved accounts
+//
+// GROK (xAI)
+//   fast:  grok-3-fast                — current default; grok-4-1-fast-non-reasoning
+//                                       reported available with 2M context window
+//   smart: grok-3                     — current default; grok-4-0709 / grok-4-1-fast-reasoning
+//                                       available for latest frontier performance
+//
 // For openrouter: set OPENROUTER_MODEL (smart) and optionally OPENROUTER_FAST_MODEL.
-// Defaults to Claude Sonnet / Haiku if unset.
 export const PROVIDER_MODELS: Record<AIProvider, { fast: string; smart: string; label: string }> = {
-  anthropic:   { fast: 'claude-haiku-4-5-20251001', smart: 'claude-sonnet-4-6',  label: 'Claude'      },
-  openai:      { fast: 'gpt-4o-mini',               smart: 'gpt-4o',             label: 'GPT-4o'      },
-  grok:        { fast: 'grok-3-fast',               smart: 'grok-3',             label: 'Grok'        },
-  openrouter:  {
+  anthropic: {
+    fast:  process.env.ANTHROPIC_FAST_MODEL  ?? 'claude-haiku-4-5-20251001',
+    smart: process.env.ANTHROPIC_SMART_MODEL ?? 'claude-sonnet-4-6',
+    label: 'Claude',
+  },
+  openai: {
+    fast:  process.env.OPENAI_FAST_MODEL  ?? 'gpt-4o-mini',
+    smart: process.env.OPENAI_SMART_MODEL ?? 'gpt-4o',
+    label: 'GPT-4o',
+  },
+  grok: {
+    fast:  process.env.GROK_FAST_MODEL  ?? 'grok-3-fast',
+    smart: process.env.GROK_SMART_MODEL ?? 'grok-3',
+    label: 'Grok',
+  },
+  openrouter: {
     fast:  process.env.OPENROUTER_FAST_MODEL  ?? process.env.OPENROUTER_MODEL ?? 'anthropic/claude-haiku-4-5-20251001',
     smart: process.env.OPENROUTER_MODEL       ?? 'anthropic/claude-sonnet-4-6',
     label: 'OpenRouter',

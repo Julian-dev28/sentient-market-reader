@@ -38,7 +38,6 @@ export async function runAgentPipeline(
   quote: BTCQuote,
   orderbook: KalshiOrderbook | null,
   provider: AIProvider = 'grok',
-  romaDepth: number = 2,
 ): Promise<PipelineState> {
   const cycleId = ++cycleCounter
   const cycleStartedAt = new Date().toISOString()
@@ -58,13 +57,10 @@ export async function runAgentPipeline(
     mdResult.output.activeMarket,
     orderbook,
     provider,
-    romaDepth,
   )
 
-  // Pause between the two roma-dspy calls to give Grok's per-minute token budget
-  // breathing room. depth=2 fires ~4-6 parallel executor calls per solve so needs
-  // 30s; depth=1 is a single atomic call so 8s is plenty.
-  await new Promise(r => setTimeout(r, romaDepth === 1 ? 8_000 : 30_000))
+  // Pause between the two roma-dspy calls to give Grok's per-minute token budget breathing room.
+  await new Promise(r => setTimeout(r, 8_000))
 
   // ── Stage 4: Probability Model (roma-dspy Python service) ────────────────
   const probResult = await runProbabilityModel(
@@ -74,7 +70,6 @@ export async function runAgentPipeline(
     mdResult.output.minutesUntilExpiry,
     mdResult.output.activeMarket,
     provider,
-    romaDepth,
   )
 
   // ── Stage 5: Risk Manager ──────────────────────────────────────────────
