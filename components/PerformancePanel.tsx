@@ -16,15 +16,20 @@ export default function PerformancePanel({ stats, trades }: { stats: Performance
   const animatedWinRate = useCountUp(stats.winRate * 100, 800)
   const animatedEdge    = useCountUp(stats.avgEdge * 100, 800)
 
+  const totalAll = stats.totalTrades + stats.pending
   const statCards = [
     {
       label: 'Win Rate',
-      val: stats.totalTrades > 0 ? `${animatedWinRate.toFixed(0)}%` : '—',
+      val: stats.totalTrades > 0 ? `${animatedWinRate.toFixed(0)}%` : totalAll > 0 ? 'pending' : '—',
       color: stats.winRate > 0.5 ? 'var(--green)' : stats.winRate < 0.45 && stats.totalTrades > 0 ? 'var(--pink)' : 'var(--amber)',
     },
-    { label: 'Trades',   val: String(stats.totalTrades),                                          color: 'var(--text-primary)' },
-    { label: 'Avg Edge', val: stats.totalTrades > 0 ? `${animatedEdge.toFixed(1)}%` : '—',       color: 'var(--brown)' },
-    { label: 'W / L',    val: `${stats.wins} / ${stats.losses}`,                                  color: 'var(--text-primary)' },
+    {
+      label: 'Trades',
+      val: totalAll > 0 ? `${stats.totalTrades}${stats.pending > 0 ? ` +${stats.pending}p` : ''}` : '0',
+      color: 'var(--text-primary)',
+    },
+    { label: 'Avg Edge', val: totalAll > 0 ? `${animatedEdge.toFixed(1)}%` : '—', color: 'var(--brown)' },
+    { label: 'W / L',    val: `${stats.wins} / ${stats.losses}`,                   color: 'var(--text-primary)' },
   ]
 
   return (

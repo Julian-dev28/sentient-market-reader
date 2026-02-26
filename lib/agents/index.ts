@@ -38,6 +38,7 @@ export async function runAgentPipeline(
   quote: BTCQuote,
   orderbook: KalshiOrderbook | null,
   provider: AIProvider = 'grok',
+  romaMode?: string,
 ): Promise<PipelineState> {
   const cycleId = ++cycleCounter
   const cycleStartedAt = new Date().toISOString()
@@ -57,6 +58,7 @@ export async function runAgentPipeline(
     mdResult.output.activeMarket,
     orderbook,
     provider,
+    romaMode,
   )
 
   // Pause between the two roma-dspy calls to give Grok's per-minute token budget breathing room.
@@ -70,6 +72,7 @@ export async function runAgentPipeline(
     mdResult.output.minutesUntilExpiry,
     mdResult.output.activeMarket,
     provider,
+    romaMode,
   )
 
   // ── Stage 5: Risk Manager ──────────────────────────────────────────────

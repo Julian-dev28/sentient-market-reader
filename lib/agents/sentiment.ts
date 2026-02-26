@@ -10,6 +10,7 @@ export async function runSentiment(
   market: KalshiMarket | null,
   orderbook: KalshiOrderbook | null,
   provider: AIProvider,
+  romaMode?: string,
 ): Promise<AgentResult<SentimentOutput>> {
   const start = Date.now()
 
@@ -38,7 +39,7 @@ export async function runSentiment(
     `Orderbook NO depth:  ${obNo}`,
   ].join('\n')
 
-  const romaResult = await callPythonRoma(goal, context)
+  const romaResult = await callPythonRoma(goal, context, 1, 2, romaMode)
   const romaTrace  = formatRomaTrace(romaResult)
 
   // Use fast tier (grok-3-mini) — extraction is simple JSON parsing, no need for the
@@ -77,6 +78,7 @@ export async function runSentiment(
       momentum:      extracted.momentum,
       orderbookSkew: extracted.orderbookSkew,
       signals:       extracted.signals,
+      provider:      romaResult.provider,
     },
     reasoning: romaTrace + `\n\nScore: ${extracted.score.toFixed(3)} (${extracted.label}) — ${extracted.signals.join(' | ')}`,
     durationMs: Date.now() - start,

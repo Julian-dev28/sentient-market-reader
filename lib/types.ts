@@ -86,6 +86,7 @@ export interface SentimentOutput {
   momentum: number       // 1h price momentum signal
   orderbookSkew: number  // bid-ask lean from Kalshi
   signals: string[]
+  provider: string       // e.g. "grok/grok-3-fast"
 }
 
 export interface ProbabilityOutput {
@@ -95,6 +96,7 @@ export interface ProbabilityOutput {
   edgePct: number        // edge as %
   recommendation: 'YES' | 'NO' | 'NO_TRADE'
   confidence: 'high' | 'medium' | 'low'
+  provider: string       // e.g. "grok/grok-4-0709"
 }
 
 export interface RiskOutput {

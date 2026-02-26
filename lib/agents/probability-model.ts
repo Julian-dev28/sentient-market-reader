@@ -9,6 +9,7 @@ export async function runProbabilityModel(
   minutesUntilExpiry: number,
   market: KalshiMarket | null,
   provider: AIProvider,
+  romaMode?: string,
 ): Promise<AgentResult<ProbabilityOutput>> {
   const start = Date.now()
 
@@ -32,7 +33,7 @@ export async function runProbabilityModel(
     `(3) time decay with ${minutesUntilExpiry.toFixed(1)} min left, (4) whether model edge vs ` +
     `market-implied ${(pMarket * 100).toFixed(1)}% justifies trading YES, NO, or standing aside.`
 
-  const pythonResult = await callPythonRoma(goal, context)
+  const pythonResult = await callPythonRoma(goal, context, 1, 2, romaMode)
   const romaAnswer = pythonResult.answer
   const agentLabel = `ProbabilityModelAgent (roma-dspy · ${pythonResult.provider})`
   const romaTrace  = formatRomaTrace(pythonResult)
@@ -66,7 +67,7 @@ export async function runProbabilityModel(
   return {
     agentName: agentLabel,
     status: 'done',
-    output: { pModel, pMarket, edge, edgePct, recommendation: extracted.recommendation, confidence: extracted.confidence },
+    output: { pModel, pMarket, edge, edgePct, recommendation: extracted.recommendation, confidence: extracted.confidence, provider: pythonResult.provider },
     reasoning: romaTrace + `\n\nP(model)=${(pModel * 100).toFixed(1)}% vs P(market)=${(pMarket * 100).toFixed(1)}% — edge: ${edgePct >= 0 ? '+' : ''}${edgePct.toFixed(1)}%. Rec: ${extracted.recommendation} (${extracted.confidence})`,
     durationMs: Date.now() - start,
     timestamp: new Date().toISOString(),

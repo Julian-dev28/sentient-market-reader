@@ -24,7 +24,7 @@ const RISK_PARAMS = {
   maxTradesPerDay: 48,     // caps at one per 15-min window
   minEdgePct: 3,           // % minimum edge to trade
   baseContractSize: 5,     // base # of contracts
-  maxContractSize: 20,     // ceiling
+  maxContractSize: 500,    // ceiling
 }
 
 /**
