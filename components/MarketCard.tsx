@@ -164,12 +164,12 @@ function TradeBox({ yesBid, yesAsk, noBid, noAsk, ticker, liveMode }: {
         </div>
         <AnimatedBar value={ask / 2} color={col} />
 
-        {/* Qty input — always visible, always typeable */}
-        <div style={{ marginTop: 10, padding: '7px 10px', borderRadius: 8, background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
-          <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Contracts</div>
+        {/* Qty input */}
+        <div style={{ marginTop: 10 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <span style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', flexShrink: 0 }}>Qty</span>
             <button onClick={() => setCountStr(String(Math.max(1, count - 1)))}
-              style={{ width: 22, height: 22, borderRadius: 5, border: '1px solid var(--border)', background: 'white', cursor: 'pointer', fontSize: 13, fontWeight: 700, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>−</button>
+              style={{ width: 22, height: 22, borderRadius: 5, border: '1px solid var(--border)', background: 'var(--bg-secondary)', cursor: 'pointer', fontSize: 13, fontWeight: 700, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>−</button>
             <input
               type="text" inputMode="numeric" value={countStr}
               onChange={e => handleCount(e.target.value)}
@@ -177,17 +177,14 @@ function TradeBox({ yesBid, yesAsk, noBid, noAsk, ticker, liveMode }: {
               onFocus={e => e.target.select()}
               style={{
                 flex: 1, textAlign: 'center', fontFamily: 'var(--font-geist-mono)',
-                fontSize: 14, fontWeight: 800, color: 'var(--text-primary)',
+                fontSize: 13, fontWeight: 800, color: 'var(--text-primary)',
                 border: '1px solid var(--border)', borderRadius: 6, padding: '3px 4px',
                 background: 'white', outline: 'none',
               }}
             />
             <button onClick={() => setCountStr(String(Math.min(500, count + 1)))}
-              style={{ width: 22, height: 22, borderRadius: 5, border: '1px solid var(--border)', background: 'white', cursor: 'pointer', fontSize: 13, fontWeight: 700, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>+</button>
-          </div>
-          <div style={{ marginTop: 5, display: 'flex', justifyContent: 'space-between', fontSize: 10 }}>
-            <span style={{ color: 'var(--text-muted)' }}>Cost <strong style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-geist-mono)' }}>${cost}</strong></span>
-            <span style={{ color: 'var(--text-muted)' }}>Max profit <strong style={{ color: col, fontFamily: 'var(--font-geist-mono)' }}>${profit}</strong></span>
+              style={{ width: 22, height: 22, borderRadius: 5, border: '1px solid var(--border)', background: 'var(--bg-secondary)', cursor: 'pointer', fontSize: 13, fontWeight: 700, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>+</button>
+            <span style={{ fontSize: 9, color: 'var(--text-muted)', marginLeft: 2 }}>${cost}</span>
           </div>
         </div>
 
