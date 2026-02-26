@@ -21,7 +21,7 @@ export type AIProvider = 'anthropic' | 'openai' | 'grok' | 'openrouter'
 export const PROVIDER_MODELS: Record<AIProvider, { fast: string; smart: string; label: string }> = {
   anthropic:   { fast: 'claude-haiku-4-5-20251001', smart: 'claude-sonnet-4-6',  label: 'Claude'      },
   openai:      { fast: 'gpt-4o-mini',               smart: 'gpt-4o',             label: 'GPT-4o'      },
-  grok:        { fast: 'grok-3-mini',               smart: 'grok-3',             label: 'Grok'        },
+  grok:        { fast: 'grok-3-fast',               smart: 'grok-3',             label: 'Grok'        },
   openrouter:  {
     fast:  process.env.OPENROUTER_FAST_MODEL  ?? process.env.OPENROUTER_MODEL ?? 'anthropic/claude-haiku-4-5-20251001',
     smart: process.env.OPENROUTER_MODEL       ?? 'anthropic/claude-sonnet-4-6',
@@ -117,26 +117,34 @@ export async function llmToolCall<T>(opts: {
   const model = resolveModel(tier, provider)
   const fullSchema = { type: 'object' as const, properties: schema.properties, required: schema.required }
 
+  const timeout = 30_000  // 30s hard cap — extraction should never take this long
+
   if (provider === 'anthropic') {
-    const res = await anthropicClient().messages.create({
-      model,
-      max_tokens: maxTokens,
-      tools: [{ name: toolName, description: toolDescription, input_schema: fullSchema }],
-      tool_choice: { type: 'tool', name: toolName },
-      messages: [{ role: 'user', content: prompt }],
-    })
+    const res = await anthropicClient().messages.create(
+      {
+        model,
+        max_tokens: maxTokens,
+        tools: [{ name: toolName, description: toolDescription, input_schema: fullSchema }],
+        tool_choice: { type: 'tool', name: toolName },
+        messages: [{ role: 'user', content: prompt }],
+      },
+      { signal: AbortSignal.timeout(timeout) },
+    )
     const block = res.content.find(b => b.type === 'tool_use')
     if (!block || block.type !== 'tool_use') throw new Error(`No tool_use block from ${provider}`)
     return block.input as T
   }
 
-  const res = await oaiCompatClient(provider).chat.completions.create({
-    model,
-    max_tokens: maxTokens,
-    tools: [{ type: 'function', function: { name: toolName, description: toolDescription, parameters: fullSchema } }],
-    tool_choice: { type: 'function', function: { name: toolName } },
-    messages: [{ role: 'user', content: prompt }],
-  })
+  const res = await oaiCompatClient(provider).chat.completions.create(
+    {
+      model,
+      max_tokens: maxTokens,
+      tools: [{ type: 'function', function: { name: toolName, description: toolDescription, parameters: fullSchema } }],
+      tool_choice: { type: 'function', function: { name: toolName } },
+      messages: [{ role: 'user', content: prompt }],
+    },
+    { signal: AbortSignal.timeout(timeout) },
+  )
   const toolCall = res.choices[0]?.message?.tool_calls?.[0] as { function: { arguments: string } } | undefined
   if (!toolCall) throw new Error(`No tool_call from ${provider}`)
   return JSON.parse(toolCall.function.arguments) as T

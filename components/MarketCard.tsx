@@ -309,51 +309,6 @@ export default function MarketCard({ market, orderbook, strikePrice, currentBTCP
                 color="var(--blue)"  bg="var(--blue-pale)"  borderCol="#a8cce0"  liveMode={liveMode} />
             </div>
 
-            {/* Orderbook depth — refreshes every 4s */}
-            {orderbook && (
-              <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 10, background: 'var(--cream)', border: '1px solid var(--border)' }}>
-                <div style={{ fontSize: 8, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>
-                  Order Depth
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                  {/* YES depth */}
-                  <div>
-                    <div style={{ fontSize: 8, color: 'var(--green-dark)', fontWeight: 700, marginBottom: 4 }}>YES</div>
-                    {(orderbook.yes ?? []).slice(0, 5).map((lvl, i) => {
-                      const maxDelta = Math.max(...(orderbook.yes ?? []).slice(0, 5).map(l => Math.abs(l.delta)))
-                      const pct = maxDelta > 0 ? (Math.abs(lvl.delta) / maxDelta) * 100 : 0
-                      return (
-                        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 3 }}>
-                          <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 9, color: 'var(--text-muted)', width: 22, textAlign: 'right', flexShrink: 0 }}>{lvl.price}¢</span>
-                          <div style={{ flex: 1, height: 5, borderRadius: 2, background: 'var(--border)', overflow: 'hidden' }}>
-                            <div style={{ height: '100%', width: `${pct}%`, background: 'var(--green)', borderRadius: 2, transition: 'width 0.4s ease' }} />
-                          </div>
-                          <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 8, color: 'var(--text-light)', width: 26, flexShrink: 0 }}>{Math.abs(lvl.delta)}</span>
-                        </div>
-                      )
-                    })}
-                  </div>
-                  {/* NO depth */}
-                  <div>
-                    <div style={{ fontSize: 8, color: 'var(--blue)', fontWeight: 700, marginBottom: 4 }}>NO</div>
-                    {(orderbook.no ?? []).slice(0, 5).map((lvl, i) => {
-                      const maxDelta = Math.max(...(orderbook.no ?? []).slice(0, 5).map(l => Math.abs(l.delta)))
-                      const pct = maxDelta > 0 ? (Math.abs(lvl.delta) / maxDelta) * 100 : 0
-                      return (
-                        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 3 }}>
-                          <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 9, color: 'var(--text-muted)', width: 22, textAlign: 'right', flexShrink: 0 }}>{lvl.price}¢</span>
-                          <div style={{ flex: 1, height: 5, borderRadius: 2, background: 'var(--border)', overflow: 'hidden' }}>
-                            <div style={{ height: '100%', width: `${pct}%`, background: 'var(--blue)', borderRadius: 2, transition: 'width 0.4s ease' }} />
-                          </div>
-                          <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 8, color: 'var(--text-light)', width: 26, flexShrink: 0 }}>{Math.abs(lvl.delta)}</span>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              </div>
-            )}
-
             {/* Countdown with SVG ring */}
             <div style={{
               display: 'flex', alignItems: 'center', gap: 12,

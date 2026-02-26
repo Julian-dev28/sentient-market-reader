@@ -127,15 +127,7 @@ export function usePipeline(liveMode: boolean, romaDepth: number = 2) {
       }))
 
     } catch (err) {
-      const msg = String(err)
-      setError(msg)
-      // Auto-retry once after 15s for non-market-window errors (e.g. transient service failure)
-      if (!msg.includes('trading hours are')) {
-        setTimeout(() => {
-          setError(null)
-          runCycle()
-        }, 15_000)
-      }
+      setError(String(err))
     } finally {
       setIsRunning(false)
       lastCycleRef.current = Date.now()
@@ -143,8 +135,7 @@ export function usePipeline(liveMode: boolean, romaDepth: number = 2) {
     }
   }, [liveMode, romaDepth])
 
-  // Auto-run once on mount so signals populate on first page load
-  useEffect(() => { runCycle() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  // Manual-only — run cycle is triggered by the user clicking the button
 
   // Countdown timer
   useEffect(() => {

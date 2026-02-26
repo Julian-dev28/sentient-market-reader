@@ -38,13 +38,14 @@ export async function runProbabilityModel(
   const agentLabel = `ProbabilityModelAgent (roma-dspy · ${pythonResult.provider})`
   const romaTrace  = formatRomaTrace(pythonResult)
 
+  // Use fast tier (grok-3-mini) — keeps token pressure low after ROMA's heavy calls.
   const extracted = await llmToolCall<{
     pModel: number
     recommendation: ProbabilityOutput['recommendation']
     confidence: ProbabilityOutput['confidence']
   }>({
     provider,
-    tier: 'smart',
+    tier: 'fast',
     maxTokens: 512,
     toolName: 'extract_probability',
     toolDescription: 'Extract probability estimate and trade recommendation from ROMA analysis',
