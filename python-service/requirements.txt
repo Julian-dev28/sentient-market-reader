@@ -1,0 +1,5 @@
+roma-dspy
+fastapi
+uvicorn[standard]
+python-dotenv
+pydantic

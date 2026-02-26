@@ -2,6 +2,34 @@ import type { AgentResult, ProbabilityOutput, KalshiMarket } from '../types'
 import { llmToolCall, type AIProvider } from '../llm-client'
 import { solve } from '../roma/solve'
 
+const PYTHON_ROMA_URL = process.env.PYTHON_ROMA_URL ?? 'http://localhost:8001'
+
+// ── Try the real roma-dspy Python service ────────────────────────────────────
+
+interface PythonRomaResponse {
+  answer: string
+  was_atomic: boolean
+  subtasks: { id: string; goal: string; result: string }[]
+  duration_ms: number
+  provider: string
+}
+
+async function callPythonRoma(goal: string, context: string): Promise<PythonRomaResponse> {
+  const res = await fetch(`${PYTHON_ROMA_URL}/analyze`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ goal, context }),
+    signal: AbortSignal.timeout(120_000),  // 2 min timeout
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(`Python ROMA service ${res.status}: ${text}`)
+  }
+  return res.json()
+}
+
+// ── Main agent ───────────────────────────────────────────────────────────────
+
 export async function runProbabilityModel(
   sentimentScore: number,
   sentimentSignals: string[],
@@ -32,11 +60,42 @@ export async function runProbabilityModel(
     `(3) time decay with ${minutesUntilExpiry.toFixed(1)} min left, (4) whether model edge vs ` +
     `market-implied ${(pMarket * 100).toFixed(1)}% justifies trading YES, NO, or standing aside.`
 
-  try {
-    // ROMA recursive solve: Atomizer → Planner → parallel Executors → Aggregator
-    const romaResult = await solve(goal, context, provider)
+  // ── Attempt 1: real roma-dspy Python service ──────────────────────────────
+  let romaAnswer: string | null = null
+  let wasAtomic = true
+  let subtasks: { id: string; goal: string; result: string }[] = []
+  let agentLabel = 'ProbabilityModelAgent (ROMA · TypeScript)'
+  let romaTrace = ''
 
-    // Structured extraction from ROMA's qualitative reasoning
+  try {
+    const pythonResult = await callPythonRoma(goal, context)
+    romaAnswer  = pythonResult.answer
+    wasAtomic   = pythonResult.was_atomic
+    subtasks    = pythonResult.subtasks
+    agentLabel  = `ProbabilityModelAgent (roma-dspy · ${pythonResult.provider})`
+    romaTrace   = wasAtomic
+      ? `[roma-dspy: solved atomically]\n\n${romaAnswer}`
+      : `[roma-dspy: decomposed into ${subtasks.length} subtasks]\n` +
+        subtasks.map(t => `• ${t.id}: ${t.goal}\n  → ${t.result}`).join('\n') +
+        `\n\n[Aggregated Answer]\n${romaAnswer}`
+  } catch {
+    // ── Attempt 2: TypeScript ROMA fallback ────────────────────────────────
+    const tsResult = await solve(goal, context, provider)
+    romaAnswer = tsResult.answer
+    wasAtomic  = tsResult.wasAtomic
+    subtasks   = tsResult.subtasks.map(t => ({
+      id: t.id, goal: t.goal, result: t.result ?? '',
+    }))
+    agentLabel = `ProbabilityModelAgent (ROMA · TypeScript · ${provider})`
+    romaTrace  = wasAtomic
+      ? `[TypeScript ROMA: solved atomically]\n\n${romaAnswer}`
+      : `[TypeScript ROMA: ${subtasks.length} subtasks]\n` +
+        subtasks.map(t => `• ${t.id}: ${t.goal}\n  → ${t.result}`).join('\n') +
+        `\n\n[Answer]\n${romaAnswer}`
+  }
+
+  // ── Structured extraction from whichever ROMA answered ───────────────────
+  try {
     const extracted = await llmToolCall<{
       pModel: number
       recommendation: ProbabilityOutput['recommendation']
@@ -50,12 +109,12 @@ export async function runProbabilityModel(
       schema: {
         properties: {
           pModel:         { type: 'number', description: 'Estimated P(YES) 0.0–1.0 that BTC ends above strike' },
-          recommendation: { type: 'string', enum: ['YES', 'NO', 'NO_TRADE'], description: `YES = buy YES contracts. NO = buy NO contracts. NO_TRADE = edge < ${((spread + 0.02) * 100).toFixed(1)}¢` },
+          recommendation: { type: 'string', enum: ['YES', 'NO', 'NO_TRADE'], description: `YES = buy YES. NO = buy NO. NO_TRADE = edge < ${((spread + 0.02) * 100).toFixed(1)}¢` },
           confidence:     { type: 'string', enum: ['high', 'medium', 'low'] },
         },
         required: ['pModel', 'recommendation', 'confidence'],
       },
-      prompt: `Extract the probability estimate and trade recommendation from this ROMA analysis:\n\n${romaResult.answer}\n\nMarket-implied P(YES): ${(pMarket * 100).toFixed(1)}%`,
+      prompt: `Extract the probability estimate and trade recommendation from this ROMA analysis:\n\n${romaAnswer}\n\nMarket-implied P(YES): ${(pMarket * 100).toFixed(1)}%`,
     })
 
     const pModel  = Math.max(0, Math.min(1, extracted.pModel))
@@ -63,21 +122,15 @@ export async function runProbabilityModel(
     const edgePct = edge * 100
 
     return {
-      agentName: 'ProbabilityModelAgent (ROMA)',
+      agentName: agentLabel,
       status: 'done',
       output: { pModel, pMarket, edge, edgePct, recommendation: extracted.recommendation, confidence: extracted.confidence },
-      reasoning:
-        romaResult.wasAtomic
-          ? `[ROMA atomic] ${romaResult.answer}`
-          : `[ROMA: ${romaResult.subtasks.length} subtasks]\n` +
-            romaResult.subtasks.map(t => `• ${t.id}: ${t.goal}\n  → ${t.result}`).join('\n') +
-            `\n\n[Answer] ${romaResult.answer}` +
-            `\n\nP(model)=${(pModel * 100).toFixed(1)}% vs P(market)=${(pMarket * 100).toFixed(1)}% — edge: ${edgePct >= 0 ? '+' : ''}${edgePct.toFixed(1)}%. Rec: ${extracted.recommendation} (${extracted.confidence})`,
+      reasoning: romaTrace + `\n\nP(model)=${(pModel * 100).toFixed(1)}% vs P(market)=${(pMarket * 100).toFixed(1)}% — edge: ${edgePct >= 0 ? '+' : ''}${edgePct.toFixed(1)}%. Rec: ${extracted.recommendation} (${extracted.confidence})`,
       durationMs: Date.now() - start,
       timestamp: new Date().toISOString(),
     }
-  } catch (err) {
-    // Rule-based fallback using sigmoid
+  } catch (extractErr) {
+    // ── Attempt 3: full rule-based fallback ──────────────────────────────────
     const timeWeight = Math.max(0, 1 - minutesUntilExpiry / 15)
     const logit = sentimentScore * 3.0 + (distanceFromStrikePct / 0.5) * timeWeight * 2.0
     const pModel = 1 / (1 + Math.exp(-logit))
@@ -88,10 +141,10 @@ export async function runProbabilityModel(
     const confidence: ProbabilityOutput['confidence'] =
       Math.abs(edge) > 0.1 ? 'high' : Math.abs(edge) > 0.04 ? 'medium' : 'low'
     return {
-      agentName: 'ProbabilityModelAgent (ROMA)',
+      agentName: 'ProbabilityModelAgent (rule-based fallback)',
       status: 'done',
       output: { pModel, pMarket, edge, edgePct, recommendation, confidence },
-      reasoning: `[rule-based fallback: ${String(err)}] P(model)=${(pModel * 100).toFixed(1)}% vs P(market)=${(pMarket * 100).toFixed(1)}%`,
+      reasoning: `[rule-based fallback: extraction failed — ${String(extractErr)}]\nROMA answer: ${romaAnswer}\nP(model)=${(pModel * 100).toFixed(1)}%`,
       durationMs: Date.now() - start,
       timestamp: new Date().toISOString(),
     }
