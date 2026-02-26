@@ -1,0 +1,5 @@
+roma-dspy @ git+https://github.com/sentient-agi/ROMA.git
+fastapi
+uvicorn[standard]
+python-dotenv
+pydantic
