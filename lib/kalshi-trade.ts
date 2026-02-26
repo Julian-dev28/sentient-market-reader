@@ -12,6 +12,8 @@ const KALSHI_BASE = 'https://api.elections.kalshi.com/trade-api/v2'
 
 /** Safely extract a string error message from a Kalshi API response body.
  *  Kalshi sometimes returns error as an object: {code, message, details}.
+ *  During maintenance, Kalshi returns authentication_error even with valid
+ *  credentials — detect via the details field and surface a clearer message.
  */
 function extractError(body: unknown, status: number): string {
   if (!body || typeof body !== 'object') return `HTTP ${status}`
@@ -20,6 +22,11 @@ function extractError(body: unknown, status: number): string {
   if (typeof err === 'string') return err
   if (err && typeof err === 'object') {
     const e = err as Record<string, unknown>
+    const details = String(e.details ?? '')
+    // Kalshi wraps maintenance/routing failures as authentication_error
+    if (details.includes('service unavailable') || details.includes('unavailable')) {
+      return 'Kalshi service unavailable — scheduled maintenance (3–5 AM ET weekdays)'
+    }
     return String(e.message ?? e.code ?? JSON.stringify(err))
   }
   if (typeof b.message === 'string') return b.message

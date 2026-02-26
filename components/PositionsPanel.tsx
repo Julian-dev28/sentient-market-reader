@@ -45,10 +45,14 @@ export default function PositionsPanel({ liveMode }: { liveMode: boolean }) {
       const balBody = await balRes.json().catch(() => null)
       if (!balRes.ok) {
         const rawErr = balBody?.error
-        const errMsg = typeof rawErr === 'string' ? rawErr
+        const base = typeof rawErr === 'string' ? rawErr
           : (rawErr?.message ?? rawErr?.code)
           ? String(rawErr.message ?? rawErr.code)
-          : `Auth error (HTTP ${balRes.status}) — check KALSHI_API_KEY and private key`
+          : `Auth error (HTTP ${balRes.status})`
+        // Kalshi returns "authentication_error" during maintenance even with valid credentials
+        const errMsg = base === 'authentication_error'
+          ? 'authentication_error — Kalshi may be in scheduled maintenance (3–5 AM ET weekdays)'
+          : base
         setError(errMsg)
         setLoading(false)
         return
