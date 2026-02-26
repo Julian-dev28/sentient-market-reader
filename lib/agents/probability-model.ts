@@ -33,7 +33,8 @@ export async function runProbabilityModel(
     `(3) time decay with ${minutesUntilExpiry.toFixed(1)} min left, (4) whether model edge vs ` +
     `market-implied ${(pMarket * 100).toFixed(1)}% justifies trading YES, NO, or standing aside.`
 
-  const pythonResult = await callPythonRoma(goal, context, 1, 2, romaMode)
+  // blitz: maxDepth=0 forces atomic (1 executor, no planning) — ~3 LLM calls instead of ~6
+  const pythonResult = await callPythonRoma(goal, context, romaMode === 'blitz' ? 0 : 1, 2, romaMode)
   const romaAnswer = pythonResult.answer
   const agentLabel = `ProbabilityModelAgent (roma-dspy · ${pythonResult.provider})`
   const romaTrace  = formatRomaTrace(pythonResult)
@@ -46,7 +47,7 @@ export async function runProbabilityModel(
   }>({
     provider,
     tier: 'fast',
-    maxTokens: 512,
+    maxTokens: romaMode === 'blitz' ? 256 : 512,
     toolName: 'extract_probability',
     toolDescription: 'Extract probability estimate and trade recommendation from ROMA analysis',
     schema: {
