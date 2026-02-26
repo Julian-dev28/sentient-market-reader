@@ -104,7 +104,7 @@ export default function PositionsPanel({ liveMode }: { liveMode: boolean }) {
     : null
 
   return (
-    <div className="card animate-fade-in" style={{ borderColor: '#d4b896', background: 'linear-gradient(135deg, #fffaf5 0%, #fdf4ea 100%)' }}>
+    <div className="card animate-fade-in" style={{ borderColor: '#8ab4cf', background: 'linear-gradient(135deg, rgba(74,127,165,0.06) 0%, rgba(74,127,165,0.02) 100%)' }}>
 
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>

@@ -86,12 +86,12 @@ export default function BotPanel({
       ) : (
         <button onClick={onStop} style={{
           width: '100%', padding: '12px 0', borderRadius: 9, cursor: 'pointer',
-          border: '1px solid var(--pink)', background: 'var(--pink-pale)',
-          fontSize: 13, fontWeight: 800, color: 'var(--pink)', letterSpacing: '0.03em',
+          border: '1px solid #b5687a', background: 'rgba(181,104,122,0.08)',
+          fontSize: 13, fontWeight: 800, color: '#b5687a', letterSpacing: '0.03em',
           transition: 'all 0.15s',
         }}
-          onMouseEnter={e => { e.currentTarget.style.background = 'var(--pink)'; e.currentTarget.style.color = '#fff' }}
-          onMouseLeave={e => { e.currentTarget.style.background = 'var(--pink-pale)'; e.currentTarget.style.color = 'var(--pink)' }}
+          onMouseEnter={e => { e.currentTarget.style.background = '#b5687a'; e.currentTarget.style.color = '#fff' }}
+          onMouseLeave={e => { e.currentTarget.style.background = 'rgba(181,104,122,0.08)'; e.currentTarget.style.color = '#b5687a' }}
         >
           ■ Stop Agent
         </button>
