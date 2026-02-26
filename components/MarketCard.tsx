@@ -165,7 +165,7 @@ function TradeBox({ yesBid, yesAsk, noBid, noAsk, ticker, liveMode }: {
         <AnimatedBar value={ask / 2} color={col} />
 
         {/* Qty input */}
-        <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'nowrap' }}>
           <span style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', flexShrink: 0 }}>Qty</span>
           <input
             type="text" inputMode="numeric" value={countStr}
@@ -173,13 +173,13 @@ function TradeBox({ yesBid, yesAsk, noBid, noAsk, ticker, liveMode }: {
             onBlur={handleCountBlur}
             onFocus={e => e.target.select()}
             style={{
-              flex: 1, textAlign: 'center', fontFamily: 'var(--font-geist-mono)',
+              flex: 1, minWidth: 0, textAlign: 'center', fontFamily: 'var(--font-geist-mono)',
               fontSize: 13, fontWeight: 800, color: 'var(--text-primary)',
               border: '1px solid var(--border)', borderRadius: 6, padding: '3px 6px',
               background: 'white', outline: 'none',
             }}
           />
-          <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', fontFamily: 'var(--font-geist-mono)', flexShrink: 0 }}>${cost}</span>
+          <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', fontFamily: 'var(--font-geist-mono)', flexShrink: 0, whiteSpace: 'nowrap' }}>${cost}</span>
         </div>
 
         {/* Action states */}
