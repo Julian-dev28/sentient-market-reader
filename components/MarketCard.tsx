@@ -87,7 +87,11 @@ function BuyBox({
       const res  = await fetch('/api/place-order', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       const data = await res.json()
       if (!res.ok || !data.ok) {
-        setOrder({ status: 'err', message: data.error ?? `HTTP ${res.status}` })
+        const rawErr = data.error
+        const errMsg = typeof rawErr === 'string' ? rawErr
+          : (rawErr?.message ?? rawErr?.code) ? String(rawErr.message ?? rawErr.code)
+          : `HTTP ${res.status}`
+        setOrder({ status: 'err', message: errMsg })
       } else {
         setOrder({ status: 'ok', orderId: data.order?.order_id ?? '', fillCount: data.order?.fill_count ?? 0 })
         setTimeout(() => setOrder({ status: 'idle' }), 4000)
