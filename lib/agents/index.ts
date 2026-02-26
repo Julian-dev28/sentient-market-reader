@@ -81,15 +81,7 @@ export async function runAgentPipeline(
     sentProviders,
   )
 
-  // Pause only when both stages share the same provider (shared per-minute token budget).
-  // Reduced from 8s→4s when stages use different modes (lighter sentiment = fewer tokens used).
-  // Split-provider (provider2 set) or multi-provider (providers set) skips the pause entirely.
   const probProvider = provider2 ?? provider
-  const usingSplitProvider = provider2 !== undefined || (providers && providers.length > 1)
-  if (!usingSplitProvider && probProvider === provider) {
-    const pauseMs = sentMode === probMode ? 8_000 : 4_000
-    await new Promise(r => setTimeout(r, pauseMs))
-  }
 
   // ── Stage 4: Probability Model (full quality mode) ────────────────────
   // probProvider may be provider2 (e.g. huggingface) — used for the ROMA solve only.
