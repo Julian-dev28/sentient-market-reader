@@ -71,9 +71,11 @@ function TradeBox({ yesBid, yesAsk, noBid, noAsk, ticker, liveMode }: {
   ticker: string
   liveMode: boolean
 }) {
-  const [side, setSide]   = useState<'yes' | 'no'>('yes')
-  const [count, setCount] = useState(1)
-  const [order, setOrder] = useState<OrderState>({ status: 'idle' })
+  const [side, setSide]       = useState<'yes' | 'no'>('yes')
+  const [countStr, setCountStr] = useState('1')   // raw input string so user can clear and retype
+  const [order, setOrder]     = useState<OrderState>({ status: 'idle' })
+
+  const count = Math.max(1, Math.min(500, parseInt(countStr, 10) || 1))
 
   const isYes  = side === 'yes'
   const bid    = isYes ? yesBid  : noBid
@@ -85,8 +87,12 @@ function TradeBox({ yesBid, yesAsk, noBid, noAsk, ticker, liveMode }: {
   const colBg  = isYes ? 'var(--green-pale)' : 'var(--pink-pale)'
 
   function handleCount(raw: string) {
-    const v = parseInt(raw, 10)
-    if (!isNaN(v)) setCount(Math.max(1, Math.min(500, v)))
+    // Allow empty string while typing; clamp happens on blur and when count is used
+    if (raw === '' || /^\d+$/.test(raw)) setCountStr(raw)
+  }
+
+  function handleCountBlur() {
+    setCountStr(String(count))  // snap to clamped value on blur
   }
 
   async function placeIt() {
@@ -162,21 +168,21 @@ function TradeBox({ yesBid, yesAsk, noBid, noAsk, ticker, liveMode }: {
         <div style={{ marginTop: 12, padding: '10px 12px', borderRadius: 9, background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
           <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Contracts</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <button onClick={() => setCount(c => Math.max(1, c - 1))}
+            <button onClick={() => setCountStr(String(Math.max(1, count - 1)))}
               style={{ width: 26, height: 26, borderRadius: 6, border: '1px solid var(--border)', background: 'white', cursor: 'pointer', fontSize: 15, fontWeight: 700, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>−</button>
             <input
-              type="number" min={1} max={500} value={count}
+              type="text" inputMode="numeric" value={countStr}
               onChange={e => handleCount(e.target.value)}
+              onBlur={handleCountBlur}
+              onFocus={e => e.target.select()}
               style={{
                 flex: 1, textAlign: 'center', fontFamily: 'var(--font-geist-mono)',
                 fontSize: 20, fontWeight: 800, color: 'var(--text-primary)',
                 border: '1px solid var(--border)', borderRadius: 7, padding: '4px 6px',
                 background: 'white', outline: 'none',
-                // hide spinners
-                MozAppearance: 'textfield',
               }}
             />
-            <button onClick={() => setCount(c => Math.min(500, c + 1))}
+            <button onClick={() => setCountStr(String(Math.min(500, count + 1)))}
               style={{ width: 26, height: 26, borderRadius: 6, border: '1px solid var(--border)', background: 'white', cursor: 'pointer', fontSize: 15, fontWeight: 700, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>+</button>
           </div>
           <div style={{ marginTop: 8, display: 'flex', justifyContent: 'space-between', fontSize: 10 }}>
