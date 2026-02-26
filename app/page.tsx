@@ -24,8 +24,8 @@ export default function Home() {
   // Provider split config
   type ProviderKey = 'grok' | 'anthropic' | 'openai' | 'huggingface' | 'openrouter'
   const ALL_PROVIDERS: ProviderKey[] = ['grok', 'anthropic', 'openai', 'huggingface', 'openrouter']
-  const [sentProviders, setSentProviders] = useState<ProviderKey[]>(['grok', 'huggingface'])  // blitz ensemble default
-  const [probProvider2, setProbProvider2] = useState<ProviderKey | ''>('huggingface')          // hf split default
+  const [sentProviders, setSentProviders] = useState<ProviderKey[]>(['grok'])  // grok-only default
+  const [probProvider2, setProbProvider2] = useState<ProviderKey | ''>('')    // no split default
 
   // Sync from localStorage after hydration (client-only)
   useEffect(() => {
@@ -33,7 +33,7 @@ export default function Home() {
     const m = localStorage.getItem('sentient-roma-mode')
     if (m === 'blitz' || m === 'sharp' || m === 'keen' || m === 'smart') setRomaMode(m)
     const sp = localStorage.getItem('sentient-sent-providers')
-    if (sp) { try { setSentProviders(JSON.parse(sp)) } catch { /* ignore */ } }
+    if (sp) { try { setSentProviders(JSON.parse(sp)) } catch { localStorage.removeItem('sentient-sent-providers') } }
     const pp = localStorage.getItem('sentient-prob-provider2')
     if (pp !== null) setProbProvider2(pp as ProviderKey | '')
   }, [])
