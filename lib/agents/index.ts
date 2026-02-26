@@ -59,10 +59,10 @@ export async function runAgentPipeline(
     provider,
   )
 
-  // Brief pause between the two roma-dspy calls to avoid hitting Grok rate limits
-  // (ROMA's internal EXECUTE ×N phase fires parallel LLM calls; two back-to-back solves
-  //  quickly exhaust the per-minute token budget and trigger 429s → circuit breaker)
-  await new Promise(r => setTimeout(r, 8_000))
+  // Pause between the two roma-dspy calls — at max_depth=2 ROMA fires ~4-6 parallel
+  // executor calls per solve; two back-to-back solves need breathing room for Grok's
+  // per-minute token budget.  15s gives the rate limiter enough headroom.
+  await new Promise(r => setTimeout(r, 15_000))
 
   // ── Stage 4: Probability Model (roma-dspy Python service) ────────────────
   const probResult = await runProbabilityModel(

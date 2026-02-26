@@ -40,7 +40,7 @@ export async function runSentiment(
 
   // ── Primary path: official Sentient roma-dspy service ────────────────────────
   try {
-    const romaResult = await callPythonRoma(goal, context, 1)
+    const romaResult = await callPythonRoma(goal, context, 2)
     const romaTrace  = formatRomaTrace(romaResult)
 
     // Structured extraction from ROMA's natural-language answer
