@@ -132,7 +132,8 @@ export function usePipeline(liveMode: boolean) {
     }
   }, [liveMode])
 
-  // No auto-run on mount — user triggers manually via runCycle
+  // Auto-run once on mount so signals populate on first page load
+  useEffect(() => { runCycle() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Countdown timer
   useEffect(() => {
