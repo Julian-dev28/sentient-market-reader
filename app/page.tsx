@@ -11,7 +11,6 @@ import SignalPanel from '@/components/SignalPanel'
 import TradeLog from '@/components/TradeLog'
 import PerformancePanel from '@/components/PerformancePanel'
 import PositionsPanel from '@/components/PositionsPanel'
-import BotPanel from '@/components/BotPanel'
 import FloatingBackground from '@/components/FloatingBackground'
 
 export default function Home() {
@@ -472,18 +471,6 @@ export default function Home() {
 
           {/* ─── RIGHT ─── */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <BotPanel
-              active={botActive}
-              liveMode={liveMode}
-              isRunning={isRunning}
-              nextCycleIn={nextCycleIn}
-              lastAction={exec?.action ?? null}
-              lastSide={(exec?.side as 'yes' | 'no' | null) ?? null}
-              lastPrice={exec?.limitPrice ?? null}
-              tradeCount={trades.length}
-              onStart={handleStartBot}
-              onStop={handleStopBot}
-            />
             <PositionsPanel liveMode={liveMode} />
             <PerformancePanel stats={stats} trades={trades} />
             <TradeLog trades={trades} />
