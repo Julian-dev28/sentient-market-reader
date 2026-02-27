@@ -65,37 +65,37 @@ export async function runAgentPipeline(
   // ── Stage 2: Price Feed ────────────────────────────────────────────────
   const pfResult = runPriceFeed(quote, mdResult.output.strikePrice)
 
-  // ── Stage 3: Sentiment Agent (lighter mode, optionally multi-provider) ──
-  // When `providers` contains multiple entries, the Python service runs each
-  // provider's ROMA solve in parallel and merges the answers — richer signal diversity.
-  const sentProviders = providers && providers.length > 1 ? providers : undefined
-  const sentResult = await runSentiment(
-    quote,
-    mdResult.output.strikePrice,
-    pfResult.output.distanceFromStrikePct,
-    mdResult.output.minutesUntilExpiry,
-    mdResult.output.activeMarket,
-    orderbook,
-    provider,
-    sentMode,
-    sentProviders,
-  )
-
   const probProvider = provider2 ?? provider
+  const sentProviders = providers && providers.length > 1 ? providers : undefined
 
-  // ── Stage 4: Probability Model (full quality mode) ────────────────────
-  // probProvider may be provider2 (e.g. huggingface) — used for the ROMA solve only.
-  // Extraction always runs on the primary provider to ensure reliable tool-call JSON.
-  const probResult = await runProbabilityModel(
-    sentResult.output.score,
-    sentResult.output.signals,
-    pfResult.output.distanceFromStrikePct,
-    mdResult.output.minutesUntilExpiry,
-    mdResult.output.activeMarket,
-    probProvider,
-    probMode,
-    provider,   // extraction provider — always primary (grok)
-  )
+  // ── Stages 3 + 4: Sentiment + Probability in parallel ─────────────────
+  // When provider2 is set (e.g. openrouter), each solve hits a different API
+  // pool — wall time drops from ~60s to ~30s (both solves run simultaneously).
+  // Probability runs without sentiment context when parallel; it reasons
+  // directly from BTC position, time decay, and market odds instead.
+  const [sentResult, probResult] = await Promise.all([
+    runSentiment(
+      quote,
+      mdResult.output.strikePrice,
+      pfResult.output.distanceFromStrikePct,
+      mdResult.output.minutesUntilExpiry,
+      mdResult.output.activeMarket,
+      orderbook,
+      provider,
+      sentMode,
+      sentProviders,
+    ),
+    runProbabilityModel(
+      null,   // parallel mode — no sentiment context available yet
+      null,
+      pfResult.output.distanceFromStrikePct,
+      mdResult.output.minutesUntilExpiry,
+      mdResult.output.activeMarket,
+      probProvider,
+      probMode,
+      provider,   // extraction always on primary (grok) for reliable tool-call JSON
+    ),
+  ])
 
   // ── Stage 5: Risk Manager ──────────────────────────────────────────────
   const side = probResult.output.recommendation === 'YES' ? 'yes' : 'no'

@@ -127,7 +127,14 @@ def build_llm_config(roma_mode: str = "keen", provider_override: Optional[str] =
         api_key = os.getenv("OPENROUTER_API_KEY")
         if not api_key:
             raise ValueError("OPENROUTER_API_KEY not set")
-        model = os.getenv("OPENROUTER_MODEL", "anthropic/claude-sonnet-4-6")
+        if roma_mode == "blitz":
+            model = os.getenv("OPENROUTER_BLITZ_MODEL", os.getenv("OPENROUTER_MODEL", "x-ai/grok-3-mini"))
+        elif roma_mode == "sharp":
+            model = os.getenv("OPENROUTER_FAST_MODEL",  os.getenv("OPENROUTER_MODEL", "x-ai/grok-3-mini"))
+        elif roma_mode == "keen":
+            model = os.getenv("OPENROUTER_MID_MODEL",   os.getenv("OPENROUTER_MODEL", "x-ai/grok-3-mini"))
+        else:  # smart
+            model = os.getenv("OPENROUTER_MODEL", "x-ai/grok-3-mini")
         return (
             LLMConfig(
                 model=f"openrouter/{model}",
