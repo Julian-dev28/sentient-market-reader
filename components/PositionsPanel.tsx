@@ -31,10 +31,6 @@ export default function PositionsPanel({ liveMode }: { liveMode: boolean }) {
   const [data, setData] = useState<PortfolioData>({ balance: null, positions: [], orders: [], fills: [] })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [sellingAll, setSellingAll] = useState(false)
-  const [sellError, setSellError] = useState<string | null>(null)
-  const [limitingAll, setLimitingAll] = useState(false)
-  const [limitError, setLimitError] = useState<string | null>(null)
 
   const fetchPortfolio = useCallback(async () => {
     if (!liveMode) return
@@ -80,60 +76,6 @@ export default function PositionsPanel({ liveMode }: { liveMode: boolean }) {
     }
   }, [liveMode])
 
-  async function sellAll() {
-    const { positions } = data
-    if (positions.length === 0) return
-    setSellingAll(true)
-    setSellError(null)
-    try {
-      const results = await Promise.all(
-        positions.map(pos => {
-          const side = pos.position > 0 ? 'yes' : 'no'
-          const count = Math.abs(pos.position)
-          return fetch('/api/sell-order', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ticker: pos.ticker, side, count }),
-          }).then(r => r.json())
-        })
-      )
-      const failed = results.filter((r) => !r.ok)
-      if (failed.length > 0) {
-        setSellError(`${failed.length} order(s) failed: ${failed[0].error}`)
-      }
-      await fetchPortfolio()
-    } finally {
-      setSellingAll(false)
-    }
-  }
-
-  async function limitAll() {
-    const { positions } = data
-    if (positions.length === 0) return
-    setLimitingAll(true)
-    setLimitError(null)
-    try {
-      const results = await Promise.all(
-        positions.map(pos => {
-          const side = pos.position > 0 ? 'yes' : 'no'
-          const count = Math.abs(pos.position)
-          return fetch('/api/limit-sell-order', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ticker: pos.ticker, side, count }),
-          }).then(r => r.json())
-        })
-      )
-      const failed = results.filter((r) => !r.ok)
-      if (failed.length > 0) {
-        setLimitError(`${failed.length} order(s) failed: ${failed[0].error}`)
-      }
-      await fetchPortfolio()
-    } finally {
-      setLimitingAll(false)
-    }
-  }
-
   useEffect(() => {
     if (!liveMode) return
     fetchPortfolio()
@@ -171,36 +113,6 @@ export default function PositionsPanel({ liveMode }: { liveMode: boolean }) {
           <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>Kalshi Account</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          {data.positions.length > 0 && (
-            <>
-              <button
-                onClick={limitAll}
-                disabled={limitingAll}
-                style={{
-                  padding: '4px 10px', borderRadius: 7, fontSize: 10, fontWeight: 700, cursor: limitingAll ? 'not-allowed' : 'pointer',
-                  border: '1px solid #7a8fb5', background: limitingAll ? 'rgba(122,143,181,0.05)' : 'rgba(122,143,181,0.08)',
-                  color: '#7a8fb5', letterSpacing: '0.02em', transition: 'all 0.15s',
-                }}
-                onMouseEnter={e => { if (!limitingAll) { e.currentTarget.style.background = '#7a8fb5'; e.currentTarget.style.color = '#fff' } }}
-                onMouseLeave={e => { e.currentTarget.style.background = 'rgba(122,143,181,0.08)'; e.currentTarget.style.color = '#7a8fb5' }}
-              >
-                {limitingAll ? '…' : '⬆ Limit 99¢'}
-              </button>
-              <button
-                onClick={sellAll}
-                disabled={sellingAll}
-                style={{
-                  padding: '4px 10px', borderRadius: 7, fontSize: 10, fontWeight: 700, cursor: sellingAll ? 'not-allowed' : 'pointer',
-                  border: '1px solid #b5687a', background: sellingAll ? 'rgba(181,104,122,0.05)' : 'rgba(181,104,122,0.08)',
-                  color: '#b5687a', letterSpacing: '0.02em', transition: 'all 0.15s',
-                }}
-                onMouseEnter={e => { if (!sellingAll) { e.currentTarget.style.background = '#b5687a'; e.currentTarget.style.color = '#fff' } }}
-                onMouseLeave={e => { e.currentTarget.style.background = 'rgba(181,104,122,0.08)'; e.currentTarget.style.color = '#b5687a' }}
-              >
-                {sellingAll ? '…' : '■ Sell All'}
-              </button>
-            </>
-          )}
           <button onClick={fetchPortfolio} disabled={loading}
             style={{ background: 'none', border: 'none', cursor: loading ? 'wait' : 'pointer', fontSize: 14, color: 'var(--text-muted)', padding: '2px 4px' }}
             title="Refresh">
@@ -208,17 +120,6 @@ export default function PositionsPanel({ liveMode }: { liveMode: boolean }) {
           </button>
         </div>
       </div>
-
-      {limitError && (
-        <div style={{ fontSize: 10, color: 'var(--red)', background: 'var(--red-pale)', borderRadius: 6, padding: '7px 10px', marginBottom: 12, lineHeight: 1.5 }}>
-          {limitError}
-        </div>
-      )}
-      {sellError && (
-        <div style={{ fontSize: 10, color: 'var(--red)', background: 'var(--red-pale)', borderRadius: 6, padding: '7px 10px', marginBottom: 12, lineHeight: 1.5 }}>
-          {sellError}
-        </div>
-      )}
 
       {error && (
         <div style={{ fontSize: 10, color: 'var(--red)', background: 'var(--red-pale)', borderRadius: 6, padding: '7px 10px', marginBottom: 12, lineHeight: 1.5 }}>
@@ -262,13 +163,12 @@ export default function PositionsPanel({ liveMode }: { liveMode: boolean }) {
             const cost   = (pos.market_exposure / 100).toFixed(2)
             const rpnl   = pos.realized_pnl / 100
             const fees   = (pos.fees_paid / 100).toFixed(2)
-            const side   = isYes ? 'yes' : 'no'
             return (
               <div key={pos.ticker} style={{
                 padding: '8px 0',
                 borderBottom: i < positions.length - 1 ? '1px solid var(--border)' : 'none',
               }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 3 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                     <span className={`pill ${isYes ? 'pill-green' : 'pill-pink'}`} style={{ fontSize: 8 }}>
                       {isYes ? '↑ YES' : '↓ NO'}
@@ -276,15 +176,13 @@ export default function PositionsPanel({ liveMode }: { liveMode: boolean }) {
                     <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 11, fontWeight: 700, color: 'var(--text-primary)' }}>
                       {qty}×
                     </span>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
                     {rpnl !== 0 && (
-                      <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 10, fontWeight: 700, color: rpnl >= 0 ? 'var(--green-dark)' : 'var(--pink)' }}>
-                        {rpnl >= 0 ? '+' : ''}${rpnl.toFixed(2)}
+                      <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 11, fontWeight: 700, color: rpnl >= 0 ? 'var(--green-dark)' : 'var(--pink)' }}>
+                        {rpnl >= 0 ? '+' : ''}${rpnl.toFixed(2)} realized
                       </span>
                     )}
-                  </div>
-                  <div style={{ display: 'flex', gap: 5 }}>
-                    <PositionActionButton ticker={pos.ticker} side={side} count={qty} route="/api/limit-sell-order" label="99¢" onDone={fetchPortfolio} />
-                    <PositionActionButton ticker={pos.ticker} side={side} count={qty} route="/api/sell-order"       label="Sell" onDone={fetchPortfolio} danger />
                   </div>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -391,34 +289,6 @@ export default function PositionsPanel({ liveMode }: { liveMode: boolean }) {
         </div>
       )}
     </div>
-  )
-}
-
-function PositionActionButton({ ticker, side, count, route, label, onDone, danger }: {
-  ticker: string; side: string; count: number; route: string; label: string; onDone: () => void; danger?: boolean
-}) {
-  const [busy, setBusy] = useState(false)
-  const col = danger ? '#b5687a' : '#7a8fb5'
-
-  async function handle() {
-    setBusy(true)
-    try {
-      await fetch(route, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ticker, side, count }) })
-      onDone()
-    } finally { setBusy(false) }
-  }
-
-  return (
-    <button onClick={handle} disabled={busy} style={{
-      border: `1px solid ${col}`, borderRadius: 5, padding: '2px 8px',
-      fontSize: 9, fontWeight: 700, color: col, background: `${col}12`,
-      cursor: busy ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap', transition: 'all 0.15s',
-    }}
-      onMouseEnter={e => { if (!busy) { e.currentTarget.style.background = col; e.currentTarget.style.color = '#fff' } }}
-      onMouseLeave={e => { e.currentTarget.style.background = `${col}12`; e.currentTarget.style.color = col }}
-    >
-      {busy ? '…' : label}
-    </button>
   )
 }
 

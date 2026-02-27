@@ -76,19 +76,6 @@ function TradeBox({ yesBid, yesAsk, noBid, noAsk, ticker, liveMode }: {
   const [side, setSide]     = useState<'yes' | 'no'>('yes')
   const [amtStr, setAmtStr] = useState('10')   // dollar amount as string
   const [order, setOrder]   = useState<OrderState>({ status: 'idle' })
-  const [posSize, setPosSize] = useState(0)
-
-  // Refresh position count for current ticker + side whenever either changes
-  useEffect(() => {
-    if (!liveMode) { setPosSize(0); return }
-    fetch('/api/positions', { cache: 'no-store' })
-      .then(r => r.json())
-      .then(d => {
-        const pos = (d.positions ?? []).find((p: { ticker: string; position: number }) => p.ticker === ticker)
-        setPosSize(pos ? (side === 'yes' ? Math.max(0, pos.position) : Math.max(0, -pos.position)) : 0)
-      })
-      .catch(() => setPosSize(0))
-  }, [ticker, side, liveMode])
 
   const isYes  = side === 'yes'
   const bid    = isYes ? yesBid  : noBid
@@ -109,22 +96,6 @@ function TradeBox({ yesBid, yesAsk, noBid, noAsk, ticker, liveMode }: {
   function handleAmtBlur() {
     const v = parseFloat(amtStr)
     setAmtStr(isNaN(v) || v <= 0 ? '1' : String(v))
-  }
-
-  async function callSellRoute(route: string) {
-    if (!liveMode || posSize === 0) return
-    setOrder({ status: 'placing' })
-    try {
-      const res  = await fetch(route, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ticker, side, count: posSize }) })
-      const data = await res.json()
-      if (!res.ok || !data.ok) {
-        setOrder({ status: 'err', message: data.error ?? `HTTP ${res.status}` })
-      } else {
-        setOrder({ status: 'ok', orderId: data.order?.order_id ?? '', fillCount: data.order?.fill_count ?? 0 })
-        setPosSize(0)
-        setTimeout(() => setOrder({ status: 'idle' }), 4000)
-      }
-    } catch (err) { setOrder({ status: 'err', message: String(err) }) }
   }
 
   async function placeIt(overrideAmt?: number) {
@@ -226,34 +197,6 @@ function TradeBox({ yesBid, yesAsk, noBid, noAsk, ticker, liveMode }: {
           ))}
         </div>
 
-        {/* Limit 99¢ / Sell All — scoped to current side position */}
-        {liveMode && (
-          <div style={{ marginTop: 7, display: 'flex', gap: 5 }}>
-            {[
-              { label: `⬆ Limit 99¢${posSize > 0 ? ` (${posSize})` : ''}`, route: '/api/limit-sell-order', color: '#7a8fb5' },
-              { label: `■ Sell All${posSize > 0 ? ` (${posSize})` : ''}`, route: '/api/sell-order',       color: '#b5687a' },
-            ].map(({ label, route, color }) => (
-              <button key={route}
-                disabled={order.status === 'placing' || posSize === 0}
-                onClick={() => callSellRoute(route)}
-                style={{
-                  flex: 1, padding: '10px 0', borderRadius: 9,
-                  border: `1px solid ${color}`,
-                  background: posSize > 0 ? `${color}14` : 'var(--bg-secondary)',
-                  fontSize: 12, fontWeight: 800,
-                  color: posSize > 0 ? color : 'var(--text-light)',
-                  cursor: posSize > 0 && order.status !== 'placing' ? 'pointer' : 'not-allowed',
-                  transition: 'all 0.15s', fontFamily: 'var(--font-geist-mono)',
-                }}
-                onMouseEnter={e => { if (posSize > 0) { e.currentTarget.style.background = color; e.currentTarget.style.color = '#fff' } }}
-                onMouseLeave={e => { e.currentTarget.style.background = posSize > 0 ? `${color}14` : 'var(--bg-secondary)'; e.currentTarget.style.color = posSize > 0 ? color : 'var(--text-light)' }}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        )}
-
         {/* Dollar amount input */}
         <div style={{ marginTop: 7, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'nowrap' }}>
           <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-secondary)', flexShrink: 0 }}>$</span>
@@ -327,6 +270,20 @@ function TradeBox({ yesBid, yesAsk, noBid, noAsk, ticker, liveMode }: {
 export default function MarketCard({ market, orderbook, strikePrice, currentBTCPrice, secondsUntilExpiry, liveMode, onRefresh }: MarketCardProps) {
   const [countdown, setCountdown] = useState(secondsUntilExpiry)
   const [spinning, setSpinning] = useState(false)
+  const [sellingAll, setSellingAll]   = useState(false)
+  const [limitingAll, setLimitingAll] = useState(false)
+
+  async function batchSell(route: string, setter: (v: boolean) => void) {
+    setter(true)
+    try {
+      const d = await fetch('/api/positions', { cache: 'no-store' }).then(r => r.json())
+      await Promise.all((d.positions ?? []).map((pos: { ticker: string; position: number }) => {
+        const side  = pos.position > 0 ? 'yes' : 'no'
+        const count = Math.abs(pos.position)
+        return fetch(route, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ticker: pos.ticker, side, count }) })
+      }))
+    } finally { setter(false) }
+  }
 
   function handleRefresh() {
     if (spinning) return
@@ -444,13 +401,35 @@ export default function MarketCard({ market, orderbook, strikePrice, currentBTCP
             </div>
 
             {/* Unified YES / NO trade box */}
-            <div style={{ marginBottom: 12 }}>
+            <div style={{ marginBottom: liveMode ? 8 : 12 }}>
               <TradeBox
                 yesBid={market.yes_bid} yesAsk={market.yes_ask}
                 noBid={market.no_bid}   noAsk={market.no_ask}
                 ticker={market.ticker}  liveMode={liveMode}
               />
             </div>
+
+            {/* Global position actions */}
+            {liveMode && (
+              <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                {[
+                  { label: '⬆ Limit All 99¢', busy: limitingAll, route: '/api/limit-sell-order', setter: setLimitingAll, color: '#7a8fb5' },
+                  { label: '■ Sell All',        busy: sellingAll,  route: '/api/sell-order',       setter: setSellingAll,  color: '#b5687a' },
+                ].map(({ label, busy, route, setter, color }) => (
+                  <button key={route} disabled={busy} onClick={() => batchSell(route, setter)}
+                    style={{
+                      flex: 1, padding: '10px 0', borderRadius: 9, cursor: busy ? 'not-allowed' : 'pointer',
+                      border: `1px solid ${color}`, background: `${color}12`,
+                      fontSize: 12, fontWeight: 700, color, transition: 'all 0.15s',
+                    }}
+                    onMouseEnter={e => { if (!busy) { e.currentTarget.style.background = color; e.currentTarget.style.color = '#fff' } }}
+                    onMouseLeave={e => { e.currentTarget.style.background = `${color}12`; e.currentTarget.style.color = color }}
+                  >
+                    {busy ? '…' : label}
+                  </button>
+                ))}
+              </div>
+            )}
 
             {/* Countdown with SVG ring */}
             <div style={{
