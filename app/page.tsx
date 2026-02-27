@@ -495,23 +495,41 @@ export default function Home() {
                   disabled={serverLocked && !isRunning}
                   title={serverLocked && !isRunning ? 'Pipeline already running on server' : undefined}
                   style={{
-                    padding: '7px 18px', borderRadius: 9,
+                    padding: '10px 32px', borderRadius: 12,
                     background: isRunning
-                      ? 'linear-gradient(135deg, #c0392b 0%, #e74c3c 100%)'
-                      : (serverLocked ? 'var(--cream-dark)' : 'linear-gradient(135deg, var(--green-dark) 0%, var(--green) 100%)'),
-                    border: isRunning ? '1px solid #c0392b' : (serverLocked ? '1px solid var(--border)' : '1px solid var(--green-dark)'),
+                      ? 'linear-gradient(135deg, #a93226 0%, #c0392b 100%)'
+                      : serverLocked
+                      ? 'var(--cream-dark)'
+                      : 'linear-gradient(135deg, #2d7a52 0%, #3a9e72 50%, #4ab87f 100%)',
+                    border: isRunning ? '1px solid #c0392b' : serverLocked ? '1px solid var(--border)' : '1px solid #2d7a52',
                     color: serverLocked && !isRunning ? 'var(--text-muted)' : '#fff',
-                    cursor: isRunning ? 'pointer' : (serverLocked ? 'not-allowed' : 'pointer'),
-                    fontSize: 12, fontWeight: 700,
-                    display: 'flex', alignItems: 'center', gap: 6,
-                    boxShadow: isRunning ? '0 2px 10px rgba(192,57,43,0.3)' : (serverLocked ? 'none' : '0 2px 10px rgba(74,148,112,0.3)'),
-                    transition: 'all 0.2s', letterSpacing: '0.02em',
+                    cursor: isRunning ? 'pointer' : serverLocked ? 'not-allowed' : 'pointer',
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1,
+                    boxShadow: isRunning
+                      ? '0 4px 18px rgba(169,50,38,0.4), inset 0 1px 0 rgba(255,255,255,0.1)'
+                      : serverLocked ? 'none'
+                      : '0 4px 18px rgba(45,122,82,0.4), inset 0 1px 0 rgba(255,255,255,0.15)',
+                    transition: 'all 0.2s',
                   }}
                 >
-                  {isRunning
-                    ? <><span style={{ display: 'inline-block' }}>■</span> Stop</>
-                    : serverLocked ? <><span style={{ animation: 'spin-slow 1s linear infinite', display: 'inline-block' }}>◌</span> Pipeline running...</>
-                    : '▶ Run Cycle'}
+                  {isRunning ? (
+                    <>
+                      <span style={{ fontSize: 15, fontWeight: 800, letterSpacing: '0.04em', lineHeight: 1 }}>■ Stop</span>
+                      <span style={{ fontSize: 9, fontWeight: 500, opacity: 0.75, letterSpacing: '0.08em', textTransform: 'uppercase' }}>pipeline</span>
+                    </>
+                  ) : serverLocked ? (
+                    <>
+                      <span style={{ fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 5, lineHeight: 1 }}>
+                        <span style={{ animation: 'spin-slow 1s linear infinite', display: 'inline-block' }}>◌</span> Running
+                      </span>
+                      <span style={{ fontSize: 9, fontWeight: 500, opacity: 0.6, letterSpacing: '0.08em', textTransform: 'uppercase' }}>server locked</span>
+                    </>
+                  ) : (
+                    <>
+                      <span style={{ fontSize: 15, fontWeight: 800, letterSpacing: '0.04em', lineHeight: 1 }}>▶ Run Cycle</span>
+                      <span style={{ fontSize: 9, fontWeight: 500, opacity: 0.7, letterSpacing: '0.08em', textTransform: 'capitalize' }}>{romaMode} mode</span>
+                    </>
+                  )}
                 </button>
               </div>
             </div>
