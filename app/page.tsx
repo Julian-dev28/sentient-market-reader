@@ -33,7 +33,7 @@ export default function Home() {
     localStorage.setItem('sentient-roma-mode', m)
   }
 
-  const { pipeline, trades, isRunning, nextCycleIn, error, stats, runCycle, stopCycle } = usePipeline(
+  const { pipeline, trades, isRunning, serverLocked, nextCycleIn, error, stats, runCycle, stopCycle } = usePipeline(
     liveMode, romaMode, botActive, aiRisk,
   )
 
@@ -441,24 +441,27 @@ export default function Home() {
                   ))}
                 </div>
                 <button
-                  onClick={isRunning ? stopCycle : runCycle}
+                  onClick={isRunning ? stopCycle : (serverLocked ? undefined : runCycle)}
+                  disabled={serverLocked && !isRunning}
+                  title={serverLocked && !isRunning ? 'Pipeline already running on server' : undefined}
                   style={{
                     padding: '7px 18px', borderRadius: 9,
                     background: isRunning
                       ? 'linear-gradient(135deg, #c0392b 0%, #e74c3c 100%)'
-                      : 'linear-gradient(135deg, var(--green-dark) 0%, var(--green) 100%)',
-                    border: isRunning ? '1px solid #c0392b' : '1px solid var(--green-dark)',
-                    color: '#fff',
-                    cursor: 'pointer',
+                      : (serverLocked ? 'var(--cream-dark)' : 'linear-gradient(135deg, var(--green-dark) 0%, var(--green) 100%)'),
+                    border: isRunning ? '1px solid #c0392b' : (serverLocked ? '1px solid var(--border)' : '1px solid var(--green-dark)'),
+                    color: serverLocked && !isRunning ? 'var(--text-muted)' : '#fff',
+                    cursor: isRunning ? 'pointer' : (serverLocked ? 'not-allowed' : 'pointer'),
                     fontSize: 12, fontWeight: 700,
                     display: 'flex', alignItems: 'center', gap: 6,
-                    boxShadow: isRunning ? '0 2px 10px rgba(192,57,43,0.3)' : '0 2px 10px rgba(74,148,112,0.3)',
+                    boxShadow: isRunning ? '0 2px 10px rgba(192,57,43,0.3)' : (serverLocked ? 'none' : '0 2px 10px rgba(74,148,112,0.3)'),
                     transition: 'all 0.2s',
                     letterSpacing: '0.02em',
                   }}
                 >
                   {isRunning
                     ? <><span style={{ display: 'inline-block' }}>■</span> Stop</>
+                    : serverLocked ? <><span style={{ animation: 'spin-slow 1s linear infinite', display: 'inline-block' }}>◌</span> Pipeline running...</>
                     : '▶ Run Cycle'}
                 </button>
               </div>

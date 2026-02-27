@@ -12,6 +12,7 @@ export async function runSentiment(
   provider: AIProvider,
   romaMode?: string,
   providers?: AIProvider[],  // multi-provider parallel solve
+  prevContext?: string,
 ): Promise<AgentResult<SentimentOutput>> {
   const start = Date.now()
 
@@ -42,6 +43,7 @@ export async function runSentiment(
       : 'No active Kalshi market',
     `Orderbook YES depth: ${obYes}`,
     `Orderbook NO depth:  ${obNo}`,
+    ...(prevContext ? [`\nPrevious cycle analysis:\n${prevContext}`] : []),
   ].join('\n')
 
   // Depth controlled by ROMA_MAX_DEPTH env var (default 1). ROMA treats 0 as unlimited — never send 0.

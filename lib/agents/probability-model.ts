@@ -11,6 +11,7 @@ export async function runProbabilityModel(
   provider: AIProvider,       // ROMA solve provider (may be split provider2)
   romaMode?: string,
   extractionProvider?: AIProvider,  // provider for JSON extraction step (defaults to provider)
+  prevContext?: string,
 ): Promise<AgentResult<ProbabilityOutput>> {
   const start = Date.now()
 
@@ -30,6 +31,7 @@ export async function runProbabilityModel(
     `Market-implied P(YES): ${(pMarket * 100).toFixed(1)}¢ — crowd's probability BTC ends above strike`,
     `Bid-ask spread: ${(spread * 100).toFixed(1)}¢`,
     `Minimum edge to trade: spread + 2¢ = ${((spread + 0.02) * 100).toFixed(1)}¢`,
+    ...(prevContext ? [`\nPrevious cycle analysis:\n${prevContext}`] : []),
   ].join('\n')
 
   const goal =
