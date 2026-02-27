@@ -60,16 +60,23 @@ export function usePipeline(
   const countdownRef                = useRef<ReturnType<typeof setInterval> | null>(null)
   const autoIntervalRef             = useRef<ReturnType<typeof setInterval> | null>(null)
   const runCycleRef                 = useRef<(() => Promise<void>) | null>(null)
+  const abortRef                    = useRef<AbortController | null>(null)
+
+  const stopCycle = useCallback(() => {
+    abortRef.current?.abort()
+  }, [])
 
   const runCycle = useCallback(async () => {
     setIsRunning(true)
     setError(null)
+    const controller = new AbortController()
+    abortRef.current = controller
     try {
       const params = new URLSearchParams({ mode: romaMode })
       if (aiRisk) params.set('aiRisk', 'true')
       if (provider2) params.set('provider2', provider2)
       if (providers && providers.length > 1) params.set('providers', providers.join(','))
-      const res = await fetch(`/api/pipeline?${params}`, { cache: 'no-store' })
+      const res = await fetch(`/api/pipeline?${params}`, { cache: 'no-store', signal: controller.signal })
       if (!res.ok) {
         if (res.status === 503) throw new Error('No active KXBTC15M market — trading hours are ~11:30 AM–midnight ET weekdays')
         throw new Error(`Pipeline error ${res.status}`)
@@ -143,7 +150,11 @@ export function usePipeline(
       }))
 
     } catch (err) {
-      setError(String(err))
+      if (err instanceof Error && err.name === 'AbortError') {
+        setError('Pipeline stopped')
+      } else {
+        setError(String(err))
+      }
     } finally {
       setIsRunning(false)
       lastCycleRef.current = Date.now()
@@ -173,5 +184,5 @@ export function usePipeline(
 
   const stats = computeStats(trades)
 
-  return { pipeline, trades, isRunning, nextCycleIn, error, stats, runCycle }
+  return { pipeline, trades, isRunning, nextCycleIn, error, stats, runCycle, stopCycle }
 }
