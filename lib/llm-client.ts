@@ -49,10 +49,10 @@ export const ROMA_MODE: RomaMode = (() => {
 //   smart: gpt-4o                     ~10–20s  — smart tier
 //
 // GROK (xAI)
-//   blitz: grok-3-mini-fast           ~3–8s   — same weights as mini, faster inference infra
-//   fast:  grok-3-mini                ~5–10s  — sharp tier
-//   mid:   grok-3-fast                ~10–20s  — keen tier
-//   smart: grok-3                     ~30–50s  — smart tier
+//   blitz: grok-4-1-fast-non-reasoning  ~0.8s   — absolute fastest, grok-4.1 non-reasoning
+//   fast:  grok-3-mini-fast             ~9.8s   — sharp tier, grok-3 mini non-reasoning
+//   mid:   grok-3-mini                  ~10.6s  — keen tier, grok-3 mini reasoning
+//   smart: grok-3                       ~30–50s — smart tier
 //
 // For openrouter: set OPENROUTER_MODEL (smart), OPENROUTER_MID_MODEL (keen), OPENROUTER_FAST_MODEL (sharp/blitz).
 // For huggingface: set HUGGINGFACE_API_KEY + optionally HF_BASE_URL (default: router.huggingface.co/v1).
@@ -76,9 +76,9 @@ export const PROVIDER_MODELS: Record<AIProvider, { blitz: string; fast: string; 
     label: 'GPT-4o',
   },
   grok: {
-    blitz: process.env.GROK_BLITZ_MODEL ?? 'grok-3-mini-fast',
-    fast:  process.env.GROK_FAST_MODEL  ?? 'grok-3-mini',
-    mid:   process.env.GROK_MID_MODEL   ?? 'grok-3-fast',
+    blitz: process.env.GROK_BLITZ_MODEL ?? 'grok-4-1-fast-non-reasoning',  // 0.8s/call — fastest
+    fast:  process.env.GROK_FAST_MODEL  ?? 'grok-3-mini-fast',              // 9.8s/call
+    mid:   process.env.GROK_MID_MODEL   ?? 'grok-3-mini',                   // 10.6s/call
     smart: process.env.GROK_SMART_MODEL ?? 'grok-3',
     label: 'Grok',
   },

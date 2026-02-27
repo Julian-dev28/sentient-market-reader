@@ -107,11 +107,11 @@ def build_llm_config(roma_mode: str = "keen", provider_override: Optional[str] =
         if not api_key:
             raise ValueError("XAI_API_KEY not set")
         if roma_mode == "blitz":
-            model = os.getenv("GROK_BLITZ_MODEL", "grok-4-fast-non-reasoning")
+            model = os.getenv("GROK_BLITZ_MODEL", "grok-4-1-fast-non-reasoning")  # 0.8s/call
         elif roma_mode == "sharp":
-            model = os.getenv("GROK_FAST_MODEL", "grok-3-mini")
+            model = os.getenv("GROK_FAST_MODEL", "grok-3-mini-fast")               # 9.8s/call
         elif roma_mode == "keen":
-            model = os.getenv("GROK_MID_MODEL", "grok-3-fast")
+            model = os.getenv("GROK_MID_MODEL", "grok-3-mini")                     # 10.6s/call
         else:  # smart
             model = os.getenv("GROK_SMART_MODEL", "grok-3")
         return (

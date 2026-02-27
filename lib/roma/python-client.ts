@@ -46,6 +46,7 @@ export async function callPythonRoma(
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
+        signal: AbortSignal.timeout(220_000),  // 220s hard cap — matches Python ROMA timeout
       })
       if (!res.ok) {
         const text = await res.text().catch(() => '')
