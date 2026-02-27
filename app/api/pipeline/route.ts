@@ -3,10 +3,11 @@ import { runAgentPipeline } from '@/lib/agents'
 import { buildKalshiHeaders } from '@/lib/kalshi-auth'
 import type { KalshiMarket, KalshiOrderbook, BTCQuote } from '@/lib/types'
 import type { AIProvider } from '@/lib/llm-client'
+import { tryLockPipeline, releasePipelineLock } from '@/lib/pipeline-lock'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
-export const maxDuration = 180  // allow up to 3 min — depth=1 ROMA typically completes in ~60s
+export const maxDuration = 300  // 5 min — blitz ROMA makes ~6 LLM calls per solve (~90-150s)
 
 /** Compute the current active KXBTC15M event_ticker using ET timezone
  *  Format: KXBTC15M-{YY}{MON}{DD}{HHMM} — date/time in US Eastern Time
@@ -42,6 +43,12 @@ function getCurrentEventTicker(): string {
 }
 
 export async function GET(req: NextRequest) {
+  // Reject concurrent pipeline runs — each ROMA solve takes ~90-150s; stacking requests
+  // fills the Python service queue with zombie tasks and causes cascading timeouts.
+  if (!tryLockPipeline()) {
+    return NextResponse.json({ error: 'Pipeline already running — retry in ~2min' }, { status: 429 })
+  }
+
   const p = process.env.AI_PROVIDER ?? 'grok'
   const validProviders = ['anthropic', 'openai', 'grok', 'openrouter', 'huggingface'] as const
   const provider: AIProvider = (validProviders as readonly string[]).includes(p) ? p as AIProvider : 'grok'
@@ -164,6 +171,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(pipeline)
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 })
+  } finally {
+    releasePipelineLock()
   }
 }
 
