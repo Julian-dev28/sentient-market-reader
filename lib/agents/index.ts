@@ -24,6 +24,7 @@ import type {
   ExecutionOutput,
 } from '../types'
 import type { AIProvider } from '../llm-client'
+import { getLastAnalysis, setLastAnalysis } from '../pipeline-lock'
 import { runMarketDiscovery } from './market-discovery'
 import { runPriceFeed } from './price-feed'
 import { runSentiment } from './sentiment'
@@ -59,6 +60,12 @@ export async function runAgentPipeline(
   const sentMode = SENT_MODE_MAP[mode] ?? mode
   const probMode = mode
 
+  // ── Previous cycle context ─────────────────────────────────────────────
+  const last = getLastAnalysis()
+  const prevContext = last
+    ? `pModel=${(last.pModel * 100).toFixed(1)}% | market=${(last.pMarket * 100).toFixed(1)}% | edge=${(last.edge * 100).toFixed(1)}¢ | rec=${last.recommendation} | sentiment=${last.sentimentLabel}(${last.sentimentScore.toFixed(2)}) | BTC=$${last.btcPrice.toLocaleString()} vs strike=$${last.strikePrice.toLocaleString()} | completed ${Math.round((Date.now() - new Date(last.completedAt).getTime()) / 60000)}min ago`
+    : undefined
+
   // ── Stage 1: Market Discovery ──────────────────────────────────────────
   const mdResult = await runMarketDiscovery(markets)
 
@@ -84,6 +91,7 @@ export async function runAgentPipeline(
       provider,
       sentMode,
       sentProviders,
+      prevContext,
     ),
     runProbabilityModel(
       null,   // parallel mode — no sentiment context available yet
@@ -94,6 +102,7 @@ export async function runAgentPipeline(
       probProvider,
       probMode,
       provider,   // extraction always on primary (grok) for reliable tool-call JSON
+      prevContext,
     ),
   ])
 
@@ -130,6 +139,19 @@ export async function runAgentPipeline(
     mdResult.output.activeMarket,
     riskResult.output.approved,
   )
+
+  // Store result for next cycle's context
+  setLastAnalysis({
+    pModel:         probResult.output.pModel,
+    pMarket:        probResult.output.pMarket,
+    edge:           probResult.output.edge,
+    recommendation: probResult.output.recommendation,
+    sentimentScore: sentResult.output.score,
+    sentimentLabel: sentResult.output.label,
+    btcPrice:       quote.price,
+    strikePrice:    mdResult.output.strikePrice,
+    completedAt:    new Date().toISOString(),
+  })
 
   return {
     cycleId,

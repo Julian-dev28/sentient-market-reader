@@ -54,6 +54,7 @@ export function usePipeline(
   const [pipeline, setPipeline]     = useState<PipelineState | null>(null)
   const [trades, setTrades]         = useState<TradeRecord[]>([])
   const [isRunning, setIsRunning]   = useState(false)
+  const [serverLocked, setServerLocked] = useState(false)
   const [nextCycleIn, setNextCycleIn] = useState(CYCLE_INTERVAL_MS / 1000)
   const [error, setError]           = useState<string | null>(null)
   const lastCycleRef                = useRef<number>(0)
@@ -79,7 +80,8 @@ export function usePipeline(
       const res = await fetch(`/api/pipeline?${params}`, { cache: 'no-store', signal: controller.signal })
       if (!res.ok) {
         if (res.status === 503) throw new Error('No active KXBTC15M market — trading hours are ~11:30 AM–midnight ET weekdays')
-        throw new Error(`Pipeline error ${res.status}`)
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.error ?? `Pipeline error ${res.status}`)
       }
       const data: PipelineState = await res.json()
       setPipeline(data)
@@ -157,10 +159,18 @@ export function usePipeline(
       }
     } finally {
       setIsRunning(false)
+      setServerLocked(false)
       lastCycleRef.current = Date.now()
       setNextCycleIn(CYCLE_INTERVAL_MS / 1000)
     }
   }, [liveMode, romaMode, autoTrade, aiRisk, provider2, providers])
+
+  // Check server lock state on mount so the button reflects server reality
+  useEffect(() => {
+    fetch('/api/pipeline/status').then(r => r.json()).then(d => {
+      if (d.running) setServerLocked(true)
+    }).catch(() => {})
+  }, [])
 
   // Keep ref current so auto-interval always calls latest version
   useEffect(() => { runCycleRef.current = runCycle }, [runCycle])
@@ -184,5 +194,5 @@ export function usePipeline(
 
   const stats = computeStats(trades)
 
-  return { pipeline, trades, isRunning, nextCycleIn, error, stats, runCycle, stopCycle }
+  return { pipeline, trades, isRunning, serverLocked, nextCycleIn, error, stats, runCycle, stopCycle }
 }
