@@ -262,12 +262,13 @@ export default function PositionsPanel({ liveMode }: { liveMode: boolean }) {
             const cost   = (pos.market_exposure / 100).toFixed(2)
             const rpnl   = pos.realized_pnl / 100
             const fees   = (pos.fees_paid / 100).toFixed(2)
+            const side   = isYes ? 'yes' : 'no'
             return (
               <div key={pos.ticker} style={{
                 padding: '8px 0',
                 borderBottom: i < positions.length - 1 ? '1px solid var(--border)' : 'none',
               }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 3 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                     <span className={`pill ${isYes ? 'pill-green' : 'pill-pink'}`} style={{ fontSize: 8 }}>
                       {isYes ? '↑ YES' : '↓ NO'}
@@ -275,13 +276,15 @@ export default function PositionsPanel({ liveMode }: { liveMode: boolean }) {
                     <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 11, fontWeight: 700, color: 'var(--text-primary)' }}>
                       {qty}×
                     </span>
-                  </div>
-                  <div style={{ textAlign: 'right' }}>
                     {rpnl !== 0 && (
-                      <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 11, fontWeight: 700, color: rpnl >= 0 ? 'var(--green-dark)' : 'var(--pink)' }}>
-                        {rpnl >= 0 ? '+' : ''}${rpnl.toFixed(2)} realized
+                      <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 10, fontWeight: 700, color: rpnl >= 0 ? 'var(--green-dark)' : 'var(--pink)' }}>
+                        {rpnl >= 0 ? '+' : ''}${rpnl.toFixed(2)}
                       </span>
                     )}
+                  </div>
+                  <div style={{ display: 'flex', gap: 5 }}>
+                    <PositionActionButton ticker={pos.ticker} side={side} count={qty} route="/api/limit-sell-order" label="99¢" onDone={fetchPortfolio} />
+                    <PositionActionButton ticker={pos.ticker} side={side} count={qty} route="/api/sell-order"       label="Sell" onDone={fetchPortfolio} danger />
                   </div>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -388,6 +391,34 @@ export default function PositionsPanel({ liveMode }: { liveMode: boolean }) {
         </div>
       )}
     </div>
+  )
+}
+
+function PositionActionButton({ ticker, side, count, route, label, onDone, danger }: {
+  ticker: string; side: string; count: number; route: string; label: string; onDone: () => void; danger?: boolean
+}) {
+  const [busy, setBusy] = useState(false)
+  const col = danger ? '#b5687a' : '#7a8fb5'
+
+  async function handle() {
+    setBusy(true)
+    try {
+      await fetch(route, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ticker, side, count }) })
+      onDone()
+    } finally { setBusy(false) }
+  }
+
+  return (
+    <button onClick={handle} disabled={busy} style={{
+      border: `1px solid ${col}`, borderRadius: 5, padding: '2px 8px',
+      fontSize: 9, fontWeight: 700, color: col, background: `${col}12`,
+      cursor: busy ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap', transition: 'all 0.15s',
+    }}
+      onMouseEnter={e => { if (!busy) { e.currentTarget.style.background = col; e.currentTarget.style.color = '#fff' } }}
+      onMouseLeave={e => { e.currentTarget.style.background = `${col}12`; e.currentTarget.style.color = col }}
+    >
+      {busy ? '…' : label}
+    </button>
   )
 }
 
