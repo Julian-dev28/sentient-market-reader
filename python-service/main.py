@@ -182,6 +182,7 @@ def build_roma_config(llm: LLMConfig) -> ROMAConfig:
         planner=AgentConfig(llm=agent_llm(temperature=0.3, max_tokens=3000)),
         executor=AgentConfig(llm=agent_llm(temperature=0.5, max_tokens=2000)),
         aggregator=AgentConfig(llm=agent_llm(temperature=0.2, max_tokens=4000)),
+        verifier=AgentConfig(llm=agent_llm(temperature=0.1, max_tokens=1000)),
     )
 
     return ROMAConfig(
@@ -212,9 +213,10 @@ def build_roma_config_tiered(analysis_llm: LLMConfig, orchestration_llm: LLMConf
         runtime=RuntimeConfig(timeout=700),
         agents=AgentsConfig(
             atomizer=make_cfg(orchestration_llm, temperature=0.1, max_tokens=1000),
-            planner=make_cfg(orchestration_llm, temperature=0.3, max_tokens=3000),
+            planner=make_cfg(orchestration_llm,  temperature=0.3, max_tokens=3000),
             executor=make_cfg(analysis_llm,      temperature=0.5, max_tokens=2000),
             aggregator=make_cfg(analysis_llm,    temperature=0.2, max_tokens=4000),
+            verifier=make_cfg(orchestration_llm, temperature=0.1, max_tokens=1000),
         ),
     )
 
@@ -340,30 +342,10 @@ Market context:
         ]
         return answer, was_atomic, subtasks
 
-    # Per-mode solve timeout — keeps total wall time predictable.
-    # The underlying thread may outlive this timeout (Python can't hard-kill threads),
-    # but the HTTP response returns immediately with a 504 so the caller can retry.
-    _solve_timeouts = {"blitz": 35, "sharp": 55, "keen": 85, "smart": 120}
-    solve_timeout = _solve_timeouts.get(roma_mode, 85)
-
     try:
         if len(active_providers) == 1:
             # ── Single-provider solve (standard path) ─────────────────────────
-            # Don't use `with` — that calls shutdown(wait=True) which blocks until
-            # the thread finishes even after a timeout. We want to return immediately.
-            _ex = ThreadPoolExecutor(max_workers=1)
-            future = _ex.submit(run_single_solve, active_providers[0])
-            try:
-                prov_label, result = future.result(timeout=solve_timeout)
-            except (TimeoutError, Exception) as _te:
-                _ex.shutdown(wait=False)
-                if isinstance(_te, TimeoutError):
-                    raise HTTPException(
-                        status_code=504,
-                        detail=f"ROMA solve timed out after {solve_timeout}s (mode={roma_mode}). Try blitz mode or retry.",
-                    )
-                raise _te
-            _ex.shutdown(wait=False)
+            prov_label, result = run_single_solve(active_providers[0])
             answer, was_atomic, subtasks = extract_answer(result)
             duration_ms = int((time.time() - start) * 1000)
             print(f"[ROMA] done  provider={prov_label}  duration={duration_ms}ms")
@@ -375,7 +357,7 @@ Market context:
 
             with ThreadPoolExecutor(max_workers=len(active_providers)) as ex:
                 future_to_prov = {ex.submit(run_single_solve, p): p for p in active_providers}
-                for future in as_completed(future_to_prov, timeout=solve_timeout):
+                for future in as_completed(future_to_prov):
                     prov = future_to_prov[future]
                     try:
                         prov_label, res = future.result()

@@ -16,8 +16,12 @@ export async function runSentiment(
   const start = Date.now()
 
   const distSign = distanceFromStrikePct >= 0 ? '+' : ''
-  const obYes = orderbook?.yes?.slice(0, 5).map(l => `${l.price}¢×${Math.abs(l.delta)}`).join(', ') ?? 'n/a'
-  const obNo  = orderbook?.no?.slice(0, 5).map(l => `${l.price}¢×${Math.abs(l.delta)}`).join(', ') ?? 'n/a'
+  const obYes = orderbook?.yes?.slice(0, 5)
+    .filter(l => l.price != null && l.delta != null)
+    .map(l => `${l.price}¢×${Math.abs(l.delta)}`).join(', ') || 'n/a'
+  const obNo  = orderbook?.no?.slice(0, 5)
+    .filter(l => l.price != null && l.delta != null)
+    .map(l => `${l.price}¢×${Math.abs(l.delta)}`).join(', ') || 'n/a'
 
   const goal =
     `Assess short-term BTC directional sentiment for this 15-min Kalshi KXBTC15M prediction window. ` +
