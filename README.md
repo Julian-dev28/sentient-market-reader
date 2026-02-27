@@ -122,10 +122,10 @@ Every pipeline cycle runs at the speed you choose. The mode selector sits in the
 
 | Mode | Model (Grok default) | Pipeline speed |
 |---|---|---|
-| **blitz** | `grok-4-1-fast-non-reasoning` | ~10–15s — absolute fastest |
-| **sharp** | `grok-3-mini-fast` | ~20–30s |
-| **keen** | `grok-3` | ~60–90s |
-| **smart** | `grok-4-0709` | ~60–120s — highest quality |
+| **blitz** | `grok-4-1-fast-non-reasoning` | ~30–60s |
+| **sharp** | `grok-3-mini-fast` | ~1–2 min |
+| **keen** | `grok-3` | ~1–3 min |
+| **smart** | `grok-4-0709` | ~1–3 min — highest quality |
 
 Default is **blitz**. Set `ROMA_MODE` in `.env.local` to change the server-side default.
 
@@ -205,8 +205,8 @@ Set `ROMA_MAX_DEPTH` in `.env.local`. **Never set it to `0`.**
 
 | Depth | LLM Calls | Wall Time (Grok) | Best For |
 |---|---|---|---|
-| 1 | 5–7 | 10–90s | Live trading — focused single-question analysis |
-| 2 | 25–42 | 120–200s | Multi-faceted research where subtasks are themselves complex |
+| 1 | 5–7 | 30s–3 min | Live trading — focused single-question analysis |
+| 2 | 25–42 | 3–7 min | Multi-faceted research where subtasks are themselves complex |
 | 3+ | 100+ | 10+ min | Deep strategic research, not real-time trading |
 
 ---

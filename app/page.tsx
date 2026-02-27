@@ -251,7 +251,7 @@ export default function Home() {
               Under 2 Minutes Remaining
             </div>
             <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 20 }}>
-              The current 15-minute window closes in <strong>less than 2 minutes</strong>. The pipeline takes {romaMode === 'blitz' ? '~10–15s' : romaMode === 'sharp' ? '~20–30s' : romaMode === 'keen' ? '~60–90s' : '~60–120s'} to complete — it may not finish before the market settles.
+              The current 15-minute window closes in <strong>less than 2 minutes</strong>. The pipeline takes {romaMode === 'blitz' ? '~30–60s' : romaMode === 'sharp' ? '~1–2 min' : '~1–3 min'} to complete — it will not finish before the market settles.
               <br /><br />
               Any trade signal generated will apply to the <strong>next window</strong> that opens.
             </div>
@@ -474,7 +474,7 @@ export default function Home() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'var(--bg-secondary)', borderRadius: 10, padding: '4px 5px', border: '1px solid var(--border)' }}>
                   {(['blitz', 'sharp', 'keen', 'smart'] as const).map(m => (
                     <button key={m} onClick={() => handleModeChange(m)}
-                      title={m === 'blitz' ? 'grok-3-mini-fast — faster inference infra (~5–15s)' : m === 'sharp' ? 'grok-3-mini (~10–20s)' : m === 'keen' ? 'grok-3-fast (~20–40s)' : 'grok-3 (~40–70s)'}
+                      title={m === 'blitz' ? 'grok-4-1-fast-non-reasoning (~30–60s)' : m === 'sharp' ? 'grok-3-mini-fast (~1–2 min)' : m === 'keen' ? 'grok-3 (~1–3 min)' : 'grok-4-0709 (~1–3 min, highest quality)'}
                       style={{
                         padding: '6px 16px', borderRadius: 7, fontSize: 13, fontWeight: 700, cursor: 'pointer',
                         border: romaMode === m ? '1px solid var(--brown)' : '1px solid transparent',
