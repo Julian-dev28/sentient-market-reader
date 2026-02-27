@@ -455,86 +455,12 @@ export default function Home() {
           {/* ─── CENTER ─── */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
 
-            {/* ── Row 1: description + expiry + run button ── */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                5-min cycles · 3 signals per 15-min window · CF Benchmarks settlement
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                {/* Countdown clock */}
-                {secondsUntilExpiry > 0 && (() => {
-                  const m = Math.floor(secondsUntilExpiry / 60)
-                  const s = secondsUntilExpiry % 60
-                  const urgent = secondsUntilExpiry < 120
-                  const color  = secondsUntilExpiry < 60 ? 'var(--pink)' : secondsUntilExpiry < 120 ? 'var(--amber)' : 'var(--green-dark)'
-                  return (
-                    <div style={{
-                      display: 'flex', alignItems: 'center', gap: 5,
-                      padding: '5px 10px', borderRadius: 8,
-                      background: urgent ? 'var(--pink-pale)' : 'var(--cream)',
-                      border: `1px solid ${urgent ? '#e0b0bf' : 'var(--border)'}`,
-                    }}>
-                      <span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Exp</span>
-                      <span style={{
-                        fontFamily: 'var(--font-geist-mono)', fontSize: 14, fontWeight: 800, color,
-                        animation: urgent ? 'urgentPulse 1s ease infinite' : 'none',
-                      }}>
-                        {m}:{String(s).padStart(2, '0')}
-                      </span>
-                    </div>
-                  )
-                })()}
-                <button
-                  onClick={isRunning ? stopCycle : (serverLocked ? undefined : () => {
-                    if (secondsUntilExpiry > 0 && secondsUntilExpiry < 120) {
-                      setShowLateWarning(true)
-                    } else {
-                      runCycle()
-                    }
-                  })}
-                  disabled={serverLocked && !isRunning}
-                  title={serverLocked && !isRunning ? 'Pipeline already running on server' : undefined}
-                  style={{
-                    padding: '10px 32px', borderRadius: 12,
-                    background: isRunning
-                      ? 'linear-gradient(135deg, #a93226 0%, #c0392b 100%)'
-                      : serverLocked
-                      ? 'var(--cream-dark)'
-                      : 'linear-gradient(135deg, #2d7a52 0%, #3a9e72 50%, #4ab87f 100%)',
-                    border: isRunning ? '1px solid #c0392b' : serverLocked ? '1px solid var(--border)' : '1px solid #2d7a52',
-                    color: serverLocked && !isRunning ? 'var(--text-muted)' : '#fff',
-                    cursor: isRunning ? 'pointer' : serverLocked ? 'not-allowed' : 'pointer',
-                    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1,
-                    boxShadow: isRunning
-                      ? '0 4px 18px rgba(169,50,38,0.4), inset 0 1px 0 rgba(255,255,255,0.1)'
-                      : serverLocked ? 'none'
-                      : '0 4px 18px rgba(45,122,82,0.4), inset 0 1px 0 rgba(255,255,255,0.15)',
-                    transition: 'all 0.2s',
-                  }}
-                >
-                  {isRunning ? (
-                    <>
-                      <span style={{ fontSize: 15, fontWeight: 800, letterSpacing: '0.04em', lineHeight: 1 }}>■ Stop</span>
-                      <span style={{ fontSize: 9, fontWeight: 500, opacity: 0.75, letterSpacing: '0.08em', textTransform: 'uppercase' }}>pipeline</span>
-                    </>
-                  ) : serverLocked ? (
-                    <>
-                      <span style={{ fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 5, lineHeight: 1 }}>
-                        <span style={{ animation: 'spin-slow 1s linear infinite', display: 'inline-block' }}>◌</span> Running
-                      </span>
-                      <span style={{ fontSize: 9, fontWeight: 500, opacity: 0.6, letterSpacing: '0.08em', textTransform: 'uppercase' }}>server locked</span>
-                    </>
-                  ) : (
-                    <>
-                      <span style={{ fontSize: 15, fontWeight: 800, letterSpacing: '0.04em', lineHeight: 1 }}>▶ Run Cycle</span>
-                      <span style={{ fontSize: 9, fontWeight: 500, opacity: 0.7, letterSpacing: '0.08em', textTransform: 'capitalize' }}>{romaMode} mode</span>
-                    </>
-                  )}
-                </button>
-              </div>
+            {/* ── Row 1: description ── */}
+            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+              5-min cycles · 3 signals per 15-min window · CF Benchmarks settlement
             </div>
 
-            {/* ── Row 2: AI Risk + mode selector + stage overrides ── */}
+            {/* ── Row 2: AI Risk + mode selector + stage overrides + expiry + run ── */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               {/* AI Risk checkbox */}
               <label style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontSize: 11, fontWeight: 700, color: aiRisk ? 'var(--brown)' : 'var(--text-muted)', userSelect: 'none' }}
@@ -596,6 +522,63 @@ export default function Home() {
                   </div>
                 )
               })}
+
+              {/* Run Cycle + expiry pushed to right */}
+              <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+              {/* Run Cycle button */}
+              <button
+                onClick={isRunning ? stopCycle : (serverLocked ? undefined : () => {
+                  if (secondsUntilExpiry > 0 && secondsUntilExpiry < 120) {
+                    setShowLateWarning(true)
+                  } else {
+                    runCycle()
+                  }
+                })}
+                disabled={serverLocked && !isRunning}
+                title={serverLocked && !isRunning ? 'Pipeline already running on server' : undefined}
+                style={{
+                  padding: '7px 20px', borderRadius: 9,
+                  background: 'transparent',
+                  border: isRunning ? '1.5px solid var(--pink)' : serverLocked ? '1.5px solid var(--border)' : '1.5px solid var(--green)',
+                  color: isRunning ? 'var(--pink)' : serverLocked ? 'var(--text-muted)' : 'var(--green-dark)',
+                  cursor: isRunning ? 'pointer' : serverLocked ? 'not-allowed' : 'pointer',
+                  fontSize: 12, fontWeight: 700,
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  transition: 'all 0.2s', letterSpacing: '0.02em',
+                }}
+              >
+                {isRunning
+                  ? <><span style={{ display: 'inline-block' }}>■</span> Stop</>
+                  : serverLocked
+                  ? <><span style={{ animation: 'spin-slow 1s linear infinite', display: 'inline-block' }}>◌</span> Running...</>
+                  : '▶ Run Cycle'}
+              </button>
+
+              {/* Expiry countdown */}
+              {secondsUntilExpiry > 0 && (() => {
+                const m = Math.floor(secondsUntilExpiry / 60)
+                const s = secondsUntilExpiry % 60
+                const urgent = secondsUntilExpiry < 120
+                const color  = secondsUntilExpiry < 60 ? 'var(--pink)' : secondsUntilExpiry < 120 ? 'var(--amber)' : 'var(--green-dark)'
+                return (
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: 5,
+                    padding: '5px 10px', borderRadius: 8,
+                    background: urgent ? 'var(--pink-pale)' : 'var(--bg-secondary)',
+                    border: `1px solid ${urgent ? '#e0b0bf' : 'var(--border)'}`,
+                  }}>
+                    <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Exp</span>
+                    <span style={{
+                      fontFamily: 'var(--font-geist-mono)', fontSize: 14, fontWeight: 800, color,
+                      animation: urgent ? 'urgentPulse 1s ease infinite' : 'none',
+                      letterSpacing: '-0.01em',
+                    }}>
+                      {m}:{String(s).padStart(2, '0')}
+                    </span>
+                  </div>
+                )
+              })()}
+              </div>
             </div>
 
             <PriceChart priceHistory={priceHistory} strikePrice={strikePrice} currentPrice={currentBTCPrice} />
