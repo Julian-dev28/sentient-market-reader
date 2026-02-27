@@ -255,7 +255,7 @@ export default function Home() {
             <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 20 }}>
               The current 15-minute window closes in <strong>less than 2 minutes</strong>. The pipeline takes {romaMode === 'blitz' ? '~30–60s' : romaMode === 'sharp' ? '~1–2 min' : '~1–3 min'} to complete — it will not finish before the market settles.
               <br /><br />
-              Any trade signal generated will apply to the <strong>next window</strong> that opens.
+              Any signal generated will likely be <strong>outdated by the time it completes</strong>.
             </div>
             <div style={{ display: 'flex', gap: 10 }}>
               <button
