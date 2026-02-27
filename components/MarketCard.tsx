@@ -222,7 +222,7 @@ function TradeBox({ yesBid, yesAsk, noBid, noAsk, ticker, liveMode }: {
 
         {/* Action states */}
         {order.status === 'idle' && (
-          <button onClick={placeIt} disabled={!liveMode}
+          <button onClick={() => placeIt()} disabled={!liveMode}
             style={{
               marginTop: 10, width: '100%', padding: '11px 0', borderRadius: 9,
               border: liveMode ? `1px solid ${colBdr}` : '1px solid var(--border)',
