@@ -59,10 +59,12 @@ def build_llm_config(roma_mode: str = "keen", provider_override: Optional[str] =
 
     roma_mode is passed from the Next.js request body (not read from env),
     so only the root .env.local needs to be edited.
-      blitz → blitz model (grok-3-mini-fast — faster infra, same weights as mini)
-      sharp → fast model  (grok-3-mini)
-      keen  → mid model   (grok-3-fast)
-      smart → smart model (grok-3)
+      blitz → GROK_BLITZ_MODEL (default: grok-4-1-fast-non-reasoning)
+      sharp → GROK_FAST_MODEL  (default: grok-3-mini-fast)
+      keen  → GROK_MID_MODEL   (default: grok-3)
+      smart → GROK_SMART_MODEL (default: grok-4-0709)
+    Sentiment and Probability stages are called with different roma_modes
+    (SENT_MODE_MAP in index.ts runs sentiment one tier lighter than probability).
     provider_override: if set, takes precedence over AI_PROVIDER env var (split-provider support).
     Returns (llm_config, provider_label).
     """
@@ -111,9 +113,9 @@ def build_llm_config(roma_mode: str = "keen", provider_override: Optional[str] =
         elif roma_mode == "sharp":
             model = os.getenv("GROK_FAST_MODEL", "grok-3-mini-fast")               # 9.8s/call
         elif roma_mode == "keen":
-            model = os.getenv("GROK_MID_MODEL", "grok-3-mini")                     # 10.6s/call
+            model = os.getenv("GROK_MID_MODEL", "grok-3")
         else:  # smart
-            model = os.getenv("GROK_SMART_MODEL", "grok-3")
+            model = os.getenv("GROK_SMART_MODEL", "grok-4-0709")
         return (
             LLMConfig(
                 model=f"openai/{model}",
