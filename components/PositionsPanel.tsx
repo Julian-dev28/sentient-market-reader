@@ -33,6 +33,8 @@ export default function PositionsPanel({ liveMode }: { liveMode: boolean }) {
   const [error, setError] = useState<string | null>(null)
   const [sellingAll, setSellingAll] = useState(false)
   const [sellError, setSellError] = useState<string | null>(null)
+  const [limitingAll, setLimitingAll] = useState(false)
+  const [limitError, setLimitError] = useState<string | null>(null)
 
   const fetchPortfolio = useCallback(async () => {
     if (!liveMode) return
@@ -105,6 +107,33 @@ export default function PositionsPanel({ liveMode }: { liveMode: boolean }) {
     }
   }
 
+  async function limitAll() {
+    const { positions } = data
+    if (positions.length === 0) return
+    setLimitingAll(true)
+    setLimitError(null)
+    try {
+      const results = await Promise.all(
+        positions.map(pos => {
+          const side = pos.position > 0 ? 'yes' : 'no'
+          const count = Math.abs(pos.position)
+          return fetch('/api/limit-sell-order', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ticker: pos.ticker, side, count }),
+          }).then(r => r.json())
+        })
+      )
+      const failed = results.filter((r) => !r.ok)
+      if (failed.length > 0) {
+        setLimitError(`${failed.length} order(s) failed: ${failed[0].error}`)
+      }
+      await fetchPortfolio()
+    } finally {
+      setLimitingAll(false)
+    }
+  }
+
   useEffect(() => {
     if (!liveMode) return
     fetchPortfolio()
@@ -143,19 +172,34 @@ export default function PositionsPanel({ liveMode }: { liveMode: boolean }) {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {data.positions.length > 0 && (
-            <button
-              onClick={sellAll}
-              disabled={sellingAll}
-              style={{
-                padding: '4px 10px', borderRadius: 7, fontSize: 10, fontWeight: 700, cursor: sellingAll ? 'not-allowed' : 'pointer',
-                border: '1px solid #b5687a', background: sellingAll ? 'rgba(181,104,122,0.05)' : 'rgba(181,104,122,0.08)',
-                color: '#b5687a', letterSpacing: '0.02em', transition: 'all 0.15s',
-              }}
-              onMouseEnter={e => { if (!sellingAll) { e.currentTarget.style.background = '#b5687a'; e.currentTarget.style.color = '#fff' } }}
-              onMouseLeave={e => { e.currentTarget.style.background = 'rgba(181,104,122,0.08)'; e.currentTarget.style.color = '#b5687a' }}
-            >
-              {sellingAll ? '…' : '■ Sell All'}
-            </button>
+            <>
+              <button
+                onClick={limitAll}
+                disabled={limitingAll}
+                style={{
+                  padding: '4px 10px', borderRadius: 7, fontSize: 10, fontWeight: 700, cursor: limitingAll ? 'not-allowed' : 'pointer',
+                  border: '1px solid #7a8fb5', background: limitingAll ? 'rgba(122,143,181,0.05)' : 'rgba(122,143,181,0.08)',
+                  color: '#7a8fb5', letterSpacing: '0.02em', transition: 'all 0.15s',
+                }}
+                onMouseEnter={e => { if (!limitingAll) { e.currentTarget.style.background = '#7a8fb5'; e.currentTarget.style.color = '#fff' } }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'rgba(122,143,181,0.08)'; e.currentTarget.style.color = '#7a8fb5' }}
+              >
+                {limitingAll ? '…' : '⬆ Limit 99¢'}
+              </button>
+              <button
+                onClick={sellAll}
+                disabled={sellingAll}
+                style={{
+                  padding: '4px 10px', borderRadius: 7, fontSize: 10, fontWeight: 700, cursor: sellingAll ? 'not-allowed' : 'pointer',
+                  border: '1px solid #b5687a', background: sellingAll ? 'rgba(181,104,122,0.05)' : 'rgba(181,104,122,0.08)',
+                  color: '#b5687a', letterSpacing: '0.02em', transition: 'all 0.15s',
+                }}
+                onMouseEnter={e => { if (!sellingAll) { e.currentTarget.style.background = '#b5687a'; e.currentTarget.style.color = '#fff' } }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'rgba(181,104,122,0.08)'; e.currentTarget.style.color = '#b5687a' }}
+              >
+                {sellingAll ? '…' : '■ Sell All'}
+              </button>
+            </>
           )}
           <button onClick={fetchPortfolio} disabled={loading}
             style={{ background: 'none', border: 'none', cursor: loading ? 'wait' : 'pointer', fontSize: 14, color: 'var(--text-muted)', padding: '2px 4px' }}
@@ -165,6 +209,11 @@ export default function PositionsPanel({ liveMode }: { liveMode: boolean }) {
         </div>
       </div>
 
+      {limitError && (
+        <div style={{ fontSize: 10, color: 'var(--red)', background: 'var(--red-pale)', borderRadius: 6, padding: '7px 10px', marginBottom: 12, lineHeight: 1.5 }}>
+          {limitError}
+        </div>
+      )}
       {sellError && (
         <div style={{ fontSize: 10, color: 'var(--red)', background: 'var(--red-pale)', borderRadius: 6, padding: '7px 10px', marginBottom: 12, lineHeight: 1.5 }}>
           {sellError}

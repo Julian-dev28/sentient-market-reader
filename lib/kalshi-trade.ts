@@ -120,6 +120,36 @@ export async function sellOrder(params: SellOrderParams): Promise<PlaceOrderResu
   }
 }
 
+/** Limit-sell contracts at 99¢ (GTC) — rests until someone pays 99¢, i.e. take-profit at max value. */
+export async function limitSellOrder(params: SellOrderParams): Promise<PlaceOrderResult> {
+  const path = '/trade-api/v2/portfolio/orders'
+  const body = {
+    ticker: params.ticker,
+    side: params.side,
+    action: 'sell',
+    count: params.count,
+    ...(params.side === 'yes' ? { yes_price: 99 } : { no_price: 99 }),
+    time_in_force: 'good_till_canceled',
+  }
+
+  try {
+    const headers = buildKalshiHeaders('POST', path)
+    if (!headers['KALSHI-ACCESS-KEY']) {
+      return { ok: false, error: 'Missing Kalshi credentials' }
+    }
+    const res = await fetch(`${KALSHI_BASE}/portfolio/orders`, {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const data = await res.json()
+    if (!res.ok) return { ok: false, error: extractError(data, res.status) }
+    return { ok: true, order: data.order as KalshiOrder }
+  } catch (err) {
+    return { ok: false, error: String(err) }
+  }
+}
+
 export async function cancelOrder(orderId: string): Promise<{ ok: boolean; error?: string }> {
   const path = `/trade-api/v2/portfolio/orders/${orderId}`
   try {
