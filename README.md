@@ -112,6 +112,96 @@ Within each solve, orchestration tasks (Atomizer + Planner) use the model one ti
 
 ---
 
+## ROMA Depth Guide
+
+### What `max_depth` Does
+
+ROMA solves a goal by recursively decomposing it. At each level the same pipeline runs:
+
+```
+Atomizer → Planner → [parallel Executors] → Aggregator
+```
+
+The **Atomizer** decides whether the goal is simple enough to answer directly, or needs breaking into subtasks. If it decomposes, the **Planner** generates subtasks, **Executors** run them in parallel, and the **Aggregator** synthesizes the results. `max_depth` caps how many times that loop can recurse.
+
+---
+
+### Depth 1 — Single Loop (default)
+
+```
+Goal
+ └─ Atomizer → [atomic? → Executor]
+             → [complex? → Planner → Executor₁, Executor₂, ...Executorₙ → Aggregator]
+```
+
+- One flat pass through the full pipeline — Atomizer, Planner, parallel Executors, Aggregator all run
+- Subtasks are answered directly by Executors and never recursed into further
+- **~5–7 LLM calls · 10–90s wall time depending on mode**
+- Correct choice for focused, single-question analysis like a 15-minute BTC prediction
+
+---
+
+### Depth 2 — Two Levels
+
+```
+Goal
+ └─ Atomizer → Planner → [
+      SubGoal₁: Atomizer → Planner → Executor₁a, Executor₁b → Aggregator₁
+      SubGoal₂: Atomizer → Planner → Executor₂a, Executor₂b → Aggregator₂
+      ...
+    ] → Top-level Aggregator
+```
+
+- Each subtask from depth-1 can itself run a full ROMA loop before returning its result
+- LLM call count multiplies: 4 subtasks × 4 sub-subtasks = ~35 calls vs ~7
+- The top-level Aggregator is blocked until the **slowest subtask's full sub-loop finishes** — latency stacks
+- **~25–42 LLM calls · 120–200s wall time on Grok**
+- Hits the 220s fetch timeout on slow models (grok-3, grok-4-0709) — not safe for live trading windows
+
+---
+
+### The `max_depth=0` Bug (and why it matters)
+
+When this app originally used blitz mode it sent `max_depth=0`, intending "force atomic — shortest possible solve." The actual behavior was the opposite.
+
+**`max_depth=0` in roma-dspy means unlimited recursion.** The value `0` is falsy, and the ROMA runtime interprets it as "no depth limit." A blitz pipeline that was supposed to make 5–7 calls instead recursed to depth 5, making ~40+ calls. Wall time went from an expected ~15s to **3 minutes 40 seconds**. Circuit breakers tripped mid-solve and cascaded failures across the run.
+
+The fix is a `Math.max(1, ...)` guard in both agent callers so the value can never reach zero regardless of what the env var says:
+
+```typescript
+const maxDepth = Math.max(1, parseInt(process.env.ROMA_MAX_DEPTH ?? '1'))
+```
+
+Set `ROMA_MAX_DEPTH` in `.env.local`. **Never set it to `0`.**
+
+---
+
+### Depth Scaling Summary
+
+| Depth | LLM Calls | Wall Time (Grok) | Best For |
+|---|---|---|---|
+| 1 | 5–7 | 10–90s | Live trading — focused single-question analysis |
+| 2 | 25–42 | 120–200s | Multi-faceted research where subtasks are themselves complex |
+| 3+ | 100+ | 10+ min | Deep strategic research, not real-time trading |
+
+---
+
+### When Depth 2+ Is Worth It
+
+Depth is not a quality dial — it is a **complexity-matching tool**. Using depth-2 on a simple goal does not produce a better answer; it just causes each Executor to generate an over-engineered sub-analysis of a simple question, which the Aggregator then re-synthesizes as noise.
+
+Depth 2+ makes sense when subtasks are themselves genuinely multi-dimensional problems that benefit from further decomposition:
+
+- **Macro thesis generation** — *"Build a comprehensive BTC outlook for the next 30 days"* decomposes into macro environment, on-chain metrics, derivatives positioning — each complex enough to warrant its own sub-loop
+- **Multi-asset correlation** — *"Should I be long BTC or ETH options given current regime?"* — each asset analysis is non-trivial
+- **Event-driven pre-trade research** — before FOMC, CPI, or ETF rebalances: historical impact, current positioning, vol surface — each a multi-step analysis
+- **Portfolio risk assessment** — *"What is my aggregate risk across all open Kalshi positions?"* — per-market correlation, liquidity, and TTL analysis stacks well at depth 2
+- **Backtest interpretation** — diagnosing losing trades, identifying regime changes, proposing adjustments
+
+For the KXBTC15M 15-minute binary: **always depth-1.** The question (*will BTC close above $X in N minutes?*) decomposes cleanly at one level into technicals, sentiment, orderbook pressure, and momentum — and each of those is simple enough that a single Executor handles it correctly. Depth-2 adds recursion where there is no second level of complexity.
+
+---
+
 ## Provider Split Config
 
 The **Provider Split Config** card (center column, top) lets you route different pipeline stages to different LLM providers simultaneously — eliminating inter-stage rate-limit pauses and maximizing throughput.
