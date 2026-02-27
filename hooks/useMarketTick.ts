@@ -39,10 +39,13 @@ export function useMarketTick(ticker: string | null): MarketTick {
   const [liveBTCPrice,     setLiveBTCPrice]     = useState<number | null>(null)
   const [livePriceHistory, setLivePriceHistory] = useState<PricePoint[]>([])
 
-  const prevTickerRef = useRef(ticker)
+  const prevTickerRef   = useRef(ticker)
+  const marketCloseRef  = useRef<number | null>(null)  // ms timestamp of current market's close_time
+
   useEffect(() => {
     if (ticker !== prevTickerRef.current) {
-      prevTickerRef.current = ticker
+      prevTickerRef.current  = ticker
+      marketCloseRef.current = null
       setLiveMarket(null)
       setLiveOrderbook(null)
       setLivePriceHistory([])
@@ -65,8 +68,9 @@ export function useMarketTick(ticker: string | null): MarketTick {
 
       try {
         const t = prevTickerRef.current
-        // Use direct single-market endpoint when ticker is known — faster + lower overhead
-        const url = t
+        // If current market has passed its close_time, discover the next one
+        const marketClosed = marketCloseRef.current !== null && marketCloseRef.current < Date.now()
+        const url = (t && !marketClosed)
           ? `/api/market-quote/${encodeURIComponent(t)}`
           : '/api/markets'
 
@@ -82,14 +86,24 @@ export function useMarketTick(ticker: string | null): MarketTick {
 
         // /api/market-quote returns { market } ; /api/markets returns { markets: [] }
         let market: KalshiMarket | null = null
-        if (data.market) {
+        if (data.market && !marketClosed) {
           market = data.market
         } else if (data.markets?.length) {
           const isLive = (m: KalshiMarket) => (m.yes_ask ?? 0) > 1 && (m.yes_ask ?? 100) < 99
           market = data.markets.find(isLive) ?? null
+          // Auto-switch to the newly discovered market
+          if (market && market.ticker !== prevTickerRef.current) {
+            prevTickerRef.current = market.ticker
+            if (mounted) { setLiveOrderbook(null); setLivePriceHistory([]) }
+          }
         }
 
-        if (mounted && market) setLiveMarket(market)
+        if (mounted && market) {
+          if (market.close_time) {
+            marketCloseRef.current = new Date(market.close_time).getTime()
+          }
+          setLiveMarket(market)
+        }
       } catch {
         backoff = Math.min(backoff * 2 + 1, 60)
       }
