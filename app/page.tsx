@@ -488,6 +488,30 @@ export default function Home() {
                     </button>
                   ))}
                 </div>
+                {/* Countdown clock */}
+                {secondsUntilExpiry > 0 && (() => {
+                  const m = Math.floor(secondsUntilExpiry / 60)
+                  const s = secondsUntilExpiry % 60
+                  const urgent = secondsUntilExpiry < 120
+                  const color  = secondsUntilExpiry < 60 ? 'var(--pink)' : secondsUntilExpiry < 120 ? 'var(--amber)' : 'var(--green-dark)'
+                  return (
+                    <div style={{
+                      display: 'flex', alignItems: 'center', gap: 5,
+                      padding: '5px 10px', borderRadius: 8,
+                      background: urgent ? 'var(--pink-pale)' : 'var(--cream)',
+                      border: `1px solid ${urgent ? '#e0b0bf' : 'var(--border)'}`,
+                    }}>
+                      <span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Exp</span>
+                      <span style={{
+                        fontFamily: 'var(--font-geist-mono)', fontSize: 14, fontWeight: 800, color,
+                        animation: urgent ? 'urgentPulse 1s ease infinite' : 'none',
+                      }}>
+                        {m}:{String(s).padStart(2, '0')}
+                      </span>
+                    </div>
+                  )
+                })()}
+
                 {/* Per-stage mode overrides */}
                 {(['sent', 'prob'] as const).map(stage => {
                   const val   = stage === 'sent' ? sentMode : probMode
