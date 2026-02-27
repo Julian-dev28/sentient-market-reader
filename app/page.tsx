@@ -21,6 +21,8 @@ export default function Home() {
   const [showBotWarning, setShowBotWarning] = useState(false)
   const [showLateWarning, setShowLateWarning] = useState(false)
   const [aiRisk, setAiRisk]                 = useState(false)
+  const [sentMode, setSentMode]             = useState<string | undefined>(undefined)
+  const [probMode, setProbMode]             = useState<string | undefined>(undefined)
 
   // Sync from localStorage after hydration (client-only)
   useEffect(() => {
@@ -35,7 +37,7 @@ export default function Home() {
   }
 
   const { pipeline, trades, isRunning, serverLocked, nextCycleIn, error, stats, runCycle, stopCycle } = usePipeline(
-    liveMode, romaMode, botActive, aiRisk,
+    liveMode, romaMode, botActive, aiRisk, undefined, undefined, sentMode, probMode,
   )
 
   // ── Trade alert pop-up ─────────────────────────────────────────────────────
@@ -486,6 +488,37 @@ export default function Home() {
                     </button>
                   ))}
                 </div>
+                {/* Per-stage mode overrides */}
+                {(['sent', 'prob'] as const).map(stage => {
+                  const val   = stage === 'sent' ? sentMode : probMode
+                  const setVal = stage === 'sent' ? setSentMode : setProbMode
+                  return (
+                    <div key={stage} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                        {stage === 'sent' ? 'Sent' : 'Prob'}
+                      </span>
+                      <select
+                        value={val ?? ''}
+                        onChange={e => setVal(e.target.value || undefined)}
+                        title={stage === 'sent' ? 'Sentiment stage model tier (auto = one tier below Prob)' : 'Probability stage model tier (auto = matches main mode)'}
+                        style={{
+                          fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                          padding: '5px 6px', borderRadius: 7,
+                          border: val ? '1px solid var(--brown)' : '1px solid var(--border)',
+                          background: val ? 'var(--cream)' : 'var(--bg-secondary)',
+                          color: val ? 'var(--brown)' : 'var(--text-muted)',
+                          outline: 'none',
+                        }}
+                      >
+                        <option value="">auto</option>
+                        <option value="blitz">blitz</option>
+                        <option value="sharp">sharp</option>
+                        <option value="keen">keen</option>
+                        <option value="smart">smart</option>
+                      </select>
+                    </div>
+                  )
+                })}
                 <button
                   onClick={isRunning ? stopCycle : (serverLocked ? undefined : () => {
                     if (secondsUntilExpiry > 0 && secondsUntilExpiry < 120) {
