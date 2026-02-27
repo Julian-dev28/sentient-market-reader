@@ -3,8 +3,8 @@ import { llmToolCall, type AIProvider } from '../llm-client'
 import { callPythonRoma, formatRomaTrace } from '../roma/python-client'
 
 export async function runProbabilityModel(
-  sentimentScore: number,
-  sentimentSignals: string[],
+  sentimentScore: number | null,    // null when running in parallel with sentiment agent
+  sentimentSignals: string[] | null,
   distanceFromStrikePct: number,
   minutesUntilExpiry: number,
   market: KalshiMarket | null,
@@ -19,8 +19,12 @@ export async function runProbabilityModel(
   const distSign = distanceFromStrikePct >= 0 ? '+' : ''
 
   const context = [
-    `SentimentAgent score: ${sentimentScore.toFixed(4)} (range -1 = strongly bearish → +1 = strongly bullish)`,
-    `Key sentiment signals: ${sentimentSignals.join(' | ')}`,
+    sentimentScore !== null
+      ? `SentimentAgent score: ${sentimentScore.toFixed(4)} (range -1 = strongly bearish → +1 = strongly bullish)`
+      : `SentimentAgent score: (running in parallel — use price position and market data only)`,
+    sentimentSignals?.length
+      ? `Key sentiment signals: ${sentimentSignals.join(' | ')}`
+      : `Key sentiment signals: (unavailable — infer from BTC position and orderbook)`,
     `BTC vs strike: ${distSign}${distanceFromStrikePct.toFixed(4)}% — currently ${distanceFromStrikePct >= 0 ? 'ABOVE' : 'BELOW'} strike`,
     `Minutes until expiry: ${minutesUntilExpiry.toFixed(2)}`,
     `Market-implied P(YES): ${(pMarket * 100).toFixed(1)}¢ — crowd's probability BTC ends above strike`,
