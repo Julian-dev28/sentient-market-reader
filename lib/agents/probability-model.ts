@@ -38,8 +38,9 @@ export async function runProbabilityModel(
     `(3) time decay with ${minutesUntilExpiry.toFixed(1)} min left, (4) whether model edge vs ` +
     `market-implied ${(pMarket * 100).toFixed(1)}% justifies trading YES, NO, or standing aside.`
 
-  // blitz: maxDepth=0 forces atomic (1 executor, no planning) — ~3 LLM calls instead of ~6
-  const pythonResult = await callPythonRoma(goal, context, romaMode === 'blitz' ? 0 : 1, 2, romaMode, provider)
+  // Depth controlled by ROMA_MAX_DEPTH env var (default 1). ROMA treats 0 as unlimited — never send 0.
+  const maxDepth = Math.max(1, parseInt(process.env.ROMA_MAX_DEPTH ?? '1'))
+  const pythonResult = await callPythonRoma(goal, context, maxDepth, 2, romaMode, provider)
   const romaAnswer = pythonResult.answer
   const agentLabel = `ProbabilityModelAgent (roma-dspy · ${pythonResult.provider})`
   const romaTrace  = formatRomaTrace(pythonResult)

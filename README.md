@@ -97,12 +97,14 @@ Every pipeline cycle runs at the speed you choose. The mode selector sits in the
 
 | Mode | Model (Grok default) | Pipeline speed |
 |---|---|---|
-| **blitz** | `grok-3-mini-fast` | ~5–15s — absolute fastest |
-| **sharp** | `grok-3-mini` | ~10–20s |
-| **keen** | `grok-3-fast` | ~20–40s |
-| **smart** | `grok-3` | ~40–70s — highest quality |
+| **blitz** | `grok-4-1-fast-non-reasoning` | ~10–15s — absolute fastest |
+| **sharp** | `grok-3-mini-fast` | ~20–30s |
+| **keen** | `grok-3` | ~60–90s |
+| **smart** | `grok-4-0709` | ~60–120s — highest quality |
 
 Default is **blitz**. Set `ROMA_MODE` in `.env.local` to change the server-side default.
+
+Set `ROMA_MAX_DEPTH` to control how many decomposition levels ROMA uses (default `1`). Higher depth = richer reasoning but proportionally slower. Keep at `1` for live 15-min windows. **Never set to `0`** — ROMA interprets `0` as unlimited recursion.
 
 ### Tiered ROMA Agents
 
@@ -137,10 +139,10 @@ Switch the entire pipeline with one env var. All tiers remap automatically:
 
 | Tier | Grok | Claude | GPT | HuggingFace |
 |---|---|---|---|---|
-| blitz | `grok-3-mini-fast` | `claude-haiku-4-5-20251001` | `gpt-4o-mini` | `Qwen2.5-1.5B` |
-| sharp | `grok-3-mini` | `claude-haiku-4-5-20251001` | `gpt-4o-mini` | `Llama-3.2-3B` |
-| keen | `grok-3-fast` | `claude-haiku-4-5-20251001` | `gpt-4o-mini` | `Llama-3.1-8B` |
-| smart | `grok-3` | `claude-sonnet-4-6` | `gpt-4o` | `Llama-3.3-70B` |
+| blitz | `grok-4-1-fast-non-reasoning` | `claude-haiku-4-5-20251001` | `gpt-4o-mini` | `Qwen2.5-1.5B` |
+| sharp | `grok-3-mini-fast` | `claude-haiku-4-5-20251001` | `gpt-4o-mini` | `Llama-3.2-3B` |
+| keen | `grok-3` | `claude-haiku-4-5-20251001` | `gpt-4o-mini` | `Llama-3.1-8B` |
+| smart | `grok-4-0709` | `claude-sonnet-4-6` | `gpt-4o` | `Llama-3.3-70B` |
 
 All model IDs are overridable via env vars. HuggingFace uses the serverless Inference API router at `https://router.huggingface.co/v1` by default; set `HF_BASE_URL` to point at a dedicated Inference Endpoint.
 
@@ -203,6 +205,7 @@ Risk Manager and Execution Agent are intentionally **deterministic** — safety-
 
 - **Full ROMA pipeline via roma-dspy** — genuine multi-agent AI reasoning on every cycle via the official Python SDK
 - **4-mode speed selector** — blitz / sharp / keen / smart buttons; each maps to a different model tier across all providers
+- **Stop button** — abort any in-flight pipeline run mid-cycle; button turns red ■ Stop while running
 - **Provider Split Config** — route Sentiment and Probability stages to different providers; ensemble multiple providers in parallel for Sentiment
 - **Tiered ROMA agents** — Atomizer + Planner use fast model; Executor + Aggregator use quality model; cuts 30–50% overhead
 - **HuggingFace provider** — Llama and Qwen models via the serverless Inference API router
@@ -250,6 +253,7 @@ pip install -r requirements.txt
 # ── LLM Provider ────────────────────────────────────────────────────
 AI_PROVIDER=grok          # anthropic | grok | openai | huggingface | openrouter
 ROMA_MODE=blitz           # blitz | sharp | keen | smart  (default: blitz)
+ROMA_MAX_DEPTH=1          # ROMA decomposition depth — never set 0 (unlimited recursion)
 
 XAI_API_KEY=xai-...
 # ANTHROPIC_API_KEY=sk-ant-...
@@ -259,10 +263,10 @@ XAI_API_KEY=xai-...
 # OPENROUTER_MODEL=x-ai/grok-3
 
 # ── Model overrides (optional) ──────────────────────────────────────
-GROK_BLITZ_MODEL=grok-3-mini-fast
-GROK_FAST_MODEL=grok-3-mini
-GROK_MID_MODEL=grok-3-fast
-GROK_SMART_MODEL=grok-3
+GROK_BLITZ_MODEL=grok-4-1-fast-non-reasoning
+GROK_FAST_MODEL=grok-3-mini-fast
+GROK_MID_MODEL=grok-3
+GROK_SMART_MODEL=grok-4-0709
 
 HF_BLITZ_MODEL=Qwen/Qwen2.5-1.5B-Instruct
 HF_FAST_MODEL=meta-llama/Llama-3.2-3B-Instruct
@@ -292,7 +296,7 @@ npm run dev
 # → http://localhost:3000
 ```
 
-The pipeline fires automatically on page load. Hit **Run Cycle** to trigger a manual analysis. Use the mode buttons to control speed. Configure provider routing in the **Provider Split Config** card. Bid/ask and BTC price refresh every 2 seconds. Paper mode is the default — no real orders are placed unless you toggle Live Trading and confirm.
+The pipeline fires automatically on page load. Hit **▶ Run Cycle** to trigger a manual analysis — the button turns red as **■ Stop** while running so you can abort mid-flight. Use the mode buttons to control speed. Configure provider routing in the **Provider Split Config** card. Bid/ask and BTC price refresh every 2 seconds. Paper mode is the default — no real orders are placed unless you toggle Live Trading and confirm.
 
 ---
 
@@ -372,6 +376,7 @@ The pipeline fires automatically on page load. Hit **Run Cycle** to trigger a ma
 |---|---|---|
 | `AI_PROVIDER` | Yes | `grok` \| `anthropic` \| `openai` \| `huggingface` \| `openrouter` |
 | `ROMA_MODE` | No | `blitz` \| `sharp` \| `keen` \| `smart` — default `blitz` |
+| `ROMA_MAX_DEPTH` | No | ROMA decomposition depth — default `1`; never set `0` (unlimited) |
 | `XAI_API_KEY` | If Grok | xAI API key |
 | `ANTHROPIC_API_KEY` | If Claude | Anthropic API key |
 | `OPENAI_API_KEY` | If OpenAI | OpenAI API key |

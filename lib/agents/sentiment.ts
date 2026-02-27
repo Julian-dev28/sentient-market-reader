@@ -44,9 +44,9 @@ export async function runSentiment(
     `Orderbook NO depth:  ${obNo}`,
   ].join('\n')
 
-  // blitz: maxDepth=0 forces atomic (1 executor, no planning) — ~3 LLM calls instead of ~6
-  // Multi-provider: parallel solves run simultaneously, merged answer enriches extraction
-  const romaResult = await callPythonRoma(goal, context, romaMode === 'blitz' ? 0 : 1, 2, romaMode, provider, providers)
+  // Depth controlled by ROMA_MAX_DEPTH env var (default 1). ROMA treats 0 as unlimited — never send 0.
+  const maxDepth = Math.max(1, parseInt(process.env.ROMA_MAX_DEPTH ?? '1'))
+  const romaResult = await callPythonRoma(goal, context, maxDepth, 2, romaMode, provider, providers)
   const romaTrace  = formatRomaTrace(romaResult)
 
   // Use fast tier (grok-3-mini) — extraction is simple JSON parsing, no need for the

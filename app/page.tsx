@@ -33,7 +33,7 @@ export default function Home() {
     localStorage.setItem('sentient-roma-mode', m)
   }
 
-  const { pipeline, trades, isRunning, nextCycleIn, error, stats, runCycle } = usePipeline(
+  const { pipeline, trades, isRunning, nextCycleIn, error, stats, runCycle, stopCycle } = usePipeline(
     liveMode, romaMode, botActive, aiRisk,
   )
 
@@ -441,25 +441,24 @@ export default function Home() {
                   ))}
                 </div>
                 <button
-                  onClick={runCycle}
-                  disabled={isRunning}
+                  onClick={isRunning ? stopCycle : runCycle}
                   style={{
                     padding: '7px 18px', borderRadius: 9,
                     background: isRunning
-                      ? 'var(--cream-dark)'
+                      ? 'linear-gradient(135deg, #c0392b 0%, #e74c3c 100%)'
                       : 'linear-gradient(135deg, var(--green-dark) 0%, var(--green) 100%)',
-                    border: isRunning ? '1px solid var(--border)' : '1px solid var(--green-dark)',
-                    color: isRunning ? 'var(--text-muted)' : '#fff',
-                    cursor: isRunning ? 'not-allowed' : 'pointer',
+                    border: isRunning ? '1px solid #c0392b' : '1px solid var(--green-dark)',
+                    color: '#fff',
+                    cursor: 'pointer',
                     fontSize: 12, fontWeight: 700,
                     display: 'flex', alignItems: 'center', gap: 6,
-                    boxShadow: isRunning ? 'none' : '0 2px 10px rgba(74,148,112,0.3)',
+                    boxShadow: isRunning ? '0 2px 10px rgba(192,57,43,0.3)' : '0 2px 10px rgba(74,148,112,0.3)',
                     transition: 'all 0.2s',
                     letterSpacing: '0.02em',
                   }}
                 >
                   {isRunning
-                    ? <><span style={{ animation: 'spin-slow 1s linear infinite', display: 'inline-block' }}>◌</span> Running...</>
+                    ? <><span style={{ display: 'inline-block' }}>■</span> Stop</>
                     : '▶ Run Cycle'}
                 </button>
               </div>

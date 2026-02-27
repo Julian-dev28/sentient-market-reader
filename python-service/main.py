@@ -198,15 +198,26 @@ def build_roma_config(llm: LLMConfig) -> ROMAConfig:
     )
 
 
-def build_roma_config_tiered(analysis_llm: LLMConfig, orchestration_llm: LLMConfig) -> ROMAConfig:
+def build_roma_config_tiered(analysis_llm: LLMConfig, orchestration_llm: LLMConfig, roma_mode: str = "keen") -> ROMAConfig:
     """
     Tiered ROMA config — fastest quality mix:
       Atomizer + Planner  → orchestration_llm (fast/cheap — just task decomposition)
       Executor + Aggregator → analysis_llm (quality model — the actual reasoning)
 
-    This cuts 30-50% off wall time because orchestration calls are sequential
-    and cheap to speed up; analysis calls run in parallel and need quality.
+    Token budgets are tightened for faster modes to reduce generation time:
+      blitz: executor 600, aggregator 800  (fast signal, no essays)
+      sharp: executor 1000, aggregator 1500
+      keen:  executor 2000, aggregator 4000 (default)
+      smart: executor 2000, aggregator 4000
     """
+    _token_budgets = {
+        "blitz": {"executor": 600,  "aggregator": 800},
+        "sharp": {"executor": 1000, "aggregator": 1500},
+        "keen":  {"executor": 2000, "aggregator": 4000},
+        "smart": {"executor": 2000, "aggregator": 4000},
+    }
+    budgets = _token_budgets.get(roma_mode, _token_budgets["keen"])
+
     def make_cfg(llm: LLMConfig, temperature: float, max_tokens: int) -> AgentConfig:
         return AgentConfig(llm=LLMConfig(
             model=llm.model,
@@ -216,14 +227,21 @@ def build_roma_config_tiered(analysis_llm: LLMConfig, orchestration_llm: LLMConf
             max_tokens=max_tokens,
         ))
 
+    # Executor must always emit sources field (Optional in signature but JSONAdapter enforces it)
+    executor_cfg = make_cfg(analysis_llm, temperature=0.5, max_tokens=budgets["executor"])
+    executor_cfg.signature_instructions = (
+        "Always include ALL output fields in your JSON response. "
+        "The 'sources' field is required — if no sources were used, set it to an empty list: []"
+    )
+
     return ROMAConfig(
         runtime=RuntimeConfig(timeout=700),
         agents=AgentsConfig(
-            atomizer=make_cfg(orchestration_llm, temperature=0.1, max_tokens=1000),
-            planner=make_cfg(orchestration_llm,  temperature=0.3, max_tokens=3000),
-            executor=make_cfg(analysis_llm,      temperature=0.5, max_tokens=2000),
-            aggregator=make_cfg(analysis_llm,    temperature=0.2, max_tokens=4000),
-            verifier=make_cfg(orchestration_llm, temperature=0.1, max_tokens=1000),
+            atomizer=make_cfg(orchestration_llm, temperature=0.1, max_tokens=500),
+            planner=make_cfg(orchestration_llm,  temperature=0.3, max_tokens=1000),
+            executor=executor_cfg,
+            aggregator=make_cfg(analysis_llm,    temperature=0.2, max_tokens=budgets["aggregator"]),
+            verifier=make_cfg(orchestration_llm, temperature=0.1, max_tokens=500),
         ),
     )
 
@@ -328,7 +346,7 @@ Market context:
         """Run one ROMA solve for a given provider; returns (provider_label, result)."""
         a_llm, p_label = build_llm_config(roma_mode, prov)
         o_llm, _       = build_llm_config(orch_mode, prov)
-        cfg = build_roma_config_tiered(a_llm, o_llm)
+        cfg = build_roma_config_tiered(a_llm, o_llm, roma_mode)
         return p_label, solve(full_prompt, max_depth=req.max_depth, config=cfg)
 
     def extract_answer(result: object) -> tuple[str, bool, list]:
