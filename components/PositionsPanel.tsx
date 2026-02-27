@@ -355,19 +355,19 @@ export default function PositionsPanel({ liveMode }: { liveMode: boolean }) {
                 borderBottom: i < Math.min(fills.length, 6) - 1 ? '1px solid var(--border)' : 'none',
                 display: 'flex', alignItems: 'center', justifyContent: 'space-between',
               }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                  <span className={`pill ${fill.side === 'yes' ? 'pill-green' : 'pill-pink'}`} style={{ fontSize: 7 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span className={`pill ${fill.side === 'yes' ? 'pill-green' : 'pill-pink'}`} style={{ fontSize: 9 }}>
                     {fill.action.toUpperCase()} {fill.side.toUpperCase()}
                   </span>
-                  <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 9, color: 'var(--text-primary)' }}>
+                  <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>
                     {fill.count}× @ {price}¢
                   </span>
-                  <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>${cost}</span>
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>${cost}</span>
                 </div>
                 <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 8, color: 'var(--text-muted)' }}>{time}</div>
+                  <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 11, color: 'var(--text-muted)' }}>{time}</div>
                   {parseFloat(fill.fee_cost) > 0 && (
-                    <div style={{ fontSize: 7, color: 'var(--text-light)' }}>fee ${fill.fee_cost}</div>
+                    <div style={{ fontSize: 9, color: 'var(--text-light)' }}>fee ${fill.fee_cost}</div>
                   )}
                 </div>
               </div>
