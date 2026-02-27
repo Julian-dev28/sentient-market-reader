@@ -17,9 +17,10 @@ export default function Home() {
   const [liveMode, setLiveMode]           = useState(false)  // always false on SSR
   const [showLiveWarning, setShowLiveWarning] = useState(false)
   const [romaMode, setRomaMode]           = useState<'blitz' | 'sharp' | 'keen' | 'smart'>('blitz')
-  const [botActive, setBotActive]         = useState(false)
+  const [botActive, setBotActive]           = useState(false)
   const [showBotWarning, setShowBotWarning] = useState(false)
-  const [aiRisk, setAiRisk]               = useState(false)
+  const [showLateWarning, setShowLateWarning] = useState(false)
+  const [aiRisk, setAiRisk]                 = useState(false)
 
   // Sync from localStorage after hydration (client-only)
   useEffect(() => {
@@ -237,6 +238,51 @@ export default function Home() {
         </div>
       )}
 
+      {/* Late-start warning modal */}
+      {showLateWarning && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 1000,
+          background: 'rgba(61,46,30,0.45)', backdropFilter: 'blur(6px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <div className="card animate-fade-in" style={{ maxWidth: 400, width: '90%', padding: '28px 28px' }}>
+            <div style={{ fontSize: 22, marginBottom: 10 }}>⏱</div>
+            <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-primary)', marginBottom: 8 }}>
+              Under 2 Minutes Remaining
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 20 }}>
+              The current 15-minute window closes in <strong>less than 2 minutes</strong>. The pipeline takes {romaMode === 'blitz' ? '~10–15s' : romaMode === 'sharp' ? '~20–30s' : romaMode === 'keen' ? '~60–90s' : '~60–120s'} to complete — it may not finish before the market settles.
+              <br /><br />
+              Any trade signal generated will apply to the <strong>next window</strong> that opens.
+            </div>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button
+                onClick={() => setShowLateWarning(false)}
+                style={{
+                  flex: 1, padding: '10px 0', borderRadius: 9, cursor: 'pointer',
+                  border: '1px solid var(--border-bright)', background: 'var(--cream)',
+                  fontSize: 13, fontWeight: 700, color: 'var(--text-secondary)',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => { setShowLateWarning(false); runCycle() }}
+                style={{
+                  flex: 1, padding: '10px 0', borderRadius: 9, cursor: 'pointer',
+                  border: '1px solid var(--amber)',
+                  background: 'linear-gradient(135deg, #b8720f 0%, var(--amber) 100%)',
+                  fontSize: 13, fontWeight: 700, color: '#fff',
+                  boxShadow: '0 2px 10px rgba(212,135,44,0.35)',
+                }}
+              >
+                Run Anyway
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Trade alert pop-up ─────────────────────────────────────────────── */}
       {tradeAlert && (
         <div style={{
@@ -441,7 +487,13 @@ export default function Home() {
                   ))}
                 </div>
                 <button
-                  onClick={isRunning ? stopCycle : (serverLocked ? undefined : runCycle)}
+                  onClick={isRunning ? stopCycle : (serverLocked ? undefined : () => {
+                    if (secondsUntilExpiry > 0 && secondsUntilExpiry < 120) {
+                      setShowLateWarning(true)
+                    } else {
+                      runCycle()
+                    }
+                  })}
                   disabled={serverLocked && !isRunning}
                   title={serverLocked && !isRunning ? 'Pipeline already running on server' : undefined}
                   style={{
