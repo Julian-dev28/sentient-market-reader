@@ -455,39 +455,12 @@ export default function Home() {
           {/* ─── CENTER ─── */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
 
+            {/* ── Row 1: description + expiry + run button ── */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
                 5-min cycles · 3 signals per 15-min window · CF Benchmarks settlement
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                {/* AI Risk checkbox */}
-                <label style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontSize: 11, fontWeight: 700, color: aiRisk ? 'var(--brown)' : 'var(--text-muted)', userSelect: 'none' }}
-                  title="Use ROMA AI risk manager instead of deterministic Kelly + limits">
-                  <input
-                    type="checkbox"
-                    checked={aiRisk}
-                    onChange={e => setAiRisk(e.target.checked)}
-                    style={{ accentColor: 'var(--brown)', width: 13, height: 13, cursor: 'pointer' }}
-                  />
-                  AI Risk
-                </label>
-
-                {/* ROMA mode selector */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'var(--bg-secondary)', borderRadius: 10, padding: '4px 5px', border: '1px solid var(--border)' }}>
-                  {(['blitz', 'sharp', 'keen', 'smart'] as const).map(m => (
-                    <button key={m} onClick={() => handleModeChange(m)}
-                      title={m === 'blitz' ? 'grok-4-1-fast-non-reasoning (~30–60s)' : m === 'sharp' ? 'grok-3-mini-fast (~1–2 min)' : m === 'keen' ? 'grok-3 (~1–3 min)' : 'grok-4-0709 (~1–3 min, highest quality)'}
-                      style={{
-                        padding: '6px 16px', borderRadius: 7, fontSize: 13, fontWeight: 700, cursor: 'pointer',
-                        border: romaMode === m ? '1px solid var(--brown)' : '1px solid transparent',
-                        background: romaMode === m ? 'var(--brown)' : 'transparent',
-                        color: romaMode === m ? '#fff' : 'var(--text-muted)',
-                        transition: 'all 0.15s', textTransform: 'capitalize',
-                      }}>
-                      {m}
-                    </button>
-                  ))}
-                </div>
                 {/* Countdown clock */}
                 {secondsUntilExpiry > 0 && (() => {
                   const m = Math.floor(secondsUntilExpiry / 60)
@@ -511,38 +484,6 @@ export default function Home() {
                     </div>
                   )
                 })()}
-
-                {/* Per-stage mode overrides */}
-                {(['sent', 'prob'] as const).map(stage => {
-                  const val   = stage === 'sent' ? sentMode : probMode
-                  const setVal = stage === 'sent' ? setSentMode : setProbMode
-                  return (
-                    <div key={stage} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                      <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                        {stage === 'sent' ? 'Sent' : 'Prob'}
-                      </span>
-                      <select
-                        value={val ?? ''}
-                        onChange={e => setVal(e.target.value || undefined)}
-                        title={stage === 'sent' ? 'Sentiment stage model tier (auto = one tier below Prob)' : 'Probability stage model tier (auto = matches main mode)'}
-                        style={{
-                          fontSize: 11, fontWeight: 600, cursor: 'pointer',
-                          padding: '5px 6px', borderRadius: 7,
-                          border: val ? '1px solid var(--brown)' : '1px solid var(--border)',
-                          background: val ? 'var(--cream)' : 'var(--bg-secondary)',
-                          color: val ? 'var(--brown)' : 'var(--text-muted)',
-                          outline: 'none',
-                        }}
-                      >
-                        <option value="">auto</option>
-                        <option value="blitz">blitz</option>
-                        <option value="sharp">sharp</option>
-                        <option value="keen">keen</option>
-                        <option value="smart">smart</option>
-                      </select>
-                    </div>
-                  )
-                })}
                 <button
                   onClick={isRunning ? stopCycle : (serverLocked ? undefined : () => {
                     if (secondsUntilExpiry > 0 && secondsUntilExpiry < 120) {
@@ -564,8 +505,7 @@ export default function Home() {
                     fontSize: 12, fontWeight: 700,
                     display: 'flex', alignItems: 'center', gap: 6,
                     boxShadow: isRunning ? '0 2px 10px rgba(192,57,43,0.3)' : (serverLocked ? 'none' : '0 2px 10px rgba(74,148,112,0.3)'),
-                    transition: 'all 0.2s',
-                    letterSpacing: '0.02em',
+                    transition: 'all 0.2s', letterSpacing: '0.02em',
                   }}
                 >
                   {isRunning
@@ -574,6 +514,70 @@ export default function Home() {
                     : '▶ Run Cycle'}
                 </button>
               </div>
+            </div>
+
+            {/* ── Row 2: AI Risk + mode selector + stage overrides ── */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {/* AI Risk checkbox */}
+              <label style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontSize: 11, fontWeight: 700, color: aiRisk ? 'var(--brown)' : 'var(--text-muted)', userSelect: 'none' }}
+                title="Use ROMA AI risk manager instead of deterministic Kelly + limits">
+                <input
+                  type="checkbox"
+                  checked={aiRisk}
+                  onChange={e => setAiRisk(e.target.checked)}
+                  style={{ accentColor: 'var(--brown)', width: 13, height: 13, cursor: 'pointer' }}
+                />
+                AI Risk
+              </label>
+
+              {/* ROMA mode selector */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'var(--bg-secondary)', borderRadius: 10, padding: '4px 5px', border: '1px solid var(--border)' }}>
+                {(['blitz', 'sharp', 'keen', 'smart'] as const).map(m => (
+                  <button key={m} onClick={() => handleModeChange(m)}
+                    title={m === 'blitz' ? 'grok-4-1-fast-non-reasoning (~30–60s)' : m === 'sharp' ? 'grok-3-mini-fast (~1–2 min)' : m === 'keen' ? 'grok-3 (~1–3 min)' : 'grok-4-0709 (~1–3 min, highest quality)'}
+                    style={{
+                      padding: '6px 16px', borderRadius: 7, fontSize: 13, fontWeight: 700, cursor: 'pointer',
+                      border: romaMode === m ? '1px solid var(--brown)' : '1px solid transparent',
+                      background: romaMode === m ? 'var(--brown)' : 'transparent',
+                      color: romaMode === m ? '#fff' : 'var(--text-muted)',
+                      transition: 'all 0.15s', textTransform: 'capitalize',
+                    }}>
+                    {m}
+                  </button>
+                ))}
+              </div>
+
+              {/* Per-stage mode overrides */}
+              {(['sent', 'prob'] as const).map(stage => {
+                const val    = stage === 'sent' ? sentMode : probMode
+                const setVal = stage === 'sent' ? setSentMode : setProbMode
+                return (
+                  <div key={stage} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                      {stage === 'sent' ? 'Sent' : 'Prob'}
+                    </span>
+                    <select
+                      value={val ?? ''}
+                      onChange={e => setVal(e.target.value || undefined)}
+                      title={stage === 'sent' ? 'Sentiment stage model tier (auto = one tier below Prob)' : 'Probability stage model tier (auto = matches main mode)'}
+                      style={{
+                        fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                        padding: '5px 6px', borderRadius: 7,
+                        border: val ? '1px solid var(--brown)' : '1px solid var(--border)',
+                        background: val ? 'var(--cream)' : 'var(--bg-secondary)',
+                        color: val ? 'var(--brown)' : 'var(--text-muted)',
+                        outline: 'none',
+                      }}
+                    >
+                      <option value="">auto</option>
+                      <option value="blitz">blitz</option>
+                      <option value="sharp">sharp</option>
+                      <option value="keen">keen</option>
+                      <option value="smart">smart</option>
+                    </select>
+                  </div>
+                )
+              })}
             </div>
 
             <PriceChart priceHistory={priceHistory} strikePrice={strikePrice} currentPrice={currentBTCPrice} />
