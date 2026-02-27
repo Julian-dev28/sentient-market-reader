@@ -48,8 +48,10 @@ export function usePipeline(
   romaMode: string = 'smart',
   autoTrade: boolean = false,
   aiRisk: boolean = false,
-  provider2?: string,   // split-provider for ProbabilityModel
-  providers?: string[], // multi-provider parallel for Sentiment
+  provider2?: string,    // split-provider for ProbabilityModel
+  providers?: string[],  // multi-provider parallel for Sentiment
+  sentMode?: string,     // explicit Sentiment stage mode (overrides SENT_MODE_MAP auto-downgrade)
+  probMode?: string,     // explicit Probability stage mode (overrides romaMode)
 ) {
   const [pipeline, setPipeline]     = useState<PipelineState | null>(null)
   const [trades, setTrades]         = useState<TradeRecord[]>([])
@@ -77,6 +79,8 @@ export function usePipeline(
       if (aiRisk) params.set('aiRisk', 'true')
       if (provider2) params.set('provider2', provider2)
       if (providers && providers.length > 1) params.set('providers', providers.join(','))
+      if (sentMode) params.set('sentMode', sentMode)
+      if (probMode) params.set('probMode', probMode)
       const res = await fetch(`/api/pipeline?${params}`, { cache: 'no-store', signal: controller.signal })
       if (!res.ok) {
         if (res.status === 503) throw new Error('No active KXBTC15M market — trading hours are ~11:30 AM–midnight ET weekdays')
@@ -163,7 +167,7 @@ export function usePipeline(
       lastCycleRef.current = Date.now()
       setNextCycleIn(CYCLE_INTERVAL_MS / 1000)
     }
-  }, [liveMode, romaMode, autoTrade, aiRisk, provider2, providers])
+  }, [liveMode, romaMode, autoTrade, aiRisk, provider2, providers, sentMode, probMode])
 
   // Check server lock state on mount so the button reflects server reality
   useEffect(() => {

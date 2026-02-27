@@ -48,17 +48,19 @@ export async function runAgentPipeline(
   provider: AIProvider = 'grok',
   romaMode?: string,
   aiRisk: boolean = false,
-  provider2?: AIProvider,   // second provider for ProbabilityModel; eliminates the inter-stage pause
-  providers?: AIProvider[], // multi-provider parallel solve for Sentiment stage (ensemble)
+  provider2?: AIProvider,      // second provider for ProbabilityModel; eliminates the inter-stage pause
+  providers?: AIProvider[],    // multi-provider parallel solve for Sentiment stage (ensemble)
+  sentModeOverride?: string,   // explicit mode for Sentiment stage (overrides SENT_MODE_MAP)
+  probModeOverride?: string,   // explicit mode for Probability stage (overrides romaMode)
 ): Promise<PipelineState> {
   const cycleId = ++cycleCounter
   const cycleStartedAt = new Date().toISOString()
   const mode = romaMode ?? 'keen'
 
-  // Per-stage mode: sentiment runs one tier lighter (faster, fewer tokens),
-  // probability runs at the full selected quality tier.
-  const sentMode = SENT_MODE_MAP[mode] ?? mode
-  const probMode = mode
+  // Per-stage mode: defaults to one tier lighter for sentiment via SENT_MODE_MAP.
+  // Explicit overrides (sentModeOverride / probModeOverride) take precedence when set.
+  const sentMode = sentModeOverride ?? (SENT_MODE_MAP[mode] ?? mode)
+  const probMode = probModeOverride ?? mode
 
   // ── Previous cycle context ─────────────────────────────────────────────
   const last = getLastAnalysis()

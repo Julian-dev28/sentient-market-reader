@@ -167,7 +167,14 @@ export async function GET(req: NextRequest) {
       ? (providersRaw.split(',').filter(p => (validProviders as readonly string[]).includes(p)) as AIProvider[])
       : undefined
 
-    const pipeline = await runAgentPipeline(markets, quote, orderbook, provider, romaMode, aiRisk, provider2, providers)
+    // Per-stage mode overrides — when set, bypass SENT_MODE_MAP auto-downgrade
+    const validModes = ['blitz', 'sharp', 'keen', 'smart']
+    const sentModeRaw = req.nextUrl.searchParams.get('sentMode')
+    const probModeRaw = req.nextUrl.searchParams.get('probMode')
+    const sentModeOverride = sentModeRaw && validModes.includes(sentModeRaw) ? sentModeRaw : undefined
+    const probModeOverride = probModeRaw && validModes.includes(probModeRaw) ? probModeRaw : undefined
+
+    const pipeline = await runAgentPipeline(markets, quote, orderbook, provider, romaMode, aiRisk, provider2, providers, sentModeOverride, probModeOverride)
     return NextResponse.json(pipeline)
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 })
