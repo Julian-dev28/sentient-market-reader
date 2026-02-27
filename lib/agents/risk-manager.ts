@@ -36,6 +36,7 @@ export function runRiskManager(
   pModel: number,
   recommendation: 'YES' | 'NO' | 'NO_TRADE',
   limitPrice: number,
+  sentimentScore?: number,
 ): AgentResult<RiskOutput> {
   const start = Date.now()
   checkDailyReset()
@@ -51,6 +52,14 @@ export function runRiskManager(
   if (recommendation === 'NO_TRADE') {
     approved = false
     rejectionReason = `Edge ${edgePct.toFixed(1)}% below minimum threshold (${RISK_PARAMS.minEdgePct}%)`
+  } else if (
+    sentimentScore !== undefined &&
+    ((recommendation === 'YES' && sentimentScore < -0.4) ||
+     (recommendation === 'NO'  && sentimentScore >  0.4))
+  ) {
+    approved = false
+    const dir = recommendation === 'YES' ? 'bearish' : 'bullish'
+    rejectionReason = `Sentiment (${sentimentScore.toFixed(2)}) strongly ${dir} — contradicts ${recommendation} recommendation`
   } else if (sessionState.dailyPnl <= RISK_PARAMS.maxDailyLoss) {
     approved = false
     rejectionReason = `Daily loss limit reached ($${Math.abs(RISK_PARAMS.maxDailyLoss)})`
@@ -139,8 +148,8 @@ export async function runRomaRiskManager(
   ].join('\n')
 
   try {
-    // Atomic solve (depth=0) — risk assessment is simple enough for single shot
-    const romaResult = await callPythonRoma(goal, context, 0, 2, romaMode)
+    const maxDepth = Math.max(1, parseInt(process.env.ROMA_MAX_DEPTH ?? '1'))
+    const romaResult = await callPythonRoma(goal, context, maxDepth, 2, romaMode)
     const romaTrace  = formatRomaTrace(romaResult)
 
     const extracted = await llmToolCall<{

@@ -93,6 +93,11 @@ export default function SignalPanel({ probability, sentiment }: SignalPanelProps
   const recBdr   = rec === 'YES' ? '#9ecfb8'             : rec === 'NO' ? '#a8cce0'          : 'var(--border)'
   const recIcon  = rec === 'YES' ? '↑' : rec === 'NO' ? '↓' : '—'
 
+  const score = sentiment?.score ?? 0
+  const sentimentContradictsRec =
+    (rec === 'YES' && score < -0.4) ||
+    (rec === 'NO'  && score >  0.4)
+
   return (
     <div className="card">
       <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -141,6 +146,18 @@ export default function SignalPanel({ probability, sentiment }: SignalPanelProps
               </div>
             </div>
           </div>
+
+          {sentimentContradictsRec && (
+            <div style={{
+              padding: '7px 10px', borderRadius: 8, marginBottom: 12,
+              background: 'var(--pink-pale)', border: '1px solid #f0a0b8',
+              fontSize: 10, color: 'var(--pink)', fontWeight: 600,
+              display: 'flex', alignItems: 'center', gap: 6,
+            }}>
+              <span>⚠</span>
+              <span>Sentiment contradicts signal — risk manager will block this trade</span>
+            </div>
+          )}
 
           <AnimatedBar
             label="ROMA Forecast"

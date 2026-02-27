@@ -33,6 +33,31 @@ The entire LLM layer is **provider-agnostic** — one env var to switch between 
 
 ---
 
+## What is ROMA?
+
+**ROMA (Recursive Open Meta-Agent)** is an open-source multi-agent reasoning framework built by [Sentient Foundation](https://github.com/sentient-agi/ROMA). Instead of sending one big prompt to an LLM and hoping for a good answer, ROMA breaks a complex goal into smaller sub-problems, solves them in parallel, and synthesizes the results — like a research team rather than a single analyst.
+
+Every ROMA solve runs the same four-agent loop:
+
+```
+Goal
+ └─ ◎ Atomizer  — is this simple enough to answer directly, or does it need decomposing?
+      ├─ [atomic]  → Executor answers the goal directly
+      └─ [complex] → Planner generates 3–5 subtasks
+                       → Executors run all subtasks in parallel
+                       → Aggregator synthesizes into a unified answer
+```
+
+**Why it matters for trading:**
+
+- The question *"will BTC close above $X in 12 minutes?"* is not a single-answer question — it requires combining price momentum, orderbook pressure, time-decay probability, and sentiment. A single LLM call conflates these dimensions and produces overconfident outputs.
+- ROMA forces each dimension into its own Executor, each of which reasons independently without anchoring on what the other Executors are concluding. The Aggregator then weighs these independent signals.
+- The Atomizer/Planner use a fast, cheap model (blitz-tier). The Executors and Aggregator use the full quality model. This means the reasoning cost is paid only where it matters.
+
+**This project uses the official `roma-dspy` Python SDK** — a real ROMA runtime, not a prompt that mimics one. The Next.js pipeline calls a FastAPI microservice that runs genuine ROMA solves and returns structured results. Two stages run in parallel (Sentiment + Probability hit separate API pools simultaneously), cutting wall time roughly in half vs sequential.
+
+---
+
 ## Architecture
 
 ```

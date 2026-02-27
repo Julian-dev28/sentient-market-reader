@@ -130,6 +130,7 @@ export async function runAgentPipeline(
         probResult.output.pModel,
         probResult.output.recommendation,
         limitPrice,
+        sentResult.output.score,
       )
 
   // ── Stage 6: Execution ─────────────────────────────────────────────────
