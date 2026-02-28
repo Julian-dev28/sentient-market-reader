@@ -153,7 +153,7 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const romaMode = req.nextUrl.searchParams.get('mode') ?? process.env.ROMA_MODE ?? 'smart'
+    const romaMode = req.nextUrl.searchParams.get('mode') ?? process.env.ROMA_MODE ?? 'keen'
     const aiRisk   = req.nextUrl.searchParams.get('aiRisk') === 'true'
 
     // Split-provider: provider2 for ProbabilityModel stage (eliminates inter-stage pause)
