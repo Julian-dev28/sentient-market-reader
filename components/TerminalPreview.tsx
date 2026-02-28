@@ -173,7 +173,7 @@ export default function TerminalPreview({ isRunning: _isRunning }: Props) {
           stateRef.current = { li: 0, ci: 0, pausing: false }
           setDisplayLines([])
           setCurrentLine('')
-        }, 3000)
+        }, 8000)
         return
       }
       const target = ls[s.li]
