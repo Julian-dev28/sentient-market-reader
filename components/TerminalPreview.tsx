@@ -181,7 +181,7 @@ export default function TerminalPreview({ isRunning: _isRunning }: Props) {
         s.ci++
         setCurrentLine(target.slice(0, s.ci))
       } else {
-        setDisplayLines(prev => [...prev, target].slice(-10))
+        setDisplayLines(prev => [...prev, target])
         setCurrentLine('')
         s.li++
         s.ci = 0
@@ -193,6 +193,13 @@ export default function TerminalPreview({ isRunning: _isRunning }: Props) {
   }, [])
 
   const serviceOk = health?.status === 'ok'
+  const scrollRef = useRef<HTMLDivElement>(null)
+
+  // Auto-scroll to bottom as lines come in
+  useEffect(() => {
+    const el = scrollRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [displayLines, currentLine])
 
   return (
     <div style={{
@@ -230,17 +237,18 @@ export default function TerminalPreview({ isRunning: _isRunning }: Props) {
       </div>
 
       {/* Body */}
-      <div style={{
+      <div ref={scrollRef} style={{
         padding: '12px 16px 14px',
-        minHeight: 148,
+        height: 160,
+        overflowY: 'auto',
         background: '#ffffff',
-        display: 'flex', flexDirection: 'column', justifyContent: 'flex-end',
+        display: 'flex', flexDirection: 'column',
+        scrollbarWidth: 'none',
       }}>
         {displayLines.map((line, i) => (
           <div key={`${i}-${line.slice(0, 12)}`} style={{
             fontFamily: 'var(--font-geist-mono)',
             fontSize: 11.5, lineHeight: 1.72,
-            opacity: Math.max(0.28, 0.28 + (i / Math.max(displayLines.length - 1, 1)) * 0.72),
           }}>
             <LineContent text={line} />
           </div>
