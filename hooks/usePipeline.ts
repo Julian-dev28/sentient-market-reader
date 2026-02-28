@@ -45,7 +45,7 @@ function simulateOutcome(trade: TradeRecord, settlementPrice: number): TradeReco
  */
 export function usePipeline(
   liveMode: boolean,
-  romaMode: string = 'smart',
+  romaMode: string = 'keen',
   autoTrade: boolean = false,
   aiRisk: boolean = false,
   provider2?: string,    // split-provider for ProbabilityModel

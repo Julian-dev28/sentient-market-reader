@@ -17,7 +17,7 @@ import TerminalPreview from '@/components/TerminalPreview'
 export default function Home() {
   const [liveMode, setLiveMode]           = useState(false)  // always false on SSR
   const [showLiveWarning, setShowLiveWarning] = useState(false)
-  const [romaMode, setRomaMode]           = useState<'blitz' | 'sharp' | 'keen' | 'smart'>('blitz')
+  const [romaMode, setRomaMode]           = useState<'blitz' | 'sharp' | 'keen' | 'smart'>('keen')
   const [botActive, setBotActive]           = useState(false)
   const [showBotWarning, setShowBotWarning] = useState(false)
   const [showLateWarning, setShowLateWarning] = useState(false)
