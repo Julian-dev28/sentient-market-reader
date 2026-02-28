@@ -12,7 +12,6 @@ import TradeLog from '@/components/TradeLog'
 import PerformancePanel from '@/components/PerformancePanel'
 import PositionsPanel from '@/components/PositionsPanel'
 import FloatingBackground from '@/components/FloatingBackground'
-import TerminalPreview from '@/components/TerminalPreview'
 
 export default function Home() {
   const [liveMode, setLiveMode]           = useState(false)  // always false on SSR
@@ -460,9 +459,6 @@ export default function Home() {
             <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
               5-min cycles · 3 signals per 15-min window · CF Benchmarks settlement
             </div>
-
-            {/* ── Terminal preview ── */}
-            <TerminalPreview isRunning={isRunning} />
 
             {/* ── Row 2: AI Risk + mode selector + stage overrides + expiry + run ── */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
