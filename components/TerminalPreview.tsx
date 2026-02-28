@@ -2,47 +2,101 @@
 
 import { useState, useEffect, useRef } from 'react'
 
-const MODEL_MAP: Record<string, string> = {
-  blitz: 'grok-4-1-fast',
-  sharp: 'grok-3-mini-fast',
-  keen:  'grok-3',
-  smart: 'grok-4-0709',
+interface HealthData {
+  status: string
+  provider?: string
+  model?: string
+  sdk?: string
+  error?: string
 }
-const SENT_MODE_MAP: Record<string, string> = {
-  blitz: 'blitz', sharp: 'sharp', keen: 'sharp', smart: 'keen',
+interface LastAnalysis {
+  pModel: number
+  pMarket: number
+  edge: number
+  recommendation: string
+  sentimentScore: number
+  sentimentLabel: string
+  btcPrice: number
+  strikePrice: number
+  completedAt: string
+}
+interface StatusData {
+  running: boolean
+  lastAnalysis: LastAnalysis | null
 }
 
 function lineColor(line: string): string {
-  if (line.startsWith('$'))    return '#8ab4cf'  // blue prompt
-  if (line.startsWith('[✓]'))  return '#74b896'  // green success
-  if (line.startsWith('[→]'))  return '#c9a870'  // amber info
-  if (line.startsWith('[◉]'))  return '#e06fa0'  // pink active
-  if (line.startsWith('[○]'))  return 'rgba(255,255,255,0.38)'
-  return 'rgba(255,255,255,0.45)'
+  if (line.startsWith('$'))    return '#8ab4cf'
+  if (line.startsWith('[✓]'))  return '#74b896'
+  if (line.startsWith('[→]'))  return '#c9a870'
+  if (line.startsWith('[◉]'))  return '#e06fa0'
+  if (line.startsWith('[✗]'))  return '#e06fa0'
+  return 'rgba(255,255,255,0.38)'
+}
+
+function buildLines(
+  health: HealthData | null,
+  status: StatusData | null,
+  isRunning: boolean,
+): string[] {
+  const out: string[] = []
+
+  out.push('$ sentient health --all')
+
+  if (health === null) {
+    out.push('[→] connecting to python service...')
+  } else if (health.status === 'offline' || health.status === 'error') {
+    out.push('[✗] python service offline')
+    if (health.error) out.push(`[→] ${health.error.slice(0, 48)}`)
+  } else {
+    out.push(`[✓] ${health.sdk ?? 'roma-dspy'} · status: ${health.status}`)
+    if (health.model)    out.push(`[✓] model: ${health.model}`)
+    if (health.provider) out.push(`[✓] provider: ${health.provider}`)
+  }
+
+  if (status) {
+    out.push(isRunning ? '[◉] pipeline: running' : '[○] pipeline: idle')
+    const a = status.lastAnalysis
+    if (a) {
+      const t = new Date(a.completedAt).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' })
+      const edge = `${a.edge >= 0 ? '+' : ''}${(a.edge * 100).toFixed(1)}%`
+      out.push(`[→] last ${t} · rec: ${a.recommendation} · edge ${edge}`)
+      out.push(`[→] pModel ${(a.pModel * 100).toFixed(1)}% · pMkt ${(a.pMarket * 100).toFixed(1)}%`)
+      const btc    = `$${a.btcPrice.toLocaleString('en-US', { maximumFractionDigits: 0 })}`
+      const strike = `$${a.strikePrice.toLocaleString('en-US', { maximumFractionDigits: 0 })}`
+      out.push(`[→] btc ${btc} · strike ${strike}`)
+    } else {
+      out.push('[○] no previous analysis found')
+    }
+  }
+
+  return out
 }
 
 interface Props {
-  romaMode: string
-  sentMode?: string
-  probMode?: string
   isRunning: boolean
 }
 
-export default function TerminalPreview({ romaMode, sentMode, probMode, isRunning }: Props) {
-  const effectiveSent = sentMode ?? SENT_MODE_MAP[romaMode] ?? romaMode
-  const effectiveProb = probMode ?? romaMode
+export default function TerminalPreview({ isRunning }: Props) {
+  const [health, setHealth] = useState<HealthData | null>(null)
+  const [status, setStatus] = useState<StatusData | null>(null)
 
-  // Recomputed each render — linesRef always reflects latest props
-  const lines = [
-    `$ sentient init --mode ${romaMode}`,
-    `[✓] roma-dspy · framework ready`,
-    `[✓] sent  ·  ${MODEL_MAP[effectiveSent] ?? effectiveSent}`,
-    `[✓] prob  ·  ${MODEL_MAP[effectiveProb] ?? effectiveProb}`,
-    `[→] atomize → plan → exec×N → aggregate → extract`,
-    `[→] kalshi KXBTC15M · BTC/USD · 15-min window`,
-    isRunning ? `[◉] pipeline active · solving...` : `[○] standby · run cycle to begin`,
-  ]
+  // Fetch both endpoints; refresh every 12s
+  useEffect(() => {
+    async function fetchAll() {
+      const [h, s] = await Promise.all([
+        fetch('/api/python-health', { cache: 'no-store' }).then(r => r.json()).catch(() => ({ status: 'offline' })),
+        fetch('/api/pipeline/status', { cache: 'no-store' }).then(r => r.json()).catch(() => null),
+      ])
+      setHealth(h)
+      setStatus(s)
+    }
+    fetchAll()
+    const id = setInterval(fetchAll, 12_000)
+    return () => clearInterval(id)
+  }, [])
 
+  const lines = buildLines(health, status, isRunning)
   const linesRef = useRef(lines)
   linesRef.current = lines
 
@@ -50,16 +104,14 @@ export default function TerminalPreview({ romaMode, sentMode, probMode, isRunnin
   const [currentLine, setCurrentLine]   = useState('')
   const stateRef = useRef({ li: 0, ci: 0, pausing: false })
 
-  // Reset typewriter on config change (not on isRunning)
-  const resetKey = `${romaMode}|${sentMode ?? ''}|${probMode ?? ''}`
+  // Reset typewriter when fresh data arrives
   useEffect(() => {
     stateRef.current = { li: 0, ci: 0, pausing: false }
     setDisplayLines([])
     setCurrentLine('')
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resetKey])
+  }, [health, status])
 
-  // Typewriter tick — mounted once, lives for component lifetime
+  // Typewriter tick — mounted once
   useEffect(() => {
     const id = setInterval(() => {
       const s = stateRef.current
@@ -67,13 +119,12 @@ export default function TerminalPreview({ romaMode, sentMode, probMode, isRunnin
 
       const ls = linesRef.current
       if (s.li >= ls.length) {
-        // All done — pause then loop
         s.pausing = true
         setTimeout(() => {
           stateRef.current = { li: 0, ci: 0, pausing: false }
           setDisplayLines([])
           setCurrentLine('')
-        }, 3400)
+        }, 4000)
         return
       }
 
@@ -82,18 +133,19 @@ export default function TerminalPreview({ romaMode, sentMode, probMode, isRunnin
         s.ci++
         setCurrentLine(target.slice(0, s.ci))
       } else {
-        // Line complete — commit and advance
-        setDisplayLines(prev => [...prev, target].slice(-6))
+        setDisplayLines(prev => [...prev, target].slice(-7))
         setCurrentLine('')
         s.li++
         s.ci = 0
         s.pausing = true
-        setTimeout(() => { s.pausing = false }, 155)
+        setTimeout(() => { s.pausing = false }, 140)
       }
-    }, 28)
+    }, 26)
 
     return () => clearInterval(id)
-  }, []) // mount once
+  }, [])
+
+  const serviceOk = health?.status === 'ok'
 
   return (
     <div style={{
@@ -105,13 +157,13 @@ export default function TerminalPreview({ romaMode, sentMode, probMode, isRunnin
       position: 'relative',
     }}>
 
-      {/* Subtle scanline overlay */}
+      {/* Scanline overlay */}
       <div style={{
         position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 0,
         backgroundImage: 'repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,0,0,0.028) 3px, rgba(0,0,0,0.028) 4px)',
       }} />
 
-      {/* Header bar */}
+      {/* Header */}
       <div style={{
         display: 'flex', alignItems: 'center', gap: 6,
         padding: '9px 14px',
@@ -119,25 +171,21 @@ export default function TerminalPreview({ romaMode, sentMode, probMode, isRunnin
         background: 'rgba(0,0,0,0.22)',
         position: 'relative', zIndex: 1,
       }}>
-        {/* macOS traffic lights */}
         <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#ff5f57', display: 'inline-block', flexShrink: 0 }} />
         <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#ffbd2e', display: 'inline-block', flexShrink: 0 }} />
         <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#28c840', display: 'inline-block', flexShrink: 0 }} />
-
-        {/* Title */}
         <span style={{
           flex: 1, textAlign: 'center',
           fontFamily: 'var(--font-geist-mono)', fontSize: 10, fontWeight: 600,
           color: 'rgba(255,255,255,0.28)', letterSpacing: '0.1em', textTransform: 'uppercase',
         }}>
-          sentient · roma-dspy · {romaMode}
+          sentient · roma-dspy
         </span>
-
-        {/* Status dot */}
+        {/* Service status dot */}
         <span style={{
           width: 7, height: 7, borderRadius: '50%', flexShrink: 0, display: 'inline-block',
-          background: isRunning ? '#3a9e72' : 'rgba(255,255,255,0.1)',
-          boxShadow: isRunning ? '0 0 8px #3a9e72' : 'none',
+          background: health === null ? 'rgba(255,255,255,0.1)' : serviceOk ? '#3a9e72' : '#e06fa0',
+          boxShadow: serviceOk ? '0 0 8px #3a9e72' : health && !serviceOk ? '0 0 8px #e06fa0' : 'none',
           transition: 'background 0.4s, box-shadow 0.4s',
         }} />
       </div>
@@ -151,17 +199,15 @@ export default function TerminalPreview({ romaMode, sentMode, probMode, isRunnin
         display: 'flex', flexDirection: 'column', justifyContent: 'flex-end',
       }}>
         {displayLines.map((line, i) => (
-          <div key={`${i}-${line.slice(0, 8)}`} style={{
+          <div key={`${i}-${line.slice(0, 10)}`} style={{
             fontFamily: 'var(--font-geist-mono)',
             fontSize: 11.5, lineHeight: 1.72,
             color: lineColor(line),
-            opacity: Math.max(0.25, 0.25 + (i / Math.max(displayLines.length - 1, 1)) * 0.72),
+            opacity: Math.max(0.22, 0.22 + (i / Math.max(displayLines.length - 1, 1)) * 0.75),
           }}>
             {line}
           </div>
         ))}
-
-        {/* Current line being typed + blinking cursor */}
         <div style={{
           fontFamily: 'var(--font-geist-mono)',
           fontSize: 11.5, lineHeight: 1.72,
