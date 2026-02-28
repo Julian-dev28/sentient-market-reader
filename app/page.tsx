@@ -448,6 +448,23 @@ export default function Home() {
                   ))}
                 </div>
                 <div style={{ marginTop: 8, fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.5 }}>{exec.rationale}</div>
+
+                {/* Prices at pipeline run */}
+                {md?.activeMarket && (
+                  <div style={{ marginTop: 10, padding: '7px 10px', borderRadius: 8, background: 'var(--bg-secondary)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <span style={{ fontSize: 8, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', flexShrink: 0 }}>At run</span>
+                    {[
+                      ['YES ask', md.activeMarket.yes_ask],
+                      ['YES bid', md.activeMarket.yes_bid],
+                      ['NO ask',  md.activeMarket.no_ask],
+                    ].map(([label, val]) => (
+                      <span key={label as string} style={{ fontSize: 10, color: 'var(--text-secondary)' }}>
+                        <span style={{ color: 'var(--text-muted)', marginRight: 3 }}>{label}</span>
+                        <span style={{ fontFamily: 'var(--font-geist-mono)', fontWeight: 700, color: 'var(--text-primary)' }}>{val}¢</span>
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>
