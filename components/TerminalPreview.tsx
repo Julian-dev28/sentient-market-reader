@@ -25,66 +25,117 @@ interface StatusData {
   lastAnalysis: LastAnalysis | null
 }
 
-function lineColor(line: string): string {
-  if (line.startsWith('$'))    return '#1a4fa0'   // blue prompt
-  if (line.startsWith('[✓]'))  return '#1a7a3a'   // dark green
-  if (line.startsWith('[→]'))  return '#222222'   // near-black info
-  if (line.startsWith('[◉]'))  return '#cc2233'   // red active
-  if (line.startsWith('[✗]'))  return '#cc2233'   // red error
-  return '#555555'
+// ── Color helpers ────────────────────────────────────────────────────────────
+function valueColor(v: string): string {
+  if (v === 'ok' || v === 'YES' || v === 'true') return '#1a7a3a'
+  if (v === 'offline' || v === 'NO' || v === 'false' || v === 'error') return '#cc2233'
+  if (v.startsWith('+')) return '#1a7a3a'
+  if (v.startsWith('-') && v.length > 1 && v[1] !== '-') return '#cc2233'
+  return '#111111'
 }
 
-function buildLines(
-  health: HealthData | null,
-  status: StatusData | null,
-  isRunning: boolean,
-): string[] {
+// ── Build lines from real API data ──────────────────────────────────────────
+function buildLines(health: HealthData | null, status: StatusData | null): string[] {
+  if (!health && !status) return ['connecting...']
+
+  const ts = new Date().toLocaleTimeString('en-US', { hour12: false })
   const out: string[] = []
 
-  out.push('$ sentient health --all')
-
-  if (health === null) {
-    out.push('[→] connecting to python service...')
+  out.push(`health @ ${ts}:`)
+  if (!health) {
+    out.push('  status:    fetching')
   } else if (health.status === 'offline' || health.status === 'error') {
-    out.push('[✗] python service offline')
-    if (health.error) out.push(`[→] ${health.error.slice(0, 48)}`)
+    out.push('  status:    offline')
   } else {
-    out.push(`[✓] ${health.sdk ?? 'roma-dspy'} · status: ${health.status}`)
-    if (health.provider) out.push(`[✓] model: ${health.provider}`)
+    out.push(`  status:    ${health.status}`)
+    if (health.model) out.push(`  model:     ${health.model}`)
+    if (health.sdk)   out.push(`  sdk:       ${health.sdk}`)
   }
 
-  if (status) {
-    out.push(isRunning ? '[◉] pipeline: running' : '[○] pipeline: idle')
+  out.push('pipeline:')
+  if (!status) {
+    out.push('  running:   fetching')
+  } else {
+    out.push(`  running:   ${status.running}`)
     const a = status.lastAnalysis
     if (a) {
-      const t = new Date(a.completedAt).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' })
-      const edge = `${a.edge >= 0 ? '+' : ''}${(a.edge * 100).toFixed(1)}%`
-      out.push(`[→] last ${t} · rec: ${a.recommendation} · edge ${edge}`)
-      out.push(`[→] pModel ${(a.pModel * 100).toFixed(1)}% · pMkt ${(a.pMarket * 100).toFixed(1)}%`)
-      const btc    = `$${a.btcPrice.toLocaleString('en-US', { maximumFractionDigits: 0 })}`
-      const strike = `$${a.strikePrice.toLocaleString('en-US', { maximumFractionDigits: 0 })}`
-      out.push(`[→] btc ${btc} · strike ${strike}`)
+      const t = new Date(a.completedAt).toLocaleTimeString('en-US', { hour12: false })
+      out.push(`  completed: ${t}`)
+      out.push(`  rec:       ${a.recommendation}`)
+      out.push(`  edge:      ${a.edge >= 0 ? '+' : ''}${(a.edge * 100).toFixed(2)}%`)
+      out.push(`  pModel:    ${(a.pModel * 100).toFixed(2)}%`)
+      out.push(`  pMarket:   ${(a.pMarket * 100).toFixed(2)}%`)
+      out.push(`  btc:       $${a.btcPrice.toLocaleString('en-US', { maximumFractionDigits: 2 })}`)
+      out.push(`  strike:    $${a.strikePrice.toLocaleString('en-US', { maximumFractionDigits: 2 })}`)
+      out.push(`  sent:      ${a.sentimentScore.toFixed(3)} · ${a.sentimentLabel}`)
     } else {
-      out.push('[○] no previous analysis found')
+      out.push('  last:      no data')
     }
   }
 
   return out
 }
 
-interface Props {
-  isRunning: boolean
+// ── Render a single line with key/value coloring ─────────────────────────────
+function LineContent({ text }: { text: string }) {
+  const trimmed = text.trimStart()
+  const indent  = text.slice(0, text.length - trimmed.length)
+
+  // Section header (no indent, ends with : or contains @)
+  if (!indent) {
+    return <span style={{ color: '#1a4fa0', fontWeight: 700 }}>{text}</span>
+  }
+
+  const sep = trimmed.indexOf(': ')
+  if (sep > 0) {
+    const key = trimmed.slice(0, sep + 1)
+    const val = trimmed.slice(sep + 2)
+    return (
+      <>
+        <span style={{ color: '#888888' }}>{indent}{key} </span>
+        <span style={{ color: valueColor(val), fontWeight: 600 }}>{val}</span>
+      </>
+    )
+  }
+
+  return <span style={{ color: '#555' }}>{text}</span>
 }
 
-export default function TerminalPreview({ isRunning }: Props) {
+// ── Partial line while typing (color transitions at ': ') ────────────────────
+function TypingLine({ text }: { text: string }) {
+  const trimmed = text.trimStart()
+  const indent  = text.slice(0, text.length - trimmed.length)
+
+  if (!indent) {
+    return <span style={{ color: '#1a4fa0', fontWeight: 700 }}>{text}</span>
+  }
+
+  const sep = trimmed.indexOf(': ')
+  if (sep > 0) {
+    const key = trimmed.slice(0, sep + 1)
+    const val = trimmed.slice(sep + 2)
+    return (
+      <>
+        <span style={{ color: '#888888' }}>{indent}{key} </span>
+        <span style={{ color: valueColor(val) || '#111' }}>{val}</span>
+      </>
+    )
+  }
+
+  return <span style={{ color: '#888888' }}>{text}</span>
+}
+
+// ── Main component ───────────────────────────────────────────────────────────
+interface Props { isRunning: boolean }
+
+export default function TerminalPreview({ isRunning: _isRunning }: Props) {
   const [health, setHealth] = useState<HealthData | null>(null)
   const [status, setStatus] = useState<StatusData | null>(null)
 
-  // Fetch both endpoints; refresh every 12s
   useEffect(() => {
     async function fetchAll() {
       const [h, s] = await Promise.all([
-        fetch('/api/python-health', { cache: 'no-store' }).then(r => r.json()).catch(() => ({ status: 'offline' })),
+        fetch('/api/python-health',   { cache: 'no-store' }).then(r => r.json()).catch(() => ({ status: 'offline' })),
         fetch('/api/pipeline/status', { cache: 'no-store' }).then(r => r.json()).catch(() => null),
       ])
       setHealth(h)
@@ -95,7 +146,7 @@ export default function TerminalPreview({ isRunning }: Props) {
     return () => clearInterval(id)
   }, [])
 
-  const lines = buildLines(health, status, isRunning)
+  const lines = buildLines(health, status)
   const linesRef = useRef(lines)
   linesRef.current = lines
 
@@ -103,19 +154,18 @@ export default function TerminalPreview({ isRunning }: Props) {
   const [currentLine, setCurrentLine]   = useState('')
   const stateRef = useRef({ li: 0, ci: 0, pausing: false })
 
-  // Reset typewriter when fresh data arrives
+  // Reset + retype whenever fresh data arrives
   useEffect(() => {
     stateRef.current = { li: 0, ci: 0, pausing: false }
     setDisplayLines([])
     setCurrentLine('')
   }, [health, status])
 
-  // Typewriter tick — mounted once
+  // Typewriter tick
   useEffect(() => {
     const id = setInterval(() => {
       const s = stateRef.current
       if (s.pausing) return
-
       const ls = linesRef.current
       if (s.li >= ls.length) {
         s.pausing = true
@@ -123,24 +173,22 @@ export default function TerminalPreview({ isRunning }: Props) {
           stateRef.current = { li: 0, ci: 0, pausing: false }
           setDisplayLines([])
           setCurrentLine('')
-        }, 4000)
+        }, 4500)
         return
       }
-
       const target = ls[s.li]
       if (s.ci < target.length) {
         s.ci++
         setCurrentLine(target.slice(0, s.ci))
       } else {
-        setDisplayLines(prev => [...prev, target].slice(-7))
+        setDisplayLines(prev => [...prev, target].slice(-10))
         setCurrentLine('')
         s.li++
         s.ci = 0
         s.pausing = true
-        setTimeout(() => { s.pausing = false }, 140)
+        setTimeout(() => { s.pausing = false }, 120)
       }
-    }, 26)
-
+    }, 22)
     return () => clearInterval(id)
   }, [])
 
@@ -154,8 +202,7 @@ export default function TerminalPreview({ isRunning }: Props) {
       overflow: 'hidden',
       boxShadow: '0 1px 8px rgba(0,0,0,0.07)',
     }}>
-
-      {/* Header — no window buttons, just title + status */}
+      {/* Header */}
       <div style={{
         display: 'flex', alignItems: 'center',
         padding: '7px 14px',
@@ -169,7 +216,6 @@ export default function TerminalPreview({ isRunning }: Props) {
         }}>
           sentient · roma-dspy
         </span>
-        {/* Service status dot */}
         <span style={{
           display: 'inline-flex', alignItems: 'center', gap: 5,
           fontFamily: 'var(--font-geist-mono)', fontSize: 9, fontWeight: 600,
@@ -183,31 +229,30 @@ export default function TerminalPreview({ isRunning }: Props) {
         </span>
       </div>
 
-      {/* Terminal body */}
+      {/* Body */}
       <div style={{
         padding: '12px 16px 14px',
-        height: 148,
-        overflow: 'hidden',
+        minHeight: 148,
         background: '#ffffff',
         display: 'flex', flexDirection: 'column', justifyContent: 'flex-end',
       }}>
         {displayLines.map((line, i) => (
-          <div key={`${i}-${line.slice(0, 10)}`} style={{
+          <div key={`${i}-${line.slice(0, 12)}`} style={{
             fontFamily: 'var(--font-geist-mono)',
             fontSize: 11.5, lineHeight: 1.72,
-            color: lineColor(line),
-            opacity: Math.max(0.3, 0.3 + (i / Math.max(displayLines.length - 1, 1)) * 0.7),
+            opacity: Math.max(0.28, 0.28 + (i / Math.max(displayLines.length - 1, 1)) * 0.72),
           }}>
-            {line}
+            <LineContent text={line} />
           </div>
         ))}
+
+        {/* Currently typing line */}
         <div style={{
           fontFamily: 'var(--font-geist-mono)',
           fontSize: 11.5, lineHeight: 1.72,
-          color: lineColor(currentLine.length > 0 ? currentLine : '$'),
           minHeight: '1.72em',
         }}>
-          {currentLine}
+          <TypingLine text={currentLine} />
           <span style={{ animation: 'blink 0.9s step-end infinite', color: '#1a4fa0', marginLeft: 1 }}>▌</span>
         </div>
       </div>
