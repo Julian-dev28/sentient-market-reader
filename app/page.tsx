@@ -462,12 +462,7 @@ export default function Home() {
             </div>
 
             {/* ── Terminal preview ── */}
-            <TerminalPreview
-              romaMode={romaMode}
-              sentMode={sentMode}
-              probMode={probMode}
-              isRunning={isRunning}
-            />
+            <TerminalPreview isRunning={isRunning} />
 
             {/* ── Row 2: AI Risk + mode selector + stage overrides + expiry + run ── */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
