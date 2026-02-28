@@ -188,7 +188,7 @@ export default function TerminalPreview({ isRunning: _isRunning }: Props) {
         s.pausing = true
         setTimeout(() => { s.pausing = false }, 120)
       }
-    }, 55)
+    }, 38)
     return () => clearInterval(id)
   }, [])
 
