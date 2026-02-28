@@ -50,8 +50,7 @@ function buildLines(
     if (health.error) out.push(`[→] ${health.error.slice(0, 48)}`)
   } else {
     out.push(`[✓] ${health.sdk ?? 'roma-dspy'} · status: ${health.status}`)
-    if (health.model)    out.push(`[✓] model: ${health.model}`)
-    if (health.provider) out.push(`[✓] provider: ${health.provider}`)
+    if (health.provider) out.push(`[✓] model: ${health.provider}`)
   }
 
   if (status) {
