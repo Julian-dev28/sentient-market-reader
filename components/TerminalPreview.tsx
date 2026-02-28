@@ -26,12 +26,12 @@ interface StatusData {
 }
 
 function lineColor(line: string): string {
-  if (line.startsWith('$'))    return '#8ab4cf'
-  if (line.startsWith('[✓]'))  return '#74b896'
-  if (line.startsWith('[→]'))  return '#c9a870'
-  if (line.startsWith('[◉]'))  return '#e06fa0'
-  if (line.startsWith('[✗]'))  return '#e06fa0'
-  return 'rgba(255,255,255,0.38)'
+  if (line.startsWith('$'))    return '#1a4fa0'   // blue prompt
+  if (line.startsWith('[✓]'))  return '#1a7a3a'   // dark green
+  if (line.startsWith('[→]'))  return '#222222'   // near-black info
+  if (line.startsWith('[◉]'))  return '#cc2233'   // red active
+  if (line.startsWith('[✗]'))  return '#cc2233'   // red error
+  return '#555555'
 }
 
 function buildLines(
@@ -149,45 +149,39 @@ export default function TerminalPreview({ isRunning }: Props) {
 
   return (
     <div style={{
-      borderRadius: 14,
-      background: 'linear-gradient(160deg, rgba(18,14,10,0.97) 0%, rgba(26,20,14,0.95) 100%)',
-      border: '1px solid rgba(139,111,71,0.2)',
+      borderRadius: 12,
+      background: '#ffffff',
+      border: '1px solid var(--border)',
       overflow: 'hidden',
-      boxShadow: '0 2px 24px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.04)',
-      position: 'relative',
+      boxShadow: '0 1px 8px rgba(0,0,0,0.07)',
     }}>
 
-      {/* Scanline overlay */}
+      {/* Header — no window buttons, just title + status */}
       <div style={{
-        position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 0,
-        backgroundImage: 'repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,0,0,0.028) 3px, rgba(0,0,0,0.028) 4px)',
-      }} />
-
-      {/* Header */}
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 6,
-        padding: '9px 14px',
-        borderBottom: '1px solid rgba(255,255,255,0.055)',
-        background: 'rgba(0,0,0,0.22)',
-        position: 'relative', zIndex: 1,
+        display: 'flex', alignItems: 'center',
+        padding: '7px 14px',
+        borderBottom: '1px solid var(--border)',
+        background: '#f5f5f5',
       }}>
-        <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#ff5f57', display: 'inline-block', flexShrink: 0 }} />
-        <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#ffbd2e', display: 'inline-block', flexShrink: 0 }} />
-        <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#28c840', display: 'inline-block', flexShrink: 0 }} />
         <span style={{
-          flex: 1, textAlign: 'center',
-          fontFamily: 'var(--font-geist-mono)', fontSize: 10, fontWeight: 600,
-          color: 'rgba(255,255,255,0.28)', letterSpacing: '0.1em', textTransform: 'uppercase',
+          flex: 1,
+          fontFamily: 'var(--font-geist-mono)', fontSize: 10, fontWeight: 700,
+          color: '#333', letterSpacing: '0.08em', textTransform: 'uppercase',
         }}>
           sentient · roma-dspy
         </span>
         {/* Service status dot */}
         <span style={{
-          width: 7, height: 7, borderRadius: '50%', flexShrink: 0, display: 'inline-block',
-          background: health === null ? 'rgba(255,255,255,0.1)' : serviceOk ? '#3a9e72' : '#e06fa0',
-          boxShadow: serviceOk ? '0 0 8px #3a9e72' : health && !serviceOk ? '0 0 8px #e06fa0' : 'none',
-          transition: 'background 0.4s, box-shadow 0.4s',
-        }} />
+          display: 'inline-flex', alignItems: 'center', gap: 5,
+          fontFamily: 'var(--font-geist-mono)', fontSize: 9, fontWeight: 600,
+          color: health === null ? '#999' : serviceOk ? '#1a7a3a' : '#cc2233',
+        }}>
+          <span style={{
+            width: 6, height: 6, borderRadius: '50%', display: 'inline-block',
+            background: health === null ? '#ccc' : serviceOk ? '#1a7a3a' : '#cc2233',
+          }} />
+          {health === null ? 'connecting' : serviceOk ? 'online' : 'offline'}
+        </span>
       </div>
 
       {/* Terminal body */}
@@ -195,7 +189,7 @@ export default function TerminalPreview({ isRunning }: Props) {
         padding: '12px 16px 14px',
         height: 148,
         overflow: 'hidden',
-        position: 'relative', zIndex: 1,
+        background: '#ffffff',
         display: 'flex', flexDirection: 'column', justifyContent: 'flex-end',
       }}>
         {displayLines.map((line, i) => (
@@ -203,7 +197,7 @@ export default function TerminalPreview({ isRunning }: Props) {
             fontFamily: 'var(--font-geist-mono)',
             fontSize: 11.5, lineHeight: 1.72,
             color: lineColor(line),
-            opacity: Math.max(0.22, 0.22 + (i / Math.max(displayLines.length - 1, 1)) * 0.75),
+            opacity: Math.max(0.3, 0.3 + (i / Math.max(displayLines.length - 1, 1)) * 0.7),
           }}>
             {line}
           </div>
@@ -215,7 +209,7 @@ export default function TerminalPreview({ isRunning }: Props) {
           minHeight: '1.72em',
         }}>
           {currentLine}
-          <span style={{ animation: 'blink 0.9s step-end infinite', color: '#8ab4cf', marginLeft: 1 }}>▌</span>
+          <span style={{ animation: 'blink 0.9s step-end infinite', color: '#1a4fa0', marginLeft: 1 }}>▌</span>
         </div>
       </div>
     </div>
