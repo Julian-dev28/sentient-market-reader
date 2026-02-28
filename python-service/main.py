@@ -305,7 +305,7 @@ def health():
     return {
         "status": "ok",
         "provider": _provider_label,
-        "model": _llm_config.model if _llm_config else "unconfigured",
+        "model": _provider_label if _llm_config else "unconfigured",
         "sdk": "roma-dspy",
     }
 
