@@ -1,6 +1,7 @@
 import type { AgentResult, SentimentOutput, BTCQuote, KalshiMarket, KalshiOrderbook, OHLCVCandle, DerivativesSignal } from '../types'
 import { llmToolCall, type AIProvider } from '../llm-client'
 import { callPythonRoma, formatRomaTrace } from '../roma/python-client'
+import { computeQuantSignals, formatQuantBrief } from '../indicators'
 
 /** Format last N 15-min candles as a compact context block for the LLM.
  *  Input: newest-first [ts, low, high, open, close, volume]
@@ -94,31 +95,36 @@ export async function runSentiment(
     `Basis (perp mark vs spot index): ${derivatives.basis >= 0 ? '+' : ''}${derivatives.basis.toFixed(4)}% — ${derivatives.basis > 0.02 ? 'contango (futures premium → bullish)' : derivatives.basis < -0.02 ? 'backwardation (futures discount → bearish)' : 'flat (no meaningful futures bias)'}`,
   ].join('\n') : null
 
+  // Pre-compute quantitative signals — deterministic math done before the LLM call
+  const quant     = computeQuantSignals(candles, liveCandles, orderbook, quote.price, strikePrice, distanceFromStrikePct, minutesUntilExpiry)
+  const quantBrief = formatQuantBrief(quant, quote.price, distanceFromStrikePct, minutesUntilExpiry)
+
   const goal =
     `Assess short-term BTC directional sentiment for this 15-min Kalshi KXBTC15M prediction window. ` +
-    `Evaluate ALL of the following signals: ` +
-    `(1) 15-min candle trend — structure, higher highs/lows, WaveTrend-style momentum; ` +
-    `CRITICAL: ⚡ CANDLE FLIP ALERT = trend reversal, override prior bias; ` +
-    `(2) 1-min live candles — these show what BTC is doing RIGHT NOW inside the current window; ` +
-    `if 1-min candles show momentum toward or away from strike, weight this heavily vs older 15-min data; ` +
-    `(3) Perp futures signals: funding rate shows positioning pressure (positive = crowded longs = bearish near-term); ` +
-    `basis (contango/backwardation) shows smart money directional lean; ` +
-    `(4) BTC vs strike + Kalshi orderbook skew; ` +
-    `(5) time pressure: ${minutesUntilExpiry.toFixed(1)} min left — with < 5 min, live 1-min momentum is decisive. ` +
+    `You have pre-computed quantitative signals — treat these as your primary analytical framework. ` +
+    `The math is already done; your role is to interpret what the signals collectively imply. ` +
+    `Synthesize in this priority order: ` +
+    `(1) PRICING MODELS — Brownian motion and log-normal binary P(YES) give you a calibrated baseline; ` +
+    `(2) REGIME — autocorrelation tells you whether to extrapolate momentum or fade it; ` +
+    `(3) LIVE VELOCITY — what BTC is doing right now at 1-min resolution, including $ per minute and time-to-strike; ` +
+    `(4) MOMENTUM indicators (RSI, MACD histogram, %B, Stochastic) — confirm or contradict the trend; ` +
+    `CRITICAL: ⚡ CANDLE FLIP ALERT = structural reversal, override all prior trend signals; ` +
+    `(5) ORDERBOOK pressure-weighted imbalance — crowd positioning at the microstructure level; ` +
+    `(6) DERIVATIVES — funding rate (crowded longs = bearish near-term), basis (contango vs backwardation); ` +
+    `(7) time pressure: ${minutesUntilExpiry.toFixed(1)} min left — under 5 min, velocity and pricing models dominate. ` +
     `Produce a directional sentiment score from -1 (strongly bearish) to +1 (strongly bullish).`
 
   const context = [
     `BTC price: $${quote.price.toLocaleString('en-US', { maximumFractionDigits: 2 })}`,
-    `1h change: ${quote.percent_change_1h >= 0 ? '+' : ''}${quote.percent_change_1h.toFixed(4)}%`,
-    `24h change: ${quote.percent_change_24h >= 0 ? '+' : ''}${quote.percent_change_24h.toFixed(4)}%`,
     `Strike price: $${strikePrice.toLocaleString('en-US', { maximumFractionDigits: 2 })}`,
     `BTC vs strike: ${distSign}${distanceFromStrikePct.toFixed(4)}% — BTC is ${distanceFromStrikePct >= 0 ? 'ABOVE' : 'BELOW'} strike`,
     `Minutes to window close: ${minutesUntilExpiry.toFixed(2)}`,
+    `1h change: ${quote.percent_change_1h >= 0 ? '+' : ''}${quote.percent_change_1h.toFixed(4)}%`,
+    `24h change: ${quote.percent_change_24h >= 0 ? '+' : ''}${quote.percent_change_24h.toFixed(4)}%`,
     market
-      ? `Kalshi YES ask: ${market.yes_ask}¢ | YES bid: ${market.yes_bid}¢ | NO ask: ${market.no_ask}¢ | Spread: ${market.yes_ask - market.yes_bid}¢`
+      ? `Kalshi market: YES ask=${market.yes_ask}¢ bid=${market.yes_bid}¢ | NO ask=${market.no_ask}¢ | spread=${market.yes_ask - market.yes_bid}¢`
       : 'No active Kalshi market',
-    `Orderbook YES depth: ${obYes}`,
-    `Orderbook NO depth:  ${obNo}`,
+    `\n${quantBrief}`,
     derivativesBlock,
     ...(liveCandles?.length && liveCandleBlock ? [`\n${liveCandleBlock}`] : []),
     ...(candles?.length ? [`\n${formatCandles(candles)}`] : []),

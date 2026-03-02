@@ -1,6 +1,7 @@
 import type { AgentResult, ProbabilityOutput, KalshiMarket, OHLCVCandle, DerivativesSignal } from '../types'
 import { llmToolCall, type AIProvider } from '../llm-client'
 import { callPythonRoma, formatRomaTrace } from '../roma/python-client'
+import { computeQuantSignals, formatQuantBrief, normalCDF } from '../indicators'
 
 /** Format last N 15-min candles as compact context for the LLM.
  *  Input: newest-first [ts, low, high, open, close, volume]
@@ -44,44 +45,6 @@ function formatCandles(candles: OHLCVCandle[]): string {
   return `${flipNote}\nLast ${candles.length} × 15-min BTC candles (oldest → newest):\n${lines.join('\n')}`
 }
 
-// ── Quantitative probability anchor ──────────────────────────────────────────
-// Models P(BTC stays above/below strike) using a Brownian motion approximation.
-// Prevents the LLM from being catastrophically wrong late in a window when BTC
-// is clearly above/below strike — the physics of time + volatility govern.
-//
-// Formula: P(YES) ≈ Φ(d / (σ_per_min × √t))
-//   d = signed distance from strike (fraction)
-//   σ_per_min = realized candle volatility scaled to per-minute
-//   t = minutes remaining
-//   Φ = standard normal CDF
-
-function normalCDF(z: number): number {
-  // Abramowitz & Stegun approximation (error < 7.5e-8)
-  const sign = z >= 0 ? 1 : -1
-  const x = Math.abs(z)
-  const t = 1 / (1 + 0.2316419 * x)
-  const poly = t * (0.319381530 + t * (-0.356563782 + t * (1.781477937 + t * (-1.821255978 + t * 1.330274429))))
-  const pdf  = Math.exp(-0.5 * x * x) / Math.sqrt(2 * Math.PI)
-  return 0.5 + sign * (0.5 - pdf * poly)
-}
-
-function computeQuantPrior(
-  candles: OHLCVCandle[] | undefined,
-  distancePct: number,
-  minutesLeft: number,
-): { pQuant: number; sigmaCandle: number } | null {
-  if (!candles?.length || minutesLeft <= 0) return null
-  // Realized volatility: mean absolute 15-min candle return (|close - open| / open)
-  const absReturns = candles.map(c => Math.abs((c[4] - c[3]) / c[3]))
-  const sigmaCandle = absReturns.reduce((a, b) => a + b, 0) / absReturns.length
-  if (sigmaCandle <= 0) return null
-  // Scale to per-minute using square-root-of-time rule
-  const sigmaPerMin = sigmaCandle / Math.sqrt(15)
-  // Signed distance as fraction (distancePct is already %, so /100)
-  const z = (distancePct / 100) / (sigmaPerMin * Math.sqrt(minutesLeft))
-  return { pQuant: normalCDF(z), sigmaCandle }
-}
-
 export async function runProbabilityModel(
   sentimentScore: number | null,    // null when running in parallel with sentiment agent
   sentimentSignals: string[] | null,
@@ -98,29 +61,17 @@ export async function runProbabilityModel(
 ): Promise<AgentResult<ProbabilityOutput>> {
   const start = Date.now()
 
-  const pMarket = market ? market.yes_ask / 100 : 0.5
-  const spread  = market ? (market.yes_ask - market.yes_bid) / 100 : 0.05
+  const pMarket  = market ? market.yes_ask / 100 : 0.5
+  const spread   = market ? (market.yes_ask - market.yes_bid) / 100 : 0.05
   const distSign = distanceFromStrikePct >= 0 ? '+' : ''
 
-  // Compute quantitative prior from realized volatility + distance + time
-  const quantResult = computeQuantPrior(candles, distanceFromStrikePct, minutesUntilExpiry)
+  // Reconstruct spot from market price + distance (prob model doesn't receive spot directly)
+  const strikePrice = market?.floor_strike ?? 0
+  const spotApprox  = strikePrice > 0 ? strikePrice * (1 + distanceFromStrikePct / 100) : 0
 
-  // Format 1-min live candles for context
-  const liveCandleBlock = (() => {
-    if (!liveCandles?.length) return null
-    const ordered = [...liveCandles].reverse()
-    const lines = ordered.map((c, i) => {
-      const [, , , open, close, vol] = c
-      const chg    = close - open
-      const chgPct = ((chg / open) * 100).toFixed(3)
-      const dir    = chg >= 0 ? '▲' : '▼'
-      const minsAgo = liveCandles.length - i
-      return `  [−${String(minsAgo).padStart(2)}m]  O:${open.toFixed(0)}  C:${close.toFixed(0)}  Vol:${vol.toFixed(1)}  ${dir}${chgPct}%`
-    })
-    const latest = liveCandles[0]
-    const liveDir = latest[4] >= latest[3] ? 'BULLISH' : 'BEARISH'
-    return `Live window (1-min candles, ${liveCandles.length} bars, oldest → newest) — current: ${liveDir}:\n${lines.join('\n')}`
-  })()
+  // Pre-compute full quant signal suite — no LLM math burden
+  const quant      = computeQuantSignals(candles, liveCandles, null, spotApprox, strikePrice, distanceFromStrikePct, minutesUntilExpiry)
+  const quantBrief = formatQuantBrief(quant, spotApprox, distanceFromStrikePct, minutesUntilExpiry)
 
   // Format derivatives signal
   const derivativesBlock = derivatives ? [
@@ -130,35 +81,36 @@ export async function runProbabilityModel(
 
   const context = [
     sentimentScore !== null
-      ? `SentimentAgent score: ${sentimentScore.toFixed(4)} (range -1 = strongly bearish → +1 = strongly bullish)`
-      : `SentimentAgent score: (running in parallel — use price position and market data only)`,
+      ? `SentimentAgent score: ${sentimentScore.toFixed(4)} (−1=strongly bearish → +1=strongly bullish)`
+      : `SentimentAgent score: (running in parallel — use quant signals and market data only)`,
     sentimentSignals?.length
       ? `Key sentiment signals: ${sentimentSignals.join(' | ')}`
-      : `Key sentiment signals: (unavailable — infer from BTC position and orderbook)`,
-    `BTC vs strike: ${distSign}${distanceFromStrikePct.toFixed(4)}% — currently ${distanceFromStrikePct >= 0 ? 'ABOVE' : 'BELOW'} strike`,
-    `Minutes until expiry: ${minutesUntilExpiry.toFixed(2)}`,
-    `Market-implied P(YES): ${(pMarket * 100).toFixed(1)}¢ — crowd's probability BTC ends above strike`,
-    `Bid-ask spread: ${(spread * 100).toFixed(1)}¢`,
-    `Minimum edge to trade: spread + 2¢ = ${((spread + 0.02) * 100).toFixed(1)}¢`,
-    quantResult
-      ? `Quantitative prior P(YES): ${(quantResult.pQuant * 100).toFixed(1)}% — physics-based (realized vol ${(quantResult.sigmaCandle * 100).toFixed(2)}%/candle, distance ${distSign}${distanceFromStrikePct.toFixed(3)}%, ${minutesUntilExpiry.toFixed(1)} min left). Your estimate should not diverge >20pp without strong countervailing signals.`
       : null,
+    `BTC vs strike: ${distSign}${distanceFromStrikePct.toFixed(4)}% — ${distanceFromStrikePct >= 0 ? 'ABOVE' : 'BELOW'} strike`,
+    `Minutes until expiry: ${minutesUntilExpiry.toFixed(2)}`,
+    `Market-implied P(YES): ${(pMarket * 100).toFixed(1)}¢ — crowd probability BTC ends above strike`,
+    `Bid-ask spread: ${(spread * 100).toFixed(1)}¢  |  Min edge to trade: ${((spread + 0.02) * 100).toFixed(1)}¢`,
+    `\n${quantBrief}`,
     derivativesBlock,
-    ...(liveCandles?.length && liveCandleBlock ? [`\n${liveCandleBlock}`] : []),
     ...(candles?.length ? [`\n${formatCandles(candles)}`] : []),
     ...(prevContext ? [`\nPrevious cycle analysis:\n${prevContext}`] : []),
   ].filter(Boolean).join('\n')
 
   const goal =
-    `Estimate the true probability that BTC ends ABOVE the Kalshi strike at window close. ` +
-    `Synthesize ALL signals in the context: ` +
-    `(1) Quantitative prior P(YES) — physics-based anchor from vol + distance + time; weight this heavily, especially late in the window; ` +
-    `(2) 1-min live candles — highest recency, shows what price is doing RIGHT NOW inside the current 15-min window; ` +
-    `if live momentum contradicts the 15-min trend, the live signal takes priority near expiry; ` +
-    `(3) Perp derivatives: funding rate (positioning pressure) and basis (contango = bullish, backwardation = bearish); ` +
-    `(4) 15-min candle trend — ⚡ CANDLE FLIP ALERT = reversal, override prior streak extrapolation; ` +
-    `(5) time decay with ${minutesUntilExpiry.toFixed(1)} min left — BTC within 0.3% of strike + flip = decisive shift; ` +
-    `(6) whether final edge vs market-implied ${(pMarket * 100).toFixed(1)}% justifies YES, NO, or NO_TRADE.`
+    `You are a quantitative trader. Estimate P(BTC > strike) at window close for a Kalshi KXBTC15M binary option. ` +
+    `QUANTITATIVE FRAMEWORK — work through this in order: ` +
+    `(1) PRICING MODELS: Both Brownian motion and log-normal binary P(YES) are your calibrated priors. ` +
+    `They encode volatility + distance + time — do not deviate >15pp without decisive signal evidence. ` +
+    `(2) REGIME: Lag-1 autocorrelation tells you whether to extrapolate momentum or expect mean-reversion. ` +
+    `In a mean-reverting regime, oversold RSI + lower band %B = bounce expected; trending regime = continuation. ` +
+    `(3) LIVE VELOCITY: Price velocity ($/min) and time-to-strike estimate from 1-min candles. ` +
+    `If velocity analysis says strike is unreachable in remaining time, weight this heavily. ` +
+    `(4) MOMENTUM CONFLUENCE: RSI + MACD histogram + Stochastic %K — require 3-of-4 alignment ` +
+    `(RSI, MACD, Stochastic, Bollinger) to override the quantitative prior by >10pp. ` +
+    `⚡ CANDLE FLIP ALERT = structural reversal, override all prior trend signals immediately. ` +
+    `(5) MICROSTRUCTURE: Pressure-weighted orderbook imbalance signals crowd positioning at the ask. ` +
+    `(6) MARKET-IMPLIED: P(market)=${(pMarket * 100).toFixed(1)}% is the Kalshi crowd's estimate. ` +
+    `Final recommendation: YES if P(model) > P(market) + min_edge, NO if P(model) < P(market) − min_edge, else NO_TRADE.`
 
   // Depth controlled by ROMA_MAX_DEPTH env var (default 1). ROMA treats 0 as unlimited — never send 0.
   const maxDepth = Math.max(1, parseInt(process.env.ROMA_MAX_DEPTH ?? '1'))
@@ -192,16 +144,24 @@ export async function runProbabilityModel(
 
   const pLLM = Math.max(0, Math.min(1, extracted.pModel))
 
-  // Blend LLM estimate with quantitative prior.
+  // Blend LLM estimate with quantitative priors.
   // Weight of quant anchor increases as time runs out (physics dominates near expiry).
-  //   α = 0.15 at 15 min remaining → 0.70 at 0 min remaining (never fully suppresses LLM)
+  //   α = 0.15 at 15 min remaining → 0.70 at 0 min remaining
+  // When both Brownian and log-normal priors are available, average them first.
   let pModel = pLLM
   let quantBlendNote = ''
-  if (quantResult) {
-    const alpha   = Math.max(0.15, Math.min(0.70, 1 - minutesUntilExpiry / 15))
-    const pBlended = alpha * quantResult.pQuant + (1 - alpha) * pLLM
+  const pBrownian = quant.brownianPrior?.pQuant ?? null
+  const pLN       = quant.lnBinary?.pYes ?? null
+  const pQuantAvg = pBrownian !== null && pLN !== null
+    ? (pBrownian + pLN) / 2
+    : (pBrownian ?? pLN)
+  if (pQuantAvg !== null) {
+    const alpha    = Math.max(0.15, Math.min(0.70, 1 - minutesUntilExpiry / 15))
+    const pBlended = alpha * pQuantAvg + (1 - alpha) * pLLM
     pModel = Math.max(0, Math.min(1, pBlended))
-    quantBlendNote = ` | P_quant=${(quantResult.pQuant * 100).toFixed(1)}% (α=${alpha.toFixed(2)}) → blended=${(pBlended * 100).toFixed(1)}%`
+    quantBlendNote = ` | P_brownian=${pBrownian !== null ? (pBrownian * 100).toFixed(1) + '%' : 'n/a'}` +
+      ` P_lnBinary=${pLN !== null ? (pLN * 100).toFixed(1) + '%' : 'n/a'}` +
+      ` P_avg=${(pQuantAvg * 100).toFixed(1)}% (α=${alpha.toFixed(2)}) → blended=${(pBlended * 100).toFixed(1)}%`
   }
 
   const edge    = pModel - pMarket
