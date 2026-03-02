@@ -52,7 +52,7 @@ export default function Header({ cycleId, isRunning, nextCycleIn, liveMode, onTo
       borderBottom: '1px solid var(--border)',
       padding: '10px 24px',
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-      background: 'rgba(253,248,243,0.90)',
+      background: 'rgba(5,5,7,0.85)',
       backdropFilter: 'blur(20px)',
       WebkitBackdropFilter: 'blur(20px)',
       position: 'sticky', top: 0, zIndex: 100,
