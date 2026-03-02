@@ -13,9 +13,8 @@ import PerformancePanel from '@/components/PerformancePanel'
 import PositionsPanel from '@/components/PositionsPanel'
 
 export default function Home() {
-  const [liveMode, setLiveMode]           = useState(false)  // always false on SSR
+  const [liveMode, setLiveMode]           = useState(false)
   const [showLiveWarning, setShowLiveWarning] = useState(false)
-  const [romaMode, setRomaMode]           = useState<'blitz' | 'sharp' | 'keen' | 'smart'>('keen')
   const [botActive, setBotActive]           = useState(false)
   const [showBotWarning, setShowBotWarning] = useState(false)
   const [showLateWarning, setShowLateWarning] = useState(false)
@@ -30,19 +29,12 @@ export default function Home() {
   const [orModelOpen, setOrModelOpen]       = useState(false)
   const orModelRef                          = useRef<HTMLDivElement>(null)
 
-  // Sync from localStorage after hydration (client-only)
+  // Sync from localStorage after hydration
   useEffect(() => {
     if (localStorage.getItem('sentient-live-mode') === 'true') setLiveMode(true)
-    const m = localStorage.getItem('sentient-roma-mode')
-    if (m === 'blitz' || m === 'sharp' || m === 'keen' || m === 'smart') setRomaMode(m)
     const om = localStorage.getItem('sentient-or-model')
     if (om) setOrModel(om)
   }, [])
-
-  function handleModeChange(m: 'blitz' | 'sharp' | 'keen' | 'smart') {
-    setRomaMode(m)
-    localStorage.setItem('sentient-roma-mode', m)
-  }
 
   function handleOrModelChange(m: string) {
     setOrModel(m)
@@ -50,18 +42,19 @@ export default function Home() {
     else localStorage.removeItem('sentient-or-model')
   }
 
-  // Fetch OpenRouter model list when settings panel opens (lazy — only once)
+  // Fetch OpenRouter model list on mount (non-blocking)
   useEffect(() => {
-    if (!showSettings || orModels.length > 0 || orModelsLoading) return
+    if (orModels.length > 0 || orModelsLoading) return
     setOrModelsLoading(true)
     fetch('/api/openrouter-models')
       .then(r => r.json())
       .then(d => { if (d.models?.length) setOrModels(d.models) })
       .catch(() => {})
       .finally(() => setOrModelsLoading(false))
-  }, [showSettings, orModels.length, orModelsLoading])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
-  // Close OR model dropdown on outside click
+  // Close model dropdown on outside click
   useEffect(() => {
     if (!orModelOpen) return
     function handleClick(e: MouseEvent) {
@@ -73,6 +66,7 @@ export default function Home() {
     return () => document.removeEventListener('mousedown', handleClick)
   }, [orModelOpen])
 
+  const romaMode: string = 'keen'
   const { pipeline, trades, isRunning, serverLocked, nextCycleIn, error, stats, runCycle, stopCycle } = usePipeline(
     liveMode, romaMode, botActive, aiRisk, undefined, undefined, sentMode, probMode, orModel || undefined,
   )
@@ -512,25 +506,117 @@ export default function Home() {
           {/* ─── CENTER ─── */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
 
-            {/* ── Control bar: mode + gear + run + expiry ── */}
+            {/* ── Control bar: model picker + gear + run + expiry ── */}
             <div style={{ position: 'relative' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
 
-                {/* ROMA mode selector */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 3, background: 'var(--bg-secondary)', borderRadius: 9, padding: '3px 4px', border: '1px solid var(--border)' }}>
-                  {(['blitz', 'sharp', 'keen', 'smart'] as const).map(m => (
-                    <button key={m} onClick={() => handleModeChange(m)}
-                      title={m === 'blitz' ? '~30s' : m === 'sharp' ? '~60s' : m === 'keen' ? '~90s' : '~2 min'}
-                      style={{
-                        padding: '5px 14px', borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: 'pointer',
-                        border: romaMode === m ? '1px solid var(--brown)' : '1px solid transparent',
-                        background: romaMode === m ? 'var(--brown)' : 'transparent',
-                        color: romaMode === m ? '#fff' : 'var(--text-muted)',
-                        transition: 'all 0.15s', textTransform: 'capitalize',
-                      }}>
-                      {m}
-                    </button>
-                  ))}
+                {/* Model picker — searchable OpenRouter model dropdown */}
+                <div ref={orModelRef} style={{ position: 'relative', flex: 1, minWidth: 0 }}>
+                  <button
+                    onClick={() => { setOrModelOpen(v => !v); setOrModelSearch('') }}
+                    style={{
+                      width: '100%', textAlign: 'left', cursor: 'pointer',
+                      padding: '6px 12px', borderRadius: 8,
+                      border: orModel ? '1px solid var(--blue)' : '1px solid var(--border)',
+                      background: orModel ? 'rgba(74,127,165,0.08)' : 'var(--bg-secondary)',
+                      color: orModel ? 'var(--blue-dark)' : 'var(--text-muted)',
+                      display: 'flex', alignItems: 'center', gap: 8,
+                    }}
+                  >
+                    <span style={{ fontSize: 9, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--text-muted)', flexShrink: 0 }}>Model</span>
+                    <span style={{ fontSize: 12, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                      {orModelsLoading && !orModel
+                        ? 'Loading…'
+                        : orModel
+                          ? (orModels.find(m => m.id === orModel)?.name ?? orModel)
+                          : 'Select model (OpenRouter)'}
+                    </span>
+                    {orModel && (
+                      <span
+                        onClick={e => { e.stopPropagation(); handleOrModelChange('') }}
+                        title="Clear model"
+                        style={{ fontSize: 11, color: 'var(--text-muted)', flexShrink: 0, lineHeight: 1, cursor: 'pointer' }}
+                      >✕</span>
+                    )}
+                    <span style={{ fontSize: 10, opacity: 0.4, flexShrink: 0 }}>{orModelOpen ? '▲' : '▼'}</span>
+                  </button>
+
+                  {orModelOpen && (
+                    <div className="animate-fade-in" style={{
+                      position: 'absolute', top: '100%', left: 0, marginTop: 4, zIndex: 200,
+                      background: 'var(--bg-card)', border: '1px solid var(--border)',
+                      borderRadius: 10, boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+                      width: '100%', minWidth: 280, display: 'flex', flexDirection: 'column',
+                    }}>
+                      <div style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)' }}>
+                        <input
+                          autoFocus
+                          placeholder={orModelsLoading ? 'Loading models…' : `Search ${orModels.length} models…`}
+                          value={orModelSearch}
+                          onChange={e => setOrModelSearch(e.target.value)}
+                          style={{
+                            width: '100%', boxSizing: 'border-box',
+                            padding: '5px 8px', borderRadius: 6, fontSize: 11,
+                            border: '1px solid var(--border)', background: 'var(--bg-secondary)',
+                            color: 'var(--text-primary)', outline: 'none',
+                          }}
+                        />
+                      </div>
+                      <div style={{ maxHeight: 280, overflowY: 'auto' }}>
+                        {('auto'.includes(orModelSearch.toLowerCase()) || orModelSearch === '') && (
+                          <div
+                            onClick={() => { handleOrModelChange(''); setOrModelOpen(false) }}
+                            style={{
+                              padding: '7px 12px', fontSize: 11, cursor: 'pointer',
+                              color: !orModel ? 'var(--blue-dark)' : 'var(--text-muted)',
+                              background: !orModel ? 'rgba(74,127,165,0.1)' : 'transparent',
+                              fontWeight: !orModel ? 700 : 400,
+                            }}
+                          >
+                            auto (env default)
+                          </div>
+                        )}
+                        {(() => {
+                          const q = orModelSearch.toLowerCase()
+                          const filtered = orModels.filter(m =>
+                            m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q)
+                          )
+                          if (!filtered.length && !orModelsLoading) {
+                            return <div style={{ padding: '10px 12px', fontSize: 11, color: 'var(--text-muted)' }}>No models found</div>
+                          }
+                          const groups: Record<string, typeof filtered> = {}
+                          for (const m of filtered) {
+                            const p = m.id.split('/')[0]
+                            if (!groups[p]) groups[p] = []
+                            groups[p].push(m)
+                          }
+                          return Object.entries(groups).sort(([a], [b]) => a.localeCompare(b)).map(([provider, models]) => (
+                            <div key={provider}>
+                              <div style={{ padding: '5px 12px 2px', fontSize: 9, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                                {provider}
+                              </div>
+                              {models.map(m => (
+                                <div
+                                  key={m.id}
+                                  onClick={() => { handleOrModelChange(m.id); setOrModelOpen(false) }}
+                                  style={{
+                                    padding: '6px 12px 6px 18px', fontSize: 11, cursor: 'pointer',
+                                    color: orModel === m.id ? 'var(--blue-dark)' : 'var(--text-secondary)',
+                                    background: orModel === m.id ? 'rgba(74,127,165,0.1)' : 'transparent',
+                                    fontWeight: orModel === m.id ? 700 : 400,
+                                  }}
+                                  onMouseEnter={e => { if (orModel !== m.id) (e.currentTarget as HTMLElement).style.background = 'var(--bg-secondary)' }}
+                                  onMouseLeave={e => { if (orModel !== m.id) (e.currentTarget as HTMLElement).style.background = 'transparent' }}
+                                >
+                                  {m.name}
+                                </div>
+                              ))}
+                            </div>
+                          ))
+                        })()}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Settings gear */}
@@ -538,7 +624,7 @@ export default function Home() {
                   onClick={() => setShowSettings(v => !v)}
                   title="Advanced settings"
                   style={{
-                    width: 30, height: 30, borderRadius: 7, cursor: 'pointer',
+                    width: 32, height: 32, borderRadius: 8, cursor: 'pointer', flexShrink: 0,
                     border: showSettings ? '1px solid var(--brown)' : '1px solid var(--border)',
                     background: showSettings ? 'var(--brown-pale)' : 'var(--bg-secondary)',
                     color: showSettings ? 'var(--brown)' : 'var(--text-muted)',
@@ -601,13 +687,13 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* Settings dropdown */}
+              {/* Settings dropdown — AI Risk + stage token-budget overrides */}
               {showSettings && (
                 <div className="animate-fade-in" style={{
                   position: 'absolute', top: '100%', left: 0, marginTop: 6, zIndex: 50,
                   background: 'var(--bg-card)', border: '1px solid var(--border)',
-                  borderRadius: 12, padding: '16px 18px',
-                  display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap',
+                  borderRadius: 12, padding: '14px 16px',
+                  display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
                   boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
                 }}>
                   {/* AI Risk */}
@@ -620,13 +706,14 @@ export default function Home() {
 
                   <div style={{ width: 1, height: 20, background: 'var(--border)' }} />
 
-                  {/* SENT + PROB overrides */}
+                  {/* Stage token-budget tier overrides */}
                   {(['sent', 'prob'] as const).map(stage => {
                     const val    = stage === 'sent' ? sentMode : probMode
                     const setVal = stage === 'sent' ? setSentMode : setProbMode
                     return (
                       <div key={stage} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                        <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                        <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em' }}
+                          title={stage === 'sent' ? 'Token budget tier for Sentiment stage' : 'Token budget tier for Probability stage'}>
                           {stage === 'sent' ? 'Sent' : 'Prob'}
                         </span>
                         <select value={val ?? ''} onChange={e => setVal(e.target.value || undefined)}
@@ -647,115 +734,6 @@ export default function Home() {
                       </div>
                     )
                   })}
-
-                  <div style={{ width: 1, height: 20, background: 'var(--border)' }} />
-
-                  {/* OR Model — searchable custom dropdown */}
-                  <div ref={orModelRef} style={{ display: 'flex', alignItems: 'center', gap: 5, position: 'relative' }}>
-                    <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em' }}>OR Model</span>
-                    {/* Trigger button */}
-                    <button
-                      onClick={() => { setOrModelOpen(v => !v); setOrModelSearch('') }}
-                      style={{
-                        fontSize: 11, fontWeight: 600, cursor: 'pointer',
-                        padding: '4px 10px', borderRadius: 6, minWidth: 200, textAlign: 'left',
-                        border: orModel ? '1px solid var(--blue)' : '1px solid var(--border)',
-                        background: 'var(--bg-secondary)',
-                        color: orModel ? 'var(--blue-dark)' : 'var(--text-muted)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6,
-                      }}
-                    >
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {orModel ? (orModels.find(m => m.id === orModel)?.name ?? orModel) : 'auto (env default)'}
-                      </span>
-                      <span style={{ opacity: 0.5, flexShrink: 0 }}>{orModelOpen ? '▲' : '▼'}</span>
-                    </button>
-
-                    {/* Dropdown panel */}
-                    {orModelOpen && (
-                      <div className="animate-fade-in" style={{
-                        position: 'absolute', top: '100%', left: 0, marginTop: 4, zIndex: 200,
-                        background: 'var(--bg-card)', border: '1px solid var(--border)',
-                        borderRadius: 10, boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
-                        width: 280, display: 'flex', flexDirection: 'column',
-                      }}>
-                        {/* Search input */}
-                        <div style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)' }}>
-                          <input
-                            autoFocus
-                            placeholder={orModelsLoading ? 'Loading models…' : 'Search models…'}
-                            value={orModelSearch}
-                            onChange={e => setOrModelSearch(e.target.value)}
-                            style={{
-                              width: '100%', boxSizing: 'border-box',
-                              padding: '5px 8px', borderRadius: 6, fontSize: 11,
-                              border: '1px solid var(--border)', background: 'var(--bg-secondary)',
-                              color: 'var(--text-primary)', outline: 'none',
-                            }}
-                          />
-                        </div>
-
-                        {/* Results list */}
-                        <div style={{ maxHeight: 260, overflowY: 'auto' }}>
-                          {/* Auto option */}
-                          {('auto'.includes(orModelSearch.toLowerCase()) || orModelSearch === '') && (
-                            <div
-                              onClick={() => { handleOrModelChange(''); setOrModelOpen(false) }}
-                              style={{
-                                padding: '7px 12px', fontSize: 11, cursor: 'pointer',
-                                color: !orModel ? 'var(--blue-dark)' : 'var(--text-muted)',
-                                background: !orModel ? 'var(--cream)' : 'transparent',
-                              }}
-                              onMouseEnter={e => { if (orModel) (e.currentTarget as HTMLElement).style.background = 'var(--bg-secondary)' }}
-                              onMouseLeave={e => { if (orModel) (e.currentTarget as HTMLElement).style.background = 'transparent' }}
-                            >
-                              auto (env default)
-                            </div>
-                          )}
-
-                          {/* Filtered + grouped model list */}
-                          {(() => {
-                            const q = orModelSearch.toLowerCase()
-                            const filtered = orModels.filter(m =>
-                              m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q)
-                            )
-                            if (!filtered.length && !orModelsLoading) {
-                              return <div style={{ padding: '10px 12px', fontSize: 11, color: 'var(--text-muted)' }}>No models found</div>
-                            }
-                            const groups: Record<string, typeof filtered> = {}
-                            for (const m of filtered) {
-                              const p = m.id.split('/')[0]
-                              if (!groups[p]) groups[p] = []
-                              groups[p].push(m)
-                            }
-                            return Object.entries(groups).sort(([a], [b]) => a.localeCompare(b)).map(([provider, models]) => (
-                              <div key={provider}>
-                                <div style={{ padding: '5px 12px 2px', fontSize: 9, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                                  {provider}
-                                </div>
-                                {models.map(m => (
-                                  <div
-                                    key={m.id}
-                                    onClick={() => { handleOrModelChange(m.id); setOrModelOpen(false) }}
-                                    style={{
-                                      padding: '6px 12px 6px 18px', fontSize: 11, cursor: 'pointer',
-                                      color: orModel === m.id ? 'var(--blue-dark)' : 'var(--text-secondary)',
-                                      background: orModel === m.id ? 'var(--cream)' : 'transparent',
-                                      fontWeight: orModel === m.id ? 700 : 400,
-                                    }}
-                                    onMouseEnter={e => { if (orModel !== m.id) (e.currentTarget as HTMLElement).style.background = 'var(--bg-secondary)' }}
-                                    onMouseLeave={e => { if (orModel !== m.id) (e.currentTarget as HTMLElement).style.background = 'transparent' }}
-                                  >
-                                    {m.name}
-                                  </div>
-                                ))}
-                              </div>
-                            ))
-                          })()}
-                        </div>
-                      </div>
-                    )}
-                  </div>
                 </div>
               )}
             </div>
