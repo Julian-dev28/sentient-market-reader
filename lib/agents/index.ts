@@ -15,6 +15,7 @@ import type {
   KalshiMarket,
   KalshiOrderbook,
   BTCQuote,
+  OHLCVCandle,
   AgentResult,
   MarketDiscoveryOutput,
   PriceFeedOutput,
@@ -52,6 +53,7 @@ export async function runAgentPipeline(
   providers?: AIProvider[],    // multi-provider parallel solve for Sentiment stage (ensemble)
   sentModeOverride?: string,   // explicit mode for Sentiment stage (overrides SENT_MODE_MAP)
   probModeOverride?: string,   // explicit mode for Probability stage (overrides romaMode)
+  candles?: OHLCVCandle[],     // last 12 completed 15-min candles, newest first
 ): Promise<PipelineState> {
   const cycleId = ++cycleCounter
   const cycleStartedAt = new Date().toISOString()
@@ -94,6 +96,7 @@ export async function runAgentPipeline(
       sentMode,
       sentProviders,
       prevContext,
+      candles,
     ),
     runProbabilityModel(
       null,   // parallel mode — no sentiment context available yet
@@ -105,6 +108,7 @@ export async function runAgentPipeline(
       probMode,
       provider,   // extraction always on primary (grok) for reliable tool-call JSON
       prevContext,
+      candles,
     ),
   ])
 

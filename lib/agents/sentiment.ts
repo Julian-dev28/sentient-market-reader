@@ -1,6 +1,49 @@
-import type { AgentResult, SentimentOutput, BTCQuote, KalshiMarket, KalshiOrderbook } from '../types'
+import type { AgentResult, SentimentOutput, BTCQuote, KalshiMarket, KalshiOrderbook, OHLCVCandle } from '../types'
 import { llmToolCall, type AIProvider } from '../llm-client'
 import { callPythonRoma, formatRomaTrace } from '../roma/python-client'
+
+/** Format last N 15-min candles as a compact context block for the LLM.
+ *  Input: newest-first [ts, low, high, open, close, volume]
+ *  Output: oldest-first table + candle flip/streak alert at the top.
+ */
+function formatCandles(candles: OHLCVCandle[]): string {
+  if (!candles.length) return ''
+  const ordered = [...candles].reverse() // oldest first
+  const lines = ordered.map((c, i) => {
+    const [, low, high, open, close, vol] = c
+    const chg    = close - open
+    const chgPct = ((chg / open) * 100).toFixed(2)
+    const dir    = chg >= 0 ? '▲' : '▼'
+    const minsAgo = (candles.length - i) * 15
+    return `  [−${String(minsAgo).padStart(3)}m]  O:${open.toFixed(0)}  H:${high.toFixed(0)}  L:${low.toFixed(0)}  C:${close.toFixed(0)}  Vol:${vol.toFixed(1)}  ${dir}${chgPct}%`
+  })
+
+  // Candle flip / streak analysis (candles are newest-first; [3]=open [4]=close)
+  const dirs = candles.slice(0, 8).map(c => (c[4] >= c[3] ? 'GREEN' : 'RED'))
+  let flipNote = ''
+  if (dirs.length >= 2) {
+    if (dirs[0] !== dirs[1]) {
+      // Count the prior streak that just reversed
+      let priorStreak = 1
+      for (let i = 2; i < dirs.length; i++) {
+        if (dirs[i] === dirs[1]) priorStreak++; else break
+      }
+      const direction = dirs[0] === 'GREEN'
+        ? `RED→GREEN FLIP (potential bullish reversal)`
+        : `GREEN→RED FLIP (potential bearish reversal)`
+      flipNote = `⚡ CANDLE FLIP ALERT: Most recent candle is a ${direction} after a ${priorStreak}-candle ${dirs[1]} streak. This is a high-priority reversal signal — override prior directional bias. Do not extrapolate the previous trend.`
+    } else {
+      let streak = 1
+      for (let i = 1; i < dirs.length; i++) {
+        if (dirs[i] === dirs[0]) streak++; else break
+      }
+      const cont = dirs[0] === 'GREEN' ? 'bullish continuation' : 'bearish continuation'
+      flipNote = `Candle streak: ${streak} consecutive ${dirs[0]} candles — ${cont}.`
+    }
+  }
+
+  return `${flipNote}\nLast ${candles.length} × 15-min BTC candles (oldest → newest):\n${lines.join('\n')}`
+}
 
 export async function runSentiment(
   quote: BTCQuote,
@@ -13,6 +56,7 @@ export async function runSentiment(
   romaMode?: string,
   providers?: AIProvider[],  // multi-provider parallel solve
   prevContext?: string,
+  candles?: OHLCVCandle[],
 ): Promise<AgentResult<SentimentOutput>> {
   const start = Date.now()
 
@@ -26,9 +70,16 @@ export async function runSentiment(
 
   const goal =
     `Assess short-term BTC directional sentiment for this 15-min Kalshi KXBTC15M prediction window. ` +
-    `Evaluate: (1) short-term price momentum from 1h/24h changes, (2) BTC position relative to the ` +
-    `strike price, (3) Kalshi orderbook crowd sentiment skew, (4) time pressure with ` +
-    `${minutesUntilExpiry.toFixed(1)} min until window close. ` +
+    `Evaluate: (1) the last 12 completed 15-min candles — identify trend structure, higher highs/lows ` +
+    `or lower highs/lows, momentum exhaustion or continuation patterns similar to WaveTrend oscillator ` +
+    `signals (overbought/oversold reversals, wave crossovers); ` +
+    `CRITICAL — if the candle data contains a ⚡ CANDLE FLIP ALERT, this means the most recent candle ` +
+    `reversed the prior streak and is a high-priority reversal signal. Do NOT extrapolate the old trend ` +
+    `— instead treat the flip direction as the leading signal and revise your bias accordingly; ` +
+    `(2) does the candle trend align with or oppose BTC's current position vs the strike price? ` +
+    `(3) Kalshi orderbook crowd sentiment skew; ` +
+    `(4) time pressure with ${minutesUntilExpiry.toFixed(1)} min until window close — ` +
+    `with < 5 min remaining, a single candle reversal near the strike is decisive. ` +
     `Produce a directional sentiment score from -1 (strongly bearish) to +1 (strongly bullish).`
 
   const context = [
@@ -43,6 +94,7 @@ export async function runSentiment(
       : 'No active Kalshi market',
     `Orderbook YES depth: ${obYes}`,
     `Orderbook NO depth:  ${obNo}`,
+    ...(candles?.length ? [`\n${formatCandles(candles)}`] : []),
     ...(prevContext ? [`\nPrevious cycle analysis:\n${prevContext}`] : []),
   ].join('\n')
 
