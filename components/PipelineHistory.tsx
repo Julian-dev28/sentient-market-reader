@@ -20,19 +20,29 @@ function duration(state: PipelineState): string {
 
 export default function PipelineHistory({ history }: Props) {
   const [expanded, setExpanded] = useState<number | null>(null)
+  const [open, setOpen]         = useState(true)
 
   if (history.length === 0) return null
 
   return (
     <div className="card">
-      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
-        Cycle History
+      <button
+        onClick={() => setOpen(v => !v)}
+        style={{
+          width: '100%', textAlign: 'left', cursor: 'pointer',
+          background: 'transparent', border: 'none', padding: 0,
+          marginBottom: open ? 12 : 0,
+          display: 'flex', alignItems: 'center', gap: 6,
+        }}
+      >
+        <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>Cycle History</span>
         <span style={{ marginLeft: 'auto', fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 4, padding: '2px 7px' }}>
           {history.length} cycle{history.length !== 1 ? 's' : ''}
         </span>
-      </div>
+        <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>{open ? '▲' : '▼'}</span>
+      </button>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      {open && <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
         {history.map(cycle => {
           const prob = cycle.agents.probability.output
           const sent = cycle.agents.sentiment.output
@@ -153,7 +163,7 @@ export default function PipelineHistory({ history }: Props) {
             </div>
           )
         })}
-      </div>
+      </div>}
     </div>
   )
 }
