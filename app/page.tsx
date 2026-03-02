@@ -29,19 +29,19 @@ function r(...extra: (string | undefined)[]) {
 
 // ── Data ──────────────────────────────────────────────────────────────────────
 const PIPELINE = [
-  { num: '01', name: 'Market Discovery',  desc: 'Finds the active KXBTC15M window, reads floor strike and close time from Kalshi.' },
-  { num: '02', name: 'Price Feed',        desc: 'Streams live BTC spot from Coinbase. Fetches 15-min OHLCV candles and 1-min live window.' },
-  { num: '03', name: 'Quant Signals',     desc: 'Pre-computes RSI, MACD, Bollinger %B, Garman-Klass vol, Brownian motion and log-normal priors.' },
-  { num: '04', name: 'Sentiment Agent',   desc: 'ROMA multi-agent loop. Synthesises regime, velocity, momentum and orderbook pressure into a directional score.' },
-  { num: '05', name: 'Probability Model', desc: 'Estimates P(BTC > strike) blending ROMA output with time-weighted quant priors via α-blend.' },
-  { num: '06', name: 'Risk + Execution',  desc: 'Kelly sizing, daily loss cap, drawdown limit. Outputs YES / NO / PASS with a limit price.' },
+  { num: '01', name: 'Market Discovery',  desc: 'Finds the active KXBTC15M window. Reads floor strike, close time and live bid/ask from Kalshi.' },
+  { num: '02', name: 'Price Feed',        desc: 'Live BTC spot from Coinbase. 15-min OHLCV candles + 1-min intra-window feed. Bybit perp funding rate.' },
+  { num: '03', name: 'Quant Signals',     desc: 'RSI, MACD, Bollinger %B, Garman-Klass vol, Brownian motion and log-normal binary priors — all computed before any LLM call.' },
+  { num: '04', name: 'Sentiment Agent',   desc: 'ROMA loop on OpenRouter. Synthesises regime, velocity, momentum and orderbook pressure into a directional score. Streams live.' },
+  { num: '05', name: 'Probability Model', desc: 'Parallel ROMA loop on OpenRouter. Estimates P(BTC > strike), blends with time-weighted quant priors. Streams alongside Sentiment.' },
+  { num: '06', name: 'Risk + Execution',  desc: 'Deterministic Kelly sizing, daily loss cap, drawdown guard. Outputs YES / NO / PASS with a limit price in cents.' },
 ]
 
 const MODES = [
-  { name: 'BLITZ', time: '~30', unit: 's',   model: 'qwen3-8b',      desc: 'One decomposition level. Sub-minute re-checks.' },
-  { name: 'SHARP', time: '~60', unit: 's',   model: 'qwen3-14b',     desc: 'Two executor subtasks. Default for live cycles.' },
-  { name: 'KEEN',  time: '~90', unit: 's',   model: 'qwen3-30b-a3b', desc: '30B sparse MoE. Richer reasoning.' },
-  { name: 'SMART', time: '~2',  unit: 'min', model: 'qwen3-max',     desc: 'Full model. Reserved for deep analysis.' },
+  { name: 'BLITZ', time: '~30', unit: 's',   model: 'gemini-2.5-flash', desc: 'Single decomposition pass. Tight token budget. Best for rapid 5-min cycles.' },
+  { name: 'SHARP', time: '~60', unit: 's',   model: 'gemini-2.5-flash', desc: 'Two executor subtasks. Extended thinking budget. Good default for most windows.' },
+  { name: 'KEEN',  time: '~90', unit: 's',   model: 'gemini-2.5-flash', desc: 'Full thinking budget per subtask. Richer context synthesis.' },
+  { name: 'SMART', time: '~2',  unit: 'min', model: 'gemini-2.5-pro',   desc: 'Upgrades to Pro for both stages. Best reasoning, slowest cycle.' },
 ]
 
 const CODE = [
@@ -87,9 +87,9 @@ export default function Landing() {
             EVERY WINDOW
           </h1>
           <p className={s.heroSub}>
-            ROMA multi-agent pipeline for Kalshi KXBTC15M.
-            Pre-computed quant signals feed parallel LLM reasoning —
-            sentiment, probability, risk, execution.
+            ROMA multi-agent pipeline powered by OpenRouter and Gemini 2.5.
+            Pre-computed quant signals feed two parallel reasoning loops —
+            sentiment and probability stream live as each stage completes.
           </p>
           <div className={s.heroCtas}>
             <Link href="/dashboard" className={s.btnPrimary}>Open Dashboard →</Link>
@@ -105,9 +105,9 @@ export default function Landing() {
       {/* Stats */}
       <div className={s.statsRow}>
         {[
-          { num: '60',  accent: 's',  label: 'Pipeline latency',  desc: 'sharp mode · two parallel ROMA solves' },
-          { num: '4',   accent: '×',  label: 'ROMA modes',         desc: 'blitz · sharp · keen · smart' },
-          { num: '12',  accent: '+',  label: 'Quant signals',      desc: 'RSI · MACD · GK vol · Black-Scholes · autocorr' },
+          { num: '2.5',  accent: '',   label: 'Gemini via OpenRouter', desc: 'Flash for speed · Pro for depth · model override per cycle' },
+          { num: '4',    accent: '×',  label: 'ROMA modes',             desc: 'blitz · sharp · keen · smart' },
+          { num: '12',   accent: '+',  label: 'Quant signals',          desc: 'RSI · MACD · GK vol · Black-Scholes · autocorr' },
         ].map(({ num, accent, label, desc }, i) => (
           <div className={`${s.statItem} ${r(i > 0 ? s.d1 : undefined)}`} key={label}>
             <div className={s.statNum}>{num}<span className={s.statAccent}>{accent}</span></div>
@@ -124,7 +124,8 @@ export default function Landing() {
           <h2 className={`${s.headline} ${r(s.d1)}`}>Six stages.<br />One decision.</h2>
           <p className={`${s.sub} ${r(s.d2)}`}>
             From market tick to signed order in a single cycle.
-            Every stage is typed, logged and observable in real time.
+            Each stage streams live to the dashboard as it completes —
+            no waiting for the full pipeline to finish.
           </p>
           <div className={s.pipelineList}>
             {PIPELINE.map((step, i) => (
@@ -149,8 +150,8 @@ export default function Landing() {
               </h2>
               <p className={`${s.signalsBody} ${r(s.d2)}`}>
                 All indicators are pre-computed in TypeScript before
-                the ROMA call. Models reason about derived signals —
-                not raw OHLCV data.
+                the OpenRouter call. Gemini 2.5 reasons about derived
+                signals — not raw OHLCV data.
               </p>
               <ul className={`${s.signalsList} ${r(s.d2)}`}>
                 {[
@@ -189,8 +190,9 @@ export default function Landing() {
           <p className={`${s.label} ${r()}`}>ROMA Modes</p>
           <h2 className={`${s.headline} ${r(s.d1)}`}>Speed or depth.<br />Your call.</h2>
           <p className={`${s.sub} ${r(s.d2)}`}>
-            Each mode selects a Qwen model tier via OpenRouter.
-            Override sentiment and probability stages independently.
+            All reasoning routes through OpenRouter — Gemini 2.5 Flash
+            for Blitz through Keen, Gemini 2.5 Pro for Smart.
+            Override the model per cycle from the dashboard.
           </p>
         </div>
         <div className={s.modesGrid}>
@@ -212,7 +214,7 @@ export default function Landing() {
             TRADE THE<br />NEXT WINDOW
           </h2>
           <p className={`${s.ctaSub} ${r(s.d1)}`}>
-            Live BTC data · Kalshi orderbook · ROMA multi-agent reasoning.
+            Live BTC data · Kalshi orderbook · OpenRouter + Gemini 2.5 · streaming agents.
           </p>
           <div className={`${s.ctaBtns} ${r(s.d2)}`}>
             <Link href="/dashboard" className={s.btnPrimary}>Open Dashboard →</Link>
@@ -223,7 +225,7 @@ export default function Landing() {
 
       {/* Footer */}
       <footer className={s.footer}>
-        <span className={s.footerBrand}>Sentient ROMA · KXBTC15M Algotrader</span>
+        <span className={s.footerBrand}>Sentient ROMA · KXBTC15M · Powered by OpenRouter</span>
         <div className={s.footerLinks}>
           <Link href="/dashboard" className={s.footerLink}>Dashboard</Link>
           <Link href="/settings"  className={s.footerLink}>Settings</Link>
