@@ -443,7 +443,9 @@ export default function AgentPipeline({
             gap: 12,
           }}>
             {AGENTS.map((agent, i) => {
-              const result = pipeline?.agents[agent.key] ?? streamingAgents?.[agent.key]
+              const result = isRunning
+                ? streamingAgents?.[agent.key]
+                : pipeline?.agents[agent.key]
               return <AgentCard key={agent.key} agent={agent} result={result} index={i} pipelineRunning={isRunning} />
             })}
           </div>
