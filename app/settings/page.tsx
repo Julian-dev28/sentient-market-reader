@@ -48,6 +48,9 @@ export default function SettingsPage() {
   const [formSubmitting, setFormSubmitting] = useState(false)
   const [disconnecting, setDisconnecting]   = useState(false)
   const [refreshing, setRefreshing]         = useState(false)
+  const [dragOver, setDragOver]             = useState(false)
+  const [pemFileName, setPemFileName]       = useState<string | null>(null)
+  const [showPaste, setShowPaste]           = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // config state
@@ -136,13 +139,24 @@ export default function SettingsPage() {
     }
   }
 
-  // ── PEM file pick ─────────────────────────────────────────────────────────
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
+  // ── PEM file loading ──────────────────────────────────────────────────────
+  const loadPemFile = (file: File) => {
+    setPemFileName(file.name)
     const reader = new FileReader()
     reader.onload = ev => setFormPem(String(ev.target?.result ?? ''))
     reader.readAsText(file)
+  }
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) loadPemFile(file)
+  }
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    setDragOver(false)
+    const file = e.dataTransfer.files?.[0]
+    if (file) loadPemFile(file)
   }
 
   // ── Derived UI values ─────────────────────────────────────────────────────
@@ -339,7 +353,7 @@ export default function SettingsPage() {
                   <>Log in to <strong>kalshi.com</strong> → Account → API Access → Create API Key.</>,
                   <>Copy the <strong>API Key ID</strong> (UUID format) shown after creation.</>,
                   <>Download the <strong>RSA private key</strong> (.pem file) — save it securely.</>,
-                  <>Paste both below, or use the "Choose file" button to load the .pem.</>,
+                  <>Drag the <strong>.pem file</strong> onto the drop zone below, or click to browse.</>,
                 ].map((step, i) => (
                   <li key={i} style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6 }}>{step}</li>
                 ))}
@@ -367,40 +381,85 @@ export default function SettingsPage() {
                 </div>
 
                 <div>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                    <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                      Private Key (PEM)
-                    </label>
-                    <button
-                      onClick={() => fileInputRef.current?.click()}
-                      style={{
-                        fontSize: 11, fontWeight: 700, color: 'var(--blue)',
-                        background: 'none', border: 'none', cursor: 'pointer', padding: 0,
-                      }}
-                    >
-                      Choose file…
-                    </button>
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept=".pem,.key,text/*"
-                      onChange={handleFileChange}
-                      style={{ display: 'none' }}
-                    />
-                  </div>
-                  <textarea
-                    placeholder={'-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----'}
-                    value={formPem}
-                    onChange={e => setFormPem(e.target.value)}
-                    rows={7}
+                  <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', display: 'block', marginBottom: 6 }}>
+                    Private Key (PEM)
+                  </label>
+
+                  {/* Drop zone */}
+                  <div
+                    onClick={() => fileInputRef.current?.click()}
+                    onDragOver={e => { e.preventDefault(); setDragOver(true) }}
+                    onDragLeave={() => setDragOver(false)}
+                    onDrop={handleDrop}
                     style={{
-                      width: '100%', boxSizing: 'border-box',
-                      padding: '10px 14px', borderRadius: 9, fontSize: 11,
-                      border: '1px solid var(--border-bright)', background: 'var(--bg-secondary)',
-                      color: 'var(--text-secondary)', fontFamily: 'var(--font-geist-mono)',
-                      outline: 'none', resize: 'vertical', lineHeight: 1.5,
+                      border: `2px dashed ${dragOver ? 'var(--blue)' : pemFileName ? 'var(--green)' : 'var(--border-bright)'}`,
+                      borderRadius: 12,
+                      background: dragOver ? 'var(--blue)08' : pemFileName ? 'var(--green)08' : 'var(--bg-secondary)',
+                      padding: '28px 20px',
+                      textAlign: 'center',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s',
                     }}
+                  >
+                    {pemFileName ? (
+                      <>
+                        <div style={{ fontSize: 22, marginBottom: 6 }}>✓</div>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--green)', marginBottom: 3 }}>
+                          {pemFileName}
+                        </div>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                          Drop a different file to replace
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div style={{ fontSize: 28, marginBottom: 8, opacity: 0.5 }}>⬇</div>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 3 }}>
+                          {dragOver ? 'Drop to load' : 'Drag your .pem file here'}
+                        </div>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                          or click to browse
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".pem,.key,text/*"
+                    onChange={handleFileChange}
+                    style={{ display: 'none' }}
                   />
+
+                  {/* Paste toggle */}
+                  <button
+                    onClick={() => setShowPaste(p => !p)}
+                    style={{
+                      marginTop: 8, fontSize: 11, fontWeight: 600,
+                      color: 'var(--text-muted)', background: 'none',
+                      border: 'none', cursor: 'pointer', padding: 0,
+                    }}
+                  >
+                    {showPaste ? '▲ Hide' : '▼ Paste PEM instead'}
+                  </button>
+
+                  {showPaste && (
+                    <textarea
+                      placeholder={'-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----'}
+                      value={formPem}
+                      onChange={e => { setFormPem(e.target.value); setPemFileName(null) }}
+                      rows={7}
+                      style={{
+                        marginTop: 8,
+                        width: '100%', boxSizing: 'border-box',
+                        padding: '10px 14px', borderRadius: 9, fontSize: 11,
+                        border: '1px solid var(--border-bright)', background: 'var(--bg-secondary)',
+                        color: 'var(--text-secondary)', fontFamily: 'var(--font-geist-mono)',
+                        outline: 'none', resize: 'vertical', lineHeight: 1.5,
+                      }}
+                    />
+                  )}
                 </div>
 
                 {formError && (
