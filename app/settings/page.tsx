@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { useAppwrite } from '@/contexts/AppwriteContext'
 
 type ConnStatus = 'checking' | 'connected' | 'unconfigured' | 'error'
@@ -33,6 +34,7 @@ interface ConfigData {
 
 export default function SettingsPage() {
   const { user, logout } = useAppwrite()
+  const router = useRouter()
 
   // connection state
   const [connStatus, setConnStatus] = useState<ConnStatus>('checking')
@@ -118,9 +120,7 @@ export default function SettingsPage() {
       })
       const d = await r.json()
       if (!r.ok) { setFormError(d.error ?? `HTTP ${r.status}`); return }
-      setFormApiKey('')
-      setFormPem('')
-      await refreshAll()
+      router.push('/dashboard')
     } catch (e) {
       setFormError(String(e))
     } finally {
