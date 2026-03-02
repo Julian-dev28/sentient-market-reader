@@ -13,26 +13,31 @@
 import { readFileSync } from 'fs'
 import { createSign, constants } from 'crypto'
 import { join } from 'path'
+import { readStoredCreds } from './kalshi-credentials'
 
-function loadPrivateKey(): string {
+function loadCreds(): { apiKey: string; privateKey: string } | null {
+  // 1. UI-uploaded credentials (stored in .kalshi-credentials.json)
+  const stored = readStoredCreds()
+  if (stored?.apiKey && stored?.privateKey) return stored
+
+  // 2. Env vars fallback
+  const apiKey = process.env.KALSHI_API_KEY
+  if (!apiKey) return null
   const keyPath = process.env.KALSHI_PRIVATE_KEY_PATH
-  if (!keyPath) return ''
-  const resolved = keyPath.startsWith('./') || keyPath.startsWith('/')
-    ? keyPath.startsWith('/') ? keyPath : join(process.cwd(), keyPath.slice(2))
-    : join(process.cwd(), keyPath)
+  if (!keyPath) return null
+  const resolved = keyPath.startsWith('/') ? keyPath : join(process.cwd(), keyPath.replace(/^\.\//, ''))
   try {
-    return readFileSync(resolved, 'utf-8')
+    const privateKey = readFileSync(resolved, 'utf-8')
+    return { apiKey, privateKey }
   } catch {
-    return ''
+    return null
   }
 }
 
 export function buildKalshiHeaders(method: string, path: string): Record<string, string> {
-  const apiKey = process.env.KALSHI_API_KEY
-  if (!apiKey) return {}
-
-  const privateKey = loadPrivateKey()
-  if (!privateKey) return {}
+  const creds = loadCreds()
+  if (!creds) return {}
+  const { apiKey, privateKey } = creds
 
   const timestamp = String(Date.now())
   // Kalshi signing: direct concatenation, no separators
@@ -60,5 +65,5 @@ export function buildKalshiHeaders(method: string, path: string): Record<string,
 }
 
 export function hasKalshiAuth(): boolean {
-  return !!(process.env.KALSHI_API_KEY && process.env.KALSHI_PRIVATE_KEY_PATH)
+  return !!loadCreds()
 }
