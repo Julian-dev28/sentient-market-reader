@@ -127,7 +127,7 @@ function TradeBox({ yesBid, yesAsk, noBid, noAsk, ticker, liveMode }: {
   }
 
   return (
-    <div style={{ borderRadius: 12, border: '1px solid var(--border)', background: 'white', overflow: 'hidden' }}>
+    <div style={{ borderRadius: 12, border: '1px solid var(--border)', background: 'var(--bg-card)', overflow: 'hidden' }}>
 
       {/* YES / NO pill toggles */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0 }}>
@@ -209,7 +209,7 @@ function TradeBox({ yesBid, yesAsk, noBid, noAsk, ticker, liveMode }: {
               flex: 1, minWidth: 0, textAlign: 'center', fontFamily: 'var(--font-geist-mono)',
               fontSize: 15, fontWeight: 800, color: 'var(--text-primary)',
               border: '1px solid var(--border)', borderRadius: 6, padding: '5px 8px',
-              background: 'white', outline: 'none',
+              background: 'var(--bg-secondary)', outline: 'none',
             }}
           />
         </div>
@@ -370,7 +370,7 @@ export default function MarketCard({ market, orderbook, strikePrice, currentBTCP
             <div style={{
               padding: '12px 14px', borderRadius: 12, marginBottom: 12,
               background: above ? 'var(--green-pale)' : 'var(--pink-pale)',
-              border: `1px solid ${above ? '#b8dfc3' : '#e0b8c6'}`,
+              border: `1px solid ${above ? '#1a4030' : '#3a1020'}`,
               transition: 'background 0.5s ease, border-color 0.5s ease',
             }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>

@@ -1,57 +1,57 @@
 @import "tailwindcss";
 
 :root {
-  /* ── Sentient Foundation palette — off-white, stone, slate-blue ── */
-  --bg-primary:    #f9f8f6;
-  --bg-secondary:  #f2f0ec;
-  --bg-card:       #ffffff;
-  --bg-card-hover: #fafaf8;
+  /* ── Dark palette ── */
+  --bg-primary:    #080810;
+  --bg-secondary:  #0f0f18;
+  --bg-card:       #12121c;
+  --bg-card-hover: #181824;
 
-  /* Borders — cool neutral */
-  --border:        #e4e0da;
-  --border-bright: #cbc6be;
+  /* Borders — visible but subtle */
+  --border:        #252535;
+  --border-bright: #353548;
 
-  /* Stone — light warm brown */
-  --brown:         #7d7060;
-  --brown-light:   #9b8f7e;
-  --brown-dark:    #5c5247;
-  --brown-pale:    #ede9e4;
+  /* Accent — slate blue (was brown) */
+  --brown:         #7b9bb8;
+  --brown-light:   #9abbd4;
+  --brown-dark:    #5a8fb5;
+  --brown-pale:    #0e1a26;
 
-  /* Rose — soft muted pink-red for below-strike / bearish direction */
-  --pink:          #b56070;
-  --pink-light:    #cf9098;
-  --pink-pale:     #f4e2e4;
-  --pink-dark:     #8c4858;
+  /* Rose — bearish */
+  --pink:          #d06878;
+  --pink-light:    #e090a0;
+  --pink-pale:     #220c14;
+  --pink-dark:     #ee88a0;
 
-  /* Blue — slate accent for signals/UI */
-  --blue:          #4a7fa5;
-  --blue-light:    #7aaac8;
-  --blue-pale:     #dce9f2;
-  --blue-dark:     #2d5f80;
+  /* Blue */
+  --blue:          #5a90b8;
+  --blue-light:    #8ab8d8;
+  --blue-pale:     #0e1a26;
+  --blue-dark:     #8ab8d8;
 
-  /* Green — positive / above-strike / win */
-  --green:         #4a9470;
-  --green-light:   #75b898;
-  --green-pale:    #d8ede5;
-  --green-dark:    #2d7050;
+  /* Green — bullish */
+  --green:         #50a878;
+  --green-light:   #78c898;
+  --green-pale:    #0c2018;
+  --green-dark:    #68d090;
 
-  /* Neutral creams */
-  --cream:         #f5f2ee;
-  --cream-dark:    #e8e4de;
+  /* Neutral darks */
+  --cream:         #131320;
+  --cream-dark:    #1c1c2c;
 
-  /* Amber — warning/neutral */
-  --amber:         #a07840;
-  --amber-pale:    #f0e4d0;
+  /* Amber */
+  --amber:         #d0a040;
+  --amber-pale:    #201808;
 
-  /* Red — loss / error */
-  --red:           #a85858;
-  --red-pale:      #f0dede;
+  /* Red */
+  --red:           #d06868;
+  --red-pale:      #200c0c;
 
-  /* Text — editorial near-black */
-  --text-primary:   #1a1814;
-  --text-secondary: #5a5248;
-  --text-muted:     #908880;
-  --text-light:     #bab2a8;
+  /* Text — clear, readable contrast */
+  --text-primary:   #e8e8f0;
+  --text-secondary: #a0a0c0;
+  --text-muted:     #686880;
+  --text-light:     #383850;
 }
 
 * { box-sizing: border-box; }
@@ -70,7 +70,7 @@ html, body {
 }
 
 ::-webkit-scrollbar { width: 4px; height: 4px; }
-::-webkit-scrollbar-track { background: var(--bg-secondary); }
+::-webkit-scrollbar-track { background: var(--bg-primary); }
 ::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 2px; }
 
 .mono { font-family: var(--font-geist-mono), 'Courier New', monospace; }
@@ -81,15 +81,10 @@ html, body {
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 20px;
-  box-shadow:
-    0 1px 2px rgba(26,24,20,0.04),
-    0 2px 12px rgba(26,24,20,0.04);
-  transition: box-shadow 0.2s ease, border-color 0.2s ease;
+  box-shadow: none;
+  transition: border-color 0.2s ease;
 }
 .card:hover {
-  box-shadow:
-    0 1px 4px rgba(26,24,20,0.06),
-    0 4px 20px rgba(26,24,20,0.06);
   border-color: var(--border-bright);
 }
 
@@ -253,13 +248,13 @@ html, body {
   padding: 3px 10px; border-radius: 100px;
   font-size: 10px; font-weight: 600; letter-spacing: 0.03em;
 }
-.pill-brown { background: var(--brown-pale);  border: 1px solid var(--border-bright);  color: var(--brown-dark); }
-.pill-pink  { background: var(--pink-pale);   border: 1px solid #d8a8b0;               color: var(--pink-dark); }
-.pill-blue  { background: var(--blue-pale);   border: 1px solid #a8cce0;               color: var(--blue-dark); }
-.pill-green { background: var(--green-pale);  border: 1px solid #9ecfb8;               color: var(--green-dark); }
-.pill-red   { background: var(--red-pale);    border: 1px solid #d8b0b0;               color: var(--red); }
-.pill-amber { background: var(--amber-pale);  border: 1px solid #d0b888;               color: var(--amber); }
-.pill-cream { background: var(--cream-dark);  border: 1px solid var(--border);         color: var(--text-secondary); }
+.pill-brown { background: var(--brown-pale);  border: 1px solid #243850;  color: var(--brown-dark); }
+.pill-pink  { background: var(--pink-pale);   border: 1px solid #4a1828;  color: var(--pink-dark); }
+.pill-blue  { background: var(--blue-pale);   border: 1px solid #243850;  color: var(--blue-dark); }
+.pill-green { background: var(--green-pale);  border: 1px solid #164030;  color: var(--green-dark); }
+.pill-red   { background: var(--red-pale);    border: 1px solid #481818;  color: var(--red); }
+.pill-amber { background: var(--amber-pale);  border: 1px solid #483010;  color: var(--amber); }
+.pill-cream { background: var(--cream-dark);  border: 1px solid var(--border);  color: var(--text-secondary); }
 
 /* ── Gradient text ─────────────────────── */
 .grad-brown-pink {

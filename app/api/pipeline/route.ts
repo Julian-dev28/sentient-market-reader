@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { runAgentPipeline } from '@/lib/agents'
 import { buildKalshiHeaders } from '@/lib/kalshi-auth'
-import type { KalshiMarket, KalshiOrderbook, BTCQuote } from '@/lib/types'
+import type { KalshiMarket, KalshiOrderbook, BTCQuote, OHLCVCandle, DerivativesSignal } from '@/lib/types'
 import type { AIProvider } from '@/lib/llm-client'
 import { tryLockPipeline, releasePipelineLock } from '@/lib/pipeline-lock'
 
@@ -139,6 +139,58 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'BTC price unavailable — all sources failed' }, { status: 503 })
     }
 
+    // Fetch last 13 × 15-min candles (newest first) — Coinbase Exchange public API
+    // granularity=900s = 15 min. Fetch 13, use 12 (drop the still-open current candle).
+    let candles: OHLCVCandle[] = []
+    const candleRes = await fetch(
+      'https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=900&limit=13',
+      { cache: 'no-store' }
+    ).catch(() => null)
+    if (candleRes?.ok) {
+      const raw = await candleRes.json()
+      // Skip index 0 (current incomplete candle), take next 12 completed ones
+      candles = Array.isArray(raw) ? raw.slice(1, 13) as OHLCVCandle[] : []
+    }
+
+    // Fetch last 16 × 1-min candles — covers the live 15-min Kalshi window at 1-min resolution.
+    // Index 0 is the currently open candle (may be partial); keep all 16 so agents see
+    // intra-window momentum right up to the present moment.
+    let liveCandles: OHLCVCandle[] = []
+    const liveCandleRes = await fetch(
+      'https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=60&limit=16',
+      { cache: 'no-store' }
+    ).catch(() => null)
+    if (liveCandleRes?.ok) {
+      const raw = await liveCandleRes.json()
+      liveCandles = Array.isArray(raw) ? raw as OHLCVCandle[] : []
+    }
+
+    // Fetch BTC perpetual futures derivatives signal — Bybit public API (no auth required).
+    // Provides funding rate (positioning pressure) and basis (contango/backwardation).
+    let derivatives: DerivativesSignal | null = null
+    const bybitRes = await fetch(
+      'https://api.bybit.com/v5/market/tickers?category=linear&symbol=BTCUSDT',
+      { cache: 'no-store' }
+    ).catch(() => null)
+    if (bybitRes?.ok) {
+      const data = await bybitRes.json()
+      const ticker = data?.result?.list?.[0]
+      if (ticker) {
+        const markPrice  = parseFloat(ticker.markPrice)
+        const indexPrice = parseFloat(ticker.indexPrice)
+        const fundingRate = parseFloat(ticker.fundingRate)
+        if (markPrice > 0 && indexPrice > 0 && !isNaN(fundingRate)) {
+          derivatives = {
+            fundingRate,
+            basis: ((markPrice - indexPrice) / indexPrice) * 100,
+            markPrice,
+            indexPrice,
+            source: 'bybit',
+          }
+        }
+      }
+    }
+
     // Fetch orderbook for nearest market
     let orderbook: KalshiOrderbook | null = null
     if (markets.length > 0) {
@@ -174,7 +226,7 @@ export async function GET(req: NextRequest) {
     const sentModeOverride = sentModeRaw && validModes.includes(sentModeRaw) ? sentModeRaw : undefined
     const probModeOverride = probModeRaw && validModes.includes(probModeRaw) ? probModeRaw : undefined
 
-    const pipeline = await runAgentPipeline(markets, quote, orderbook, provider, romaMode, aiRisk, provider2, providers, sentModeOverride, probModeOverride)
+    const pipeline = await runAgentPipeline(markets, quote, orderbook, provider, romaMode, aiRisk, provider2, providers, sentModeOverride, probModeOverride, candles, liveCandles, derivatives)
     return NextResponse.json(pipeline)
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 })

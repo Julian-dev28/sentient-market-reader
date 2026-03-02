@@ -36,10 +36,11 @@ export async function callPythonRoma(
   providers?: string[],
 ): Promise<PythonRomaResponse> {
   const romaMode = modeOverride ?? process.env.ROMA_MODE ?? 'smart'
+  const beamWidth = parseInt(process.env.ROMA_BEAM_WIDTH ?? '2')
   let lastErr: unknown
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      const body: Record<string, unknown> = { goal, context, max_depth: maxDepth, roma_mode: romaMode }
+      const body: Record<string, unknown> = { goal, context, max_depth: maxDepth, beam_width: beamWidth, roma_mode: romaMode }
       if (providers && providers.length > 0) body.providers = providers
       else if (provider) body.provider = provider
       const res = await fetch(`${PYTHON_ROMA_URL}/analyze`, {
