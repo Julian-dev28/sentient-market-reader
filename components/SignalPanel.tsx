@@ -119,7 +119,7 @@ export default function SignalPanel({ probability, sentiment }: SignalPanelProps
               {/* Action */}
               <div>
                 <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 3 }}>
-                  AI Recommendation
+                  ROMA Recommendation
                 </div>
                 <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 26, fontWeight: 900, color: recColor, lineHeight: 1 }}>
                   {rec === 'YES' ? 'BUY YES' : rec === 'NO' ? 'BUY NO' : 'PASS'}
@@ -139,9 +139,9 @@ export default function SignalPanel({ probability, sentiment }: SignalPanelProps
               fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5,
               marginTop: 2,
             }}>
-              {rec === 'YES' && <>AI thinks BTC will end <strong style={{ color: recColor }}>above the strike</strong> — and the market is underpricing that outcome.</>}
-              {rec === 'NO'  && <>AI thinks BTC will end <strong style={{ color: recColor }}>below the strike</strong> — and the market is overpricing the YES side.</>}
-              {rec === 'NO_TRADE' && <>AI and market agree closely — no exploitable edge found. Sitting this one out.</>}
+              {rec === 'YES' && <>ROMA thinks BTC will end <strong style={{ color: recColor }}>above the strike</strong> — and the market is underpricing that outcome.</>}
+              {rec === 'NO'  && <>ROMA thinks BTC will end <strong style={{ color: recColor }}>below the strike</strong> — and the market is overpricing the YES side.</>}
+              {rec === 'NO_TRADE' && <>ROMA and market agree closely — no exploitable edge found. Sitting this one out.</>}
             </div>
 
             {conviction && conviction.label !== 'no edge' && (
@@ -177,10 +177,10 @@ export default function SignalPanel({ probability, sentiment }: SignalPanelProps
             const aiColor  = ai.side  === 'YES' ? 'var(--green)' : 'var(--blue)'
             const mktColor = mkt.side === 'YES' ? 'var(--green)' : 'var(--blue)'
             const gapText = Math.abs(delta) <= 1
-              ? 'AI and market agree — no edge'
+              ? 'ROMA and market agree — no edge'
               : delta > 0
-                ? `AI is ${delta}pp more bullish than the market`
-                : `AI is ${Math.abs(delta)}pp more bearish than the market`
+                ? `ROMA is ${delta}pp more bullish than the market`
+                : `ROMA is ${Math.abs(delta)}pp more bearish than the market`
             const gapColor = Math.abs(delta) <= 1 ? 'var(--text-muted)' : delta > 0 ? 'var(--green-dark)' : 'var(--pink)'
 
             return (
@@ -190,7 +190,7 @@ export default function SignalPanel({ probability, sentiment }: SignalPanelProps
                 <div>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
                     <div>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)' }}>AI thinks </span>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)' }}>ROMA thinks </span>
                       <span style={{ fontSize: 11, fontWeight: 800, color: aiColor }}>{ai.side} wins</span>
                     </div>
                     <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 12, fontWeight: 800, color: aiColor }}>
