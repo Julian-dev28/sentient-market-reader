@@ -59,6 +59,7 @@ export async function runProbabilityModel(
   liveCandles?: OHLCVCandle[],
   derivatives?: DerivativesSignal,
   orModelOverride?: string,        // override OpenRouter model ID for this call
+  signal?: AbortSignal,            // abort signal from the HTTP request
 ): Promise<AgentResult<ProbabilityOutput>> {
   const start = Date.now()
 
@@ -115,7 +116,7 @@ export async function runProbabilityModel(
 
   // Depth controlled by ROMA_MAX_DEPTH env var (default 1). ROMA treats 0 as unlimited — never send 0.
   const maxDepth = Math.max(1, parseInt(process.env.ROMA_MAX_DEPTH ?? '1'))
-  const pythonResult = await callPythonRoma(goal, context, maxDepth, 2, romaMode, provider, undefined, orModelOverride)
+  const pythonResult = await callPythonRoma(goal, context, maxDepth, 2, romaMode, provider, undefined, orModelOverride, signal)
   const romaAnswer = pythonResult.answer
   const agentLabel = `ProbabilityModelAgent (roma-dspy · ${pythonResult.provider})`
   const romaTrace  = formatRomaTrace(pythonResult)

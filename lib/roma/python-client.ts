@@ -35,9 +35,13 @@ export async function callPythonRoma(
   provider?: string,
   providers?: string[],
   modelOverride?: string,  // override the model used by the python service (openrouter only)
+  signal?: AbortSignal,    // caller abort signal — combined with 220s hard timeout
 ): Promise<PythonRomaResponse> {
   const romaMode = modeOverride ?? process.env.ROMA_MODE ?? 'smart'
   const beamWidth = parseInt(process.env.ROMA_BEAM_WIDTH ?? '2')
+  const fetchSignal = signal
+    ? AbortSignal.any([signal, AbortSignal.timeout(220_000)])
+    : AbortSignal.timeout(220_000)
   let lastErr: unknown
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
@@ -49,7 +53,7 @@ export async function callPythonRoma(
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(220_000),  // 220s hard cap — matches Python ROMA timeout
+        signal: fetchSignal,
       })
       if (!res.ok) {
         const text = await res.text().catch(() => '')
@@ -62,6 +66,8 @@ export async function callPythonRoma(
       return await res.json()
     } catch (err) {
       lastErr = err
+      // Don't retry on abort — the caller intentionally cancelled
+      if (err instanceof Error && err.name === 'AbortError') throw err
       if (attempt < maxRetries) {
         await new Promise(r => setTimeout(r, 2_000 * attempt))
       }

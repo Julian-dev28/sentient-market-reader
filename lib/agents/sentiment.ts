@@ -62,6 +62,7 @@ export async function runSentiment(
   derivatives?: DerivativesSignal, // perp funding rate + basis
   extractionProvider?: AIProvider, // provider for JSON extraction step (defaults to provider)
   orModelOverride?: string,        // override OpenRouter model ID for this call
+  signal?: AbortSignal,            // abort signal from the HTTP request
 ): Promise<AgentResult<SentimentOutput>> {
   const start = Date.now()
 
@@ -134,7 +135,7 @@ export async function runSentiment(
 
   // Depth controlled by ROMA_MAX_DEPTH env var (default 1). ROMA treats 0 as unlimited — never send 0.
   const maxDepth = Math.max(1, parseInt(process.env.ROMA_MAX_DEPTH ?? '1'))
-  const romaResult = await callPythonRoma(goal, context, maxDepth, 2, romaMode, provider, providers, orModelOverride)
+  const romaResult = await callPythonRoma(goal, context, maxDepth, 2, romaMode, provider, providers, orModelOverride, signal)
   const romaTrace  = formatRomaTrace(romaResult)
 
   // Use fast tier (grok-3-mini) — extraction is simple JSON parsing, no need for the

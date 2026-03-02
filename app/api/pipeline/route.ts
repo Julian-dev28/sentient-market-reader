@@ -229,9 +229,12 @@ export async function GET(req: NextRequest) {
     const orModelRaw = req.nextUrl.searchParams.get('orModel')
     const orModelOverride = orModelRaw || undefined
 
-    const pipeline = await runAgentPipeline(markets, quote, orderbook, provider, romaMode, aiRisk, provider2, providers, sentModeOverride, probModeOverride, candles, liveCandles, derivatives, orModelOverride)
+    const pipeline = await runAgentPipeline(markets, quote, orderbook, provider, romaMode, aiRisk, provider2, providers, sentModeOverride, probModeOverride, candles, liveCandles, derivatives, orModelOverride, req.signal)
     return NextResponse.json(pipeline)
   } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      return new Response(null, { status: 499 })  // client closed request
+    }
     return NextResponse.json({ error: String(err) }, { status: 500 })
   } finally {
     releasePipelineLock()

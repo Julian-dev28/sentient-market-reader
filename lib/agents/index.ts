@@ -58,6 +58,7 @@ export async function runAgentPipeline(
   liveCandles?: OHLCVCandle[], // last 16 × 1-min candles — intra-window live price action
   derivatives?: DerivativesSignal | null,  // perp futures funding rate + basis
   orModelOverride?: string,    // override OpenRouter model ID for sentiment + probability stages
+  signal?: AbortSignal,        // abort signal — cancels in-flight ROMA fetches when client disconnects
 ): Promise<PipelineState> {
   const cycleId = ++cycleCounter
   const cycleStartedAt = new Date().toISOString()
@@ -108,6 +109,7 @@ export async function runAgentPipeline(
       derivatives ?? undefined,
       provider,  // extractionProvider — always primary (grok) for reliable tool-call JSON
       orModelOverride,
+      signal,
     ),
     runProbabilityModel(
       null,   // parallel mode — no sentiment context available yet
@@ -123,6 +125,7 @@ export async function runAgentPipeline(
       liveCandles,
       derivatives ?? undefined,
       orModelOverride,
+      signal,
     ),
   ])
 
