@@ -2,9 +2,10 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import Link from 'next/link'
+import { useAppwrite } from '@/contexts/AppwriteContext'
 
 type ConnStatus = 'checking' | 'connected' | 'unconfigured' | 'error'
-type CredSource = 'ui' | 'env' | 'none'
+type CredSource = 'ui' | 'env' | 'none' | 'db'
 
 interface BalanceData {
   balance?: number
@@ -31,6 +32,8 @@ interface ConfigData {
 }
 
 export default function SettingsPage() {
+  const { user, logout } = useAppwrite()
+
   // connection state
   const [connStatus, setConnStatus] = useState<ConnStatus>('checking')
   const [credSource, setCredSource] = useState<CredSource>('none')
@@ -52,7 +55,7 @@ export default function SettingsPage() {
 
   const loadConnectStatus = useCallback(async () => {
     try {
-      const r = await fetch('/api/kalshi-connect')
+      const r = await fetch('/api/kalshi-connect', { credentials: 'include' })
       const d = await r.json() as ConnectStatus
       setCredSource(d.source)
       setConnectedApiKey(d.apiKey ?? null)
@@ -64,7 +67,7 @@ export default function SettingsPage() {
 
   const checkBalance = useCallback(async () => {
     try {
-      const r = await fetch('/api/balance')
+      const r = await fetch('/api/balance', { credentials: 'include' })
       if (r.status === 401) { setConnStatus('unconfigured'); return }
       const d = await r.json()
       if (!r.ok) { setConnStatus('error'); setConnErrMsg(d.error ?? `HTTP ${r.status}`); return }
@@ -106,6 +109,7 @@ export default function SettingsPage() {
     try {
       const r = await fetch('/api/kalshi-connect', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ apiKey: formApiKey.trim(), privateKey: formPem.trim() }),
       })
@@ -125,7 +129,7 @@ export default function SettingsPage() {
   const handleDisconnect = async () => {
     setDisconnecting(true)
     try {
-      await fetch('/api/kalshi-connect', { method: 'DELETE' })
+      await fetch('/api/kalshi-connect', { method: 'DELETE', credentials: 'include' })
       await refreshAll()
     } finally {
       setDisconnecting(false)
@@ -151,7 +155,8 @@ export default function SettingsPage() {
     : connStatus === 'unconfigured' ? 'Not configured'
     : 'Connection error'
 
-  const sourceLabel = credSource === 'ui'  ? 'UI upload'
+  const sourceLabel = credSource === 'db'  ? 'Your account'
+    : credSource === 'ui'  ? 'UI upload'
     : credSource === 'env' ? 'Environment vars'
     : null
 
@@ -172,9 +177,25 @@ export default function SettingsPage() {
             Settings
           </span>
         </div>
-        <Link href="/dashboard" style={{ fontSize: 12, color: 'var(--text-muted)', textDecoration: 'none', fontWeight: 600 }}>
-          ← Dashboard
-        </Link>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          {user && (
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{user.email}</span>
+          )}
+          <Link href="/dashboard" style={{ fontSize: 12, color: 'var(--text-muted)', textDecoration: 'none', fontWeight: 600 }}>
+            ← Dashboard
+          </Link>
+          {user && (
+            <button
+              onClick={logout}
+              style={{
+                fontSize: 12, fontWeight: 600, color: 'var(--text-muted)',
+                background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+              }}
+            >
+              Sign out
+            </button>
+          )}
+        </div>
       </nav>
 
       <main style={{ maxWidth: 640, margin: '0 auto', padding: '48px 24px' }}>
@@ -276,7 +297,7 @@ export default function SettingsPage() {
                 >
                   {refreshing ? 'Refreshing…' : 'Refresh'}
                 </button>
-                {credSource === 'ui' && (
+                {(credSource === 'ui' || credSource === 'db') && (
                   <button
                     onClick={handleDisconnect}
                     disabled={disconnecting}
