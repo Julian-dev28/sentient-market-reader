@@ -22,10 +22,10 @@ Sentiment also runs one tier lighter than probability by default.
 
 | Stage | Role | Provider | Model |
 |-------|------|----------|-------|
-| Atomizer | orchestration | openrouter | `qwen3-8b` |
-| Planner | orchestration | openrouter | `qwen3-8b` |
-| Executor ×2 (parallel) | reasoning | openrouter | `qwen3-8b` |
-| Aggregator | reasoning | openrouter | `qwen3-8b` |
+| Atomizer | orchestration | openrouter | `qwen3.5-flash-02-23` |
+| Planner | orchestration | openrouter | `qwen3.5-flash-02-23` |
+| Executor ×2 (parallel) | reasoning | openrouter | `qwen3.5-flash-02-23` |
+| Aggregator | reasoning | openrouter | `qwen3.5-flash-02-23` |
 | Sentiment extraction | JSON parse | grok | `grok-3-mini-fast` |
 | Probability extraction | JSON parse | grok | `grok-3-mini-fast` |
 
@@ -37,10 +37,10 @@ Sentiment also runs one tier lighter than probability by default.
 
 | Stage | Role | Provider | Model |
 |-------|------|----------|-------|
-| Atomizer | orchestration | openrouter | `qwen3-8b` ← blitz orch |
-| Planner | orchestration | openrouter | `qwen3-8b` ← blitz orch |
-| Executor ×2 (parallel) | reasoning | openrouter | `qwen3-14b` |
-| Aggregator | reasoning | openrouter | `qwen3-14b` |
+| Atomizer | orchestration | openrouter | `qwen3.5-flash-02-23` ← blitz orch |
+| Planner | orchestration | openrouter | `qwen3.5-flash-02-23` ← blitz orch |
+| Executor ×2 (parallel) | reasoning | openrouter | `qwen3.5-flash-02-23` |
+| Aggregator | reasoning | openrouter | `qwen3.5-flash-02-23` |
 | Sentiment extraction | JSON parse | grok | `grok-3-mini-fast` |
 | Probability extraction | JSON parse | grok | `grok-3-mini-fast` |
 
@@ -89,7 +89,7 @@ Sentiment vs Probability tier:
   blitz→blitz/blitz | sharp→sharp/sharp | keen→sharp/keen | smart→keen/smart
 ```
 
-So `keen` mode runs sentiment at `sharp` (qwen3-14b) for speed, probability at `keen`
+So `keen` mode runs sentiment at `sharp` (qwen3.5-flash) for speed, probability at `keen`
 (qwen3-30b-a3b) for quality — the decision-critical stage gets the better model.
 
 ---
@@ -118,10 +118,10 @@ a model without changing mode logic:
 
 ```
 # OpenRouter (current — AI_PROVIDER2=openrouter)
-OPENROUTER_BLITZ_MODEL=qwen/qwen3-8b          # $0.05/$0.40/M  — fastest blitz
-OPENROUTER_FAST_MODEL=qwen/qwen3-14b          # $0.06/$0.24/M  — sharp tier
-OPENROUTER_MID_MODEL=qwen/qwen3-30b-a3b       # $0.08/$0.28/M  — keen tier (30B MoE)
-OPENROUTER_MODEL=qwen/qwen3-max               # $1.20/$6.00/M  — smart tier
+OPENROUTER_BLITZ_MODEL=qwen/qwen3.5-flash-02-23  # $0.10/$0.40/M  — linear-attn MoE, fastest
+OPENROUTER_FAST_MODEL=qwen/qwen3.5-flash-02-23  # $0.10/$0.40/M  — sharp tier
+OPENROUTER_MID_MODEL=qwen/qwen3-30b-a3b         # $0.08/$0.28/M  — keen tier (30B MoE)
+OPENROUTER_MODEL=qwen/qwen3-max                 # $1.20/$6.00/M  — smart tier
 
 # Grok direct (AI_PROVIDER=grok — extraction only currently)
 GROK_BLITZ_MODEL=grok-3-mini-fast
