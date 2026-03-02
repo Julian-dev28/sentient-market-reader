@@ -129,7 +129,7 @@ export default function PositionsPanel({ liveMode }: { liveMode: boolean }) {
 
       {/* Total Equity hero */}
       {totalEquity !== null && (
-        <div style={{ padding: '12px 14px', borderRadius: 12, marginBottom: 10, background: 'rgba(255,255,255,0.8)', border: '1px solid var(--border-bright)' }}>
+        <div style={{ padding: '12px 14px', borderRadius: 12, marginBottom: 10, background: 'var(--bg-secondary)', border: '1px solid var(--border-bright)' }}>
           <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: 600, marginBottom: 3 }}>Total Equity</div>
           <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 26, fontWeight: 800, color: 'var(--brown)', letterSpacing: '-0.02em' }}>
             ${totalEquity.toFixed(2)}
@@ -144,7 +144,7 @@ export default function PositionsPanel({ liveMode }: { liveMode: boolean }) {
           ['In Orders',   inOrders > 0            ? `$${inOrders.toFixed(2)}`        : '$0.00', 'var(--amber)'],
           ['Positions',   positionsValue !== null ? `$${positionsValue.toFixed(2)}` : '—', 'var(--green-dark)'],
         ].map(([label, val, col]) => (
-          <div key={label} style={{ padding: '8px 10px', borderRadius: 9, background: 'rgba(255,255,255,0.6)', border: '1px solid var(--border)' }}>
+          <div key={label} style={{ padding: '8px 10px', borderRadius: 9, background: 'var(--bg-card-hover)', border: '1px solid var(--border)' }}>
             <div style={{ fontSize: 8, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>{label}</div>
             <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 13, fontWeight: 800, color: col }}>{val}</div>
           </div>
