@@ -75,6 +75,13 @@ function sentimentLabel(score: number): { text: string; color: string } {
 }
 
 export default function SignalPanel({ probability, sentiment }: SignalPanelProps) {
+  const [sentimentReady, setSentimentReady] = useState(false)
+  useEffect(() => {
+    if (!sentiment) return
+    const id = setTimeout(() => setSentimentReady(true), 120)
+    return () => clearTimeout(id)
+  }, [sentiment])
+
   const rec      = probability?.recommendation ?? 'NO_TRADE'
   const recColor = rec === 'YES' ? 'var(--green)' : rec === 'NO' ? 'var(--blue)' : 'var(--text-muted)'
   const recBg    = rec === 'YES' ? 'var(--green-pale)' : rec === 'NO' ? 'var(--blue-pale)' : 'var(--cream)'
@@ -274,8 +281,6 @@ export default function SignalPanel({ probability, sentiment }: SignalPanelProps
           {(() => {
             const sent = sentimentLabel(sentiment.score)
             const pct  = Math.round(((sentiment.score + 1) / 2) * 100)
-            const [ready, setReady] = useState(false)
-            useEffect(() => { setTimeout(() => setReady(true), 120) }, [])
             return (
               <div style={{ marginBottom: 10 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, alignItems: 'center' }}>
@@ -286,7 +291,7 @@ export default function SignalPanel({ probability, sentiment }: SignalPanelProps
                   <div style={{
                     position: 'absolute', top: -4, width: 16, height: 16, borderRadius: '50%',
                     background: sent.color, border: '3px solid var(--bg-card)',
-                    left: `calc(${ready ? pct : 50}% - 8px)`,
+                    left: `calc(${sentimentReady ? pct : 50}% - 8px)`,
                     transition: 'left 0.7s cubic-bezier(0.34,1.56,0.64,1)',
                     boxShadow: `0 0 8px ${sent.color}80`,
                   }} />
