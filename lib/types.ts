@@ -40,6 +40,15 @@ export interface KalshiOrderbook {
 // [timestamp, low, high, open, close, volume] — Coinbase Exchange format, newest first
 export type OHLCVCandle = [number, number, number, number, number, number]
 
+/** Perpetual futures derivatives signal — funding rate + basis from a public exchange */
+export interface DerivativesSignal {
+  fundingRate: number   // current 8h funding rate; positive = longs pay shorts (bearish pressure)
+  basis: number         // (markPrice - indexPrice) / indexPrice × 100; positive = contango (bullish)
+  markPrice: number
+  indexPrice: number
+  source: string        // e.g. 'bybit'
+}
+
 export interface BTCQuote {
   price: number
   percent_change_1h: number

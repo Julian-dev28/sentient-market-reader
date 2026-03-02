@@ -1,4 +1,4 @@
-import type { AgentResult, SentimentOutput, BTCQuote, KalshiMarket, KalshiOrderbook, OHLCVCandle } from '../types'
+import type { AgentResult, SentimentOutput, BTCQuote, KalshiMarket, KalshiOrderbook, OHLCVCandle, DerivativesSignal } from '../types'
 import { llmToolCall, type AIProvider } from '../llm-client'
 import { callPythonRoma, formatRomaTrace } from '../roma/python-client'
 
@@ -56,7 +56,9 @@ export async function runSentiment(
   romaMode?: string,
   providers?: AIProvider[],  // multi-provider parallel solve
   prevContext?: string,
-  candles?: OHLCVCandle[],
+  candles?: OHLCVCandle[],       // last 12 completed 15-min candles
+  liveCandles?: OHLCVCandle[],   // last 16 × 1-min candles (live window)
+  derivatives?: DerivativesSignal, // perp funding rate + basis
 ): Promise<AgentResult<SentimentOutput>> {
   const start = Date.now()
 
@@ -68,18 +70,40 @@ export async function runSentiment(
     .filter(l => l.price != null && l.delta != null)
     .map(l => `${l.price}¢×${Math.abs(l.delta)}`).join(', ') || 'n/a'
 
+  // Format 1-min live candles — show the current window at 1-min resolution
+  const liveCandleBlock = (() => {
+    if (!liveCandles?.length) return null
+    const ordered = [...liveCandles].reverse() // oldest first
+    const lines = ordered.map((c, i) => {
+      const [, , , open, close, vol] = c
+      const chg    = close - open
+      const chgPct = ((chg / open) * 100).toFixed(3)
+      const dir    = chg >= 0 ? '▲' : '▼'
+      const minsAgo = liveCandles.length - i
+      return `  [−${String(minsAgo).padStart(2)}m]  O:${open.toFixed(0)}  C:${close.toFixed(0)}  Vol:${vol.toFixed(1)}  ${dir}${chgPct}%`
+    })
+    const latest = liveCandles[0]
+    const liveDir = latest[4] >= latest[3] ? 'BULLISH' : 'BEARISH'
+    return `Live window (1-min candles, last ${liveCandles.length} bars, oldest → newest) — current direction: ${liveDir}:\n${lines.join('\n')}`
+  })()
+
+  // Format derivatives signal
+  const derivativesBlock = derivatives ? [
+    `Bybit BTC perp funding rate: ${(derivatives.fundingRate * 100).toFixed(4)}% per 8h — ${derivatives.fundingRate > 0.0001 ? 'positive (longs paying → short-term bearish pressure)' : derivatives.fundingRate < -0.0001 ? 'negative (shorts paying → short-term bullish pressure)' : 'near-zero (balanced positioning)'}`,
+    `Basis (perp mark vs spot index): ${derivatives.basis >= 0 ? '+' : ''}${derivatives.basis.toFixed(4)}% — ${derivatives.basis > 0.02 ? 'contango (futures premium → bullish)' : derivatives.basis < -0.02 ? 'backwardation (futures discount → bearish)' : 'flat (no meaningful futures bias)'}`,
+  ].join('\n') : null
+
   const goal =
     `Assess short-term BTC directional sentiment for this 15-min Kalshi KXBTC15M prediction window. ` +
-    `Evaluate: (1) the last 12 completed 15-min candles — identify trend structure, higher highs/lows ` +
-    `or lower highs/lows, momentum exhaustion or continuation patterns similar to WaveTrend oscillator ` +
-    `signals (overbought/oversold reversals, wave crossovers); ` +
-    `CRITICAL — if the candle data contains a ⚡ CANDLE FLIP ALERT, this means the most recent candle ` +
-    `reversed the prior streak and is a high-priority reversal signal. Do NOT extrapolate the old trend ` +
-    `— instead treat the flip direction as the leading signal and revise your bias accordingly; ` +
-    `(2) does the candle trend align with or oppose BTC's current position vs the strike price? ` +
-    `(3) Kalshi orderbook crowd sentiment skew; ` +
-    `(4) time pressure with ${minutesUntilExpiry.toFixed(1)} min until window close — ` +
-    `with < 5 min remaining, a single candle reversal near the strike is decisive. ` +
+    `Evaluate ALL of the following signals: ` +
+    `(1) 15-min candle trend — structure, higher highs/lows, WaveTrend-style momentum; ` +
+    `CRITICAL: ⚡ CANDLE FLIP ALERT = trend reversal, override prior bias; ` +
+    `(2) 1-min live candles — these show what BTC is doing RIGHT NOW inside the current window; ` +
+    `if 1-min candles show momentum toward or away from strike, weight this heavily vs older 15-min data; ` +
+    `(3) Perp futures signals: funding rate shows positioning pressure (positive = crowded longs = bearish near-term); ` +
+    `basis (contango/backwardation) shows smart money directional lean; ` +
+    `(4) BTC vs strike + Kalshi orderbook skew; ` +
+    `(5) time pressure: ${minutesUntilExpiry.toFixed(1)} min left — with < 5 min, live 1-min momentum is decisive. ` +
     `Produce a directional sentiment score from -1 (strongly bearish) to +1 (strongly bullish).`
 
   const context = [
@@ -94,9 +118,11 @@ export async function runSentiment(
       : 'No active Kalshi market',
     `Orderbook YES depth: ${obYes}`,
     `Orderbook NO depth:  ${obNo}`,
+    derivativesBlock,
+    ...(liveCandles?.length && liveCandleBlock ? [`\n${liveCandleBlock}`] : []),
     ...(candles?.length ? [`\n${formatCandles(candles)}`] : []),
     ...(prevContext ? [`\nPrevious cycle analysis:\n${prevContext}`] : []),
-  ].join('\n')
+  ].filter(Boolean).join('\n')
 
   // Depth controlled by ROMA_MAX_DEPTH env var (default 1). ROMA treats 0 as unlimited — never send 0.
   const maxDepth = Math.max(1, parseInt(process.env.ROMA_MAX_DEPTH ?? '1'))

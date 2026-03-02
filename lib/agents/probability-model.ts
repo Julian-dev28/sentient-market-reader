@@ -1,4 +1,4 @@
-import type { AgentResult, ProbabilityOutput, KalshiMarket, OHLCVCandle } from '../types'
+import type { AgentResult, ProbabilityOutput, KalshiMarket, OHLCVCandle, DerivativesSignal } from '../types'
 import { llmToolCall, type AIProvider } from '../llm-client'
 import { callPythonRoma, formatRomaTrace } from '../roma/python-client'
 
@@ -93,6 +93,8 @@ export async function runProbabilityModel(
   extractionProvider?: AIProvider,  // provider for JSON extraction step (defaults to provider)
   prevContext?: string,
   candles?: OHLCVCandle[],
+  liveCandles?: OHLCVCandle[],
+  derivatives?: DerivativesSignal,
 ): Promise<AgentResult<ProbabilityOutput>> {
   const start = Date.now()
 
@@ -102,6 +104,29 @@ export async function runProbabilityModel(
 
   // Compute quantitative prior from realized volatility + distance + time
   const quantResult = computeQuantPrior(candles, distanceFromStrikePct, minutesUntilExpiry)
+
+  // Format 1-min live candles for context
+  const liveCandleBlock = (() => {
+    if (!liveCandles?.length) return null
+    const ordered = [...liveCandles].reverse()
+    const lines = ordered.map((c, i) => {
+      const [, , , open, close, vol] = c
+      const chg    = close - open
+      const chgPct = ((chg / open) * 100).toFixed(3)
+      const dir    = chg >= 0 ? '▲' : '▼'
+      const minsAgo = liveCandles.length - i
+      return `  [−${String(minsAgo).padStart(2)}m]  O:${open.toFixed(0)}  C:${close.toFixed(0)}  Vol:${vol.toFixed(1)}  ${dir}${chgPct}%`
+    })
+    const latest = liveCandles[0]
+    const liveDir = latest[4] >= latest[3] ? 'BULLISH' : 'BEARISH'
+    return `Live window (1-min candles, ${liveCandles.length} bars, oldest → newest) — current: ${liveDir}:\n${lines.join('\n')}`
+  })()
+
+  // Format derivatives signal
+  const derivativesBlock = derivatives ? [
+    `Bybit perp funding rate: ${(derivatives.fundingRate * 100).toFixed(4)}%/8h — ${derivatives.fundingRate > 0.0001 ? 'positive (crowded longs → bearish pressure)' : derivatives.fundingRate < -0.0001 ? 'negative (crowded shorts → bullish pressure)' : 'neutral'}`,
+    `Basis: ${derivatives.basis >= 0 ? '+' : ''}${derivatives.basis.toFixed(4)}% — ${derivatives.basis > 0.02 ? 'contango (bullish)' : derivatives.basis < -0.02 ? 'backwardation (bearish)' : 'flat'}`,
+  ].join('\n') : null
 
   const context = [
     sentimentScore !== null
@@ -116,24 +141,24 @@ export async function runProbabilityModel(
     `Bid-ask spread: ${(spread * 100).toFixed(1)}¢`,
     `Minimum edge to trade: spread + 2¢ = ${((spread + 0.02) * 100).toFixed(1)}¢`,
     quantResult
-      ? `Quantitative prior P(YES): ${(quantResult.pQuant * 100).toFixed(1)}% — computed from realized vol ${(quantResult.sigmaCandle * 100).toFixed(2)}%/candle, distance ${distSign}${distanceFromStrikePct.toFixed(3)}%, ${minutesUntilExpiry.toFixed(1)} min left. This is a physics-based anchor — your estimate should not diverge by more than 20pp unless you have very strong countervailing signals.`
+      ? `Quantitative prior P(YES): ${(quantResult.pQuant * 100).toFixed(1)}% — physics-based (realized vol ${(quantResult.sigmaCandle * 100).toFixed(2)}%/candle, distance ${distSign}${distanceFromStrikePct.toFixed(3)}%, ${minutesUntilExpiry.toFixed(1)} min left). Your estimate should not diverge >20pp without strong countervailing signals.`
       : null,
+    derivativesBlock,
+    ...(liveCandles?.length && liveCandleBlock ? [`\n${liveCandleBlock}`] : []),
     ...(candles?.length ? [`\n${formatCandles(candles)}`] : []),
     ...(prevContext ? [`\nPrevious cycle analysis:\n${prevContext}`] : []),
   ].filter(Boolean).join('\n')
 
   const goal =
     `Estimate the true probability that BTC ends ABOVE the Kalshi strike at window close. ` +
-    `Factor in: (1) sentiment + momentum signals, (2) current price position vs strike, ` +
-    `(3) candle structure from the last 12 completed 15-min bars — ` +
-    `CRITICAL: if the candle data contains a ⚡ CANDLE FLIP ALERT, this overrides prior trend bias. ` +
-    `A RED→GREEN flip means bullish reversal is underway; GREEN→RED means bearish reversal. ` +
-    `Do NOT extrapolate a streak that has already reversed. ` +
-    `Also apply WaveTrend-style momentum (overbought/oversold, exhaustion vs continuation); ` +
-    `(4) time decay with ${minutesUntilExpiry.toFixed(1)} min left — ` +
-    `when BTC is within 0.3% of strike AND a candle flip just occurred, the probability should ` +
-    `shift significantly toward the flip direction, not stay anchored to the prior streak; ` +
-    `(5) whether model edge vs market-implied ${(pMarket * 100).toFixed(1)}% justifies trading YES, NO, or standing aside.`
+    `Synthesize ALL signals in the context: ` +
+    `(1) Quantitative prior P(YES) — physics-based anchor from vol + distance + time; weight this heavily, especially late in the window; ` +
+    `(2) 1-min live candles — highest recency, shows what price is doing RIGHT NOW inside the current 15-min window; ` +
+    `if live momentum contradicts the 15-min trend, the live signal takes priority near expiry; ` +
+    `(3) Perp derivatives: funding rate (positioning pressure) and basis (contango = bullish, backwardation = bearish); ` +
+    `(4) 15-min candle trend — ⚡ CANDLE FLIP ALERT = reversal, override prior streak extrapolation; ` +
+    `(5) time decay with ${minutesUntilExpiry.toFixed(1)} min left — BTC within 0.3% of strike + flip = decisive shift; ` +
+    `(6) whether final edge vs market-implied ${(pMarket * 100).toFixed(1)}% justifies YES, NO, or NO_TRADE.`
 
   // Depth controlled by ROMA_MAX_DEPTH env var (default 1). ROMA treats 0 as unlimited — never send 0.
   const maxDepth = Math.max(1, parseInt(process.env.ROMA_MAX_DEPTH ?? '1'))

@@ -16,6 +16,7 @@ import type {
   KalshiOrderbook,
   BTCQuote,
   OHLCVCandle,
+  DerivativesSignal,
   AgentResult,
   MarketDiscoveryOutput,
   PriceFeedOutput,
@@ -54,6 +55,8 @@ export async function runAgentPipeline(
   sentModeOverride?: string,   // explicit mode for Sentiment stage (overrides SENT_MODE_MAP)
   probModeOverride?: string,   // explicit mode for Probability stage (overrides romaMode)
   candles?: OHLCVCandle[],     // last 12 completed 15-min candles, newest first
+  liveCandles?: OHLCVCandle[], // last 16 × 1-min candles — intra-window live price action
+  derivatives?: DerivativesSignal | null,  // perp futures funding rate + basis
 ): Promise<PipelineState> {
   const cycleId = ++cycleCounter
   const cycleStartedAt = new Date().toISOString()
@@ -97,6 +100,8 @@ export async function runAgentPipeline(
       sentProviders,
       prevContext,
       candles,
+      liveCandles,
+      derivatives ?? undefined,
     ),
     runProbabilityModel(
       null,   // parallel mode — no sentiment context available yet
@@ -109,6 +114,8 @@ export async function runAgentPipeline(
       provider,   // extraction always on primary (grok) for reliable tool-call JSON
       prevContext,
       candles,
+      liveCandles,
+      derivatives ?? undefined,
     ),
   ])
 
