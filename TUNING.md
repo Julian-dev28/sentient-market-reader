@@ -22,10 +22,10 @@ Sentiment also runs one tier lighter than probability by default.
 
 | Stage | Role | Provider | Model |
 |-------|------|----------|-------|
-| Atomizer | orchestration | openrouter | `gemini-2.5-flash-lite` |
-| Planner | orchestration | openrouter | `gemini-2.5-flash-lite` |
-| Executor ×2 (parallel) | reasoning | openrouter | `gemini-2.5-flash-lite` |
-| Aggregator | reasoning | openrouter | `gemini-2.5-flash-lite` |
+| Atomizer | orchestration | openrouter | `qwen3-8b` |
+| Planner | orchestration | openrouter | `qwen3-8b` |
+| Executor ×2 (parallel) | reasoning | openrouter | `qwen3-8b` |
+| Aggregator | reasoning | openrouter | `qwen3-8b` |
 | Sentiment extraction | JSON parse | grok | `grok-3-mini-fast` |
 | Probability extraction | JSON parse | grok | `grok-3-mini-fast` |
 
@@ -37,10 +37,10 @@ Sentiment also runs one tier lighter than probability by default.
 
 | Stage | Role | Provider | Model |
 |-------|------|----------|-------|
-| Atomizer | orchestration | openrouter | `gemini-2.5-flash-lite` ← blitz orch |
-| Planner | orchestration | openrouter | `gemini-2.5-flash-lite` ← blitz orch |
-| Executor ×2 (parallel) | reasoning | openrouter | `claude-haiku-4-5` |
-| Aggregator | reasoning | openrouter | `claude-haiku-4-5` |
+| Atomizer | orchestration | openrouter | `qwen3-8b` ← blitz orch |
+| Planner | orchestration | openrouter | `qwen3-8b` ← blitz orch |
+| Executor ×2 (parallel) | reasoning | openrouter | `qwen3-14b` |
+| Aggregator | reasoning | openrouter | `qwen3-14b` |
 | Sentiment extraction | JSON parse | grok | `grok-3-mini-fast` |
 | Probability extraction | JSON parse | grok | `grok-3-mini-fast` |
 
@@ -52,14 +52,14 @@ Sentiment also runs one tier lighter than probability by default.
 
 | Stage | Role | Provider | Model |
 |-------|------|----------|-------|
-| Atomizer | orchestration | openrouter | `claude-haiku-4-5` ← sharp orch |
-| Planner | orchestration | openrouter | `claude-haiku-4-5` ← sharp orch |
-| Executor ×2 (parallel) | reasoning | openrouter | `claude-sonnet-4-6` |
-| Aggregator | reasoning | openrouter | `claude-sonnet-4-6` |
+| Atomizer | orchestration | openrouter | `qwen3-14b` ← sharp orch |
+| Planner | orchestration | openrouter | `qwen3-14b` ← sharp orch |
+| Executor ×2 (parallel) | reasoning | openrouter | `qwen3-30b-a3b` |
+| Aggregator | reasoning | openrouter | `qwen3-30b-a3b` |
 | Sentiment extraction | JSON parse | grok | `grok-3-mini-fast` |
 | Probability extraction | JSON parse | grok | `grok-3-mini-fast` |
 
-> Sentiment runs at `sharp` tier (haiku); probability at `keen` (sonnet).
+> Sentiment runs at `sharp` tier (qwen3-14b); probability at `keen` (qwen3-30b-a3b).
 
 ---
 
@@ -67,15 +67,15 @@ Sentiment also runs one tier lighter than probability by default.
 
 | Stage | Role | Provider | Model |
 |-------|------|----------|-------|
-| Atomizer | orchestration | openrouter | `claude-sonnet-4-6` ← keen orch |
-| Planner | orchestration | openrouter | `claude-sonnet-4-6` ← keen orch |
-| Executor ×2 (parallel) | reasoning | openrouter | `claude-sonnet-4-6` |
-| Aggregator | reasoning | openrouter | `claude-sonnet-4-6` |
+| Atomizer | orchestration | openrouter | `qwen3-30b-a3b` ← keen orch |
+| Planner | orchestration | openrouter | `qwen3-30b-a3b` ← keen orch |
+| Executor ×2 (parallel) | reasoning | openrouter | `qwen3-max` |
+| Aggregator | reasoning | openrouter | `qwen3-max` |
 | Sentiment extraction | JSON parse | grok | `grok-3-mini-fast` |
 | Probability extraction | JSON parse | grok | `grok-3-mini-fast` |
 
-> Sentiment runs at `keen` tier (sonnet); probability at `smart` (sonnet).
-> All-Sonnet stack — maximum reasoning depth.
+> Sentiment runs at `keen` tier (qwen3-30b-a3b); probability at `smart` (qwen3-max).
+> All-Qwen stack — maximum reasoning depth.
 
 ---
 
@@ -89,8 +89,8 @@ Sentiment vs Probability tier:
   blitz→blitz/blitz | sharp→sharp/sharp | keen→sharp/keen | smart→keen/smart
 ```
 
-So `keen` mode runs sentiment at `sharp` (haiku) for speed, probability at `keen`
-(sonnet) for quality — the decision-critical stage gets the better model.
+So `keen` mode runs sentiment at `sharp` (qwen3-14b) for speed, probability at `keen`
+(qwen3-30b-a3b) for quality — the decision-critical stage gets the better model.
 
 ---
 
@@ -118,10 +118,10 @@ a model without changing mode logic:
 
 ```
 # OpenRouter (current — AI_PROVIDER2=openrouter)
-OPENROUTER_BLITZ_MODEL=google/gemini-2.5-flash-lite
-OPENROUTER_FAST_MODEL=anthropic/claude-haiku-4-5
-OPENROUTER_MID_MODEL=anthropic/claude-sonnet-4-6
-OPENROUTER_MODEL=anthropic/claude-sonnet-4-6
+OPENROUTER_BLITZ_MODEL=qwen/qwen3-8b          # $0.05/$0.40/M  — fastest blitz
+OPENROUTER_FAST_MODEL=qwen/qwen3-14b          # $0.06/$0.24/M  — sharp tier
+OPENROUTER_MID_MODEL=qwen/qwen3-30b-a3b       # $0.08/$0.28/M  — keen tier (30B MoE)
+OPENROUTER_MODEL=qwen/qwen3-max               # $1.20/$6.00/M  — smart tier
 
 # Grok direct (AI_PROVIDER=grok — extraction only currently)
 GROK_BLITZ_MODEL=grok-3-mini-fast
