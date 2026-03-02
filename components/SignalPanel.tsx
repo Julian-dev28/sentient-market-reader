@@ -137,7 +137,7 @@ export default function SignalPanel({ probability, sentiment }: SignalPanelProps
             {/* Plain-English explanation */}
             <div style={{
               fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5,
-              padding: '8px 10px', borderRadius: 8, background: 'rgba(255,255,255,0.4)',
+              marginTop: 2,
             }}>
               {rec === 'YES' && <>AI thinks BTC will end <strong style={{ color: recColor }}>above the strike</strong> — and the market is underpricing that outcome.</>}
               {rec === 'NO'  && <>AI thinks BTC will end <strong style={{ color: recColor }}>below the strike</strong> — and the market is overpricing the YES side.</>}
