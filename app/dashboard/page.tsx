@@ -11,6 +11,7 @@ import SignalPanel from '@/components/SignalPanel'
 import TradeLog from '@/components/TradeLog'
 import PerformancePanel from '@/components/PerformancePanel'
 import PositionsPanel from '@/components/PositionsPanel'
+import PipelineHistory from '@/components/PipelineHistory'
 
 export default function Home() {
   const [liveMode, setLiveMode]           = useState(false)
@@ -68,7 +69,7 @@ export default function Home() {
   }, [orModelOpen])
 
   const romaMode: string = 'keen'
-  const { pipeline, streamingAgents, trades, isRunning, serverLocked, nextCycleIn, error, stats, runCycle, stopCycle } = usePipeline(
+  const { pipeline, history, streamingAgents, trades, isRunning, serverLocked, nextCycleIn, error, stats, runCycle, stopCycle } = usePipeline(
     liveMode, romaMode, botActive, aiRisk, undefined, undefined, sentMode, probMode, orModel || undefined,
   )
 
@@ -781,6 +782,7 @@ export default function Home() {
 
             <PriceChart priceHistory={priceHistory} strikePrice={strikePrice} currentPrice={currentBTCPrice} />
             <AgentPipeline pipeline={pipeline} isRunning={isRunning} streamingAgents={streamingAgents} />
+            <PipelineHistory history={history} />
           </div>
 
           {/* ─── RIGHT ─── */}
