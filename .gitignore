@@ -46,3 +46,5 @@ python-service/.cache
 python-service/__pycache__/
 **/__pycache__/
 *.pyc
+# Kalshi UI-uploaded credentials (never commit)
+.kalshi-credentials.json
