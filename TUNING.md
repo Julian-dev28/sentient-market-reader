@@ -1,153 +1,137 @@
-# ROMA Pipeline Tuning Guide
+# ROMA Pipeline — Mode & Engine Spec
 
-Four knobs control the speed/quality tradeoff of every pipeline run.
-They interact — understanding all four lets you dial in exactly the
-behaviour you want.
+## Current active config
+
+```
+AI_PROVIDER=grok          → extraction only (fast JSON tool-call, ~1-2s)
+AI_PROVIDER2=openrouter   → ROMA reasoning solves (sentiment + probability, in parallel)
+ROMA_MODE=blitz
+ROMA_MAX_DEPTH=1
+ROMA_BEAM_WIDTH=2
+```
 
 ---
 
-## 1. ROMA_MODE — Analysis quality tier
+## Mode spec — what runs at each ROMA_MODE
 
-```
-ROMA_MODE=blitz | sharp | keen | smart
-```
+Each mode uses a **tiered engine**: executor/aggregator (the reasoning stages) get
+a heavier model; atomizer/planner (orchestration stages) get one tier lighter.
+Sentiment also runs one tier lighter than probability by default.
 
-Sets which model tier the **executor** and **aggregator** agents use
-(the stages that actually reason about the market). The orchestration
-agents (atomizer, planner) automatically run one tier lighter.
+### `blitz` — live trading, speed priority (~45-70s wall time)
 
-| Mode  | Wall time (est.) | Use when |
-|-------|-----------------|----------|
-| blitz | 20–45s          | Live trading window — speed over depth |
-| sharp | 30–60s          | Good balance; reliable intra-window signal |
-| keen  | 45–90s          | Pre-window prep or post-window review |
-| smart | 60–120s         | Deep analysis; model uses most capable models at every stage |
+| Stage | Role | Provider | Model |
+|-------|------|----------|-------|
+| Atomizer | orchestration | openrouter | `gemini-2.5-flash-lite` |
+| Planner | orchestration | openrouter | `gemini-2.5-flash-lite` |
+| Executor ×2 (parallel) | reasoning | openrouter | `gemini-2.5-flash-lite` |
+| Aggregator | reasoning | openrouter | `gemini-2.5-flash-lite` |
+| Sentiment extraction | JSON parse | grok | `grok-3-mini-fast` |
+| Probability extraction | JSON parse | grok | `grok-3-mini-fast` |
 
-The comment next to each model in `.env` shows estimated per-stage
-time. Wall time = max(sentiment, probability) since both run in
-parallel.
+> Sentiment and probability ROMA solves run in parallel (wall time = max of the two).
 
 ---
 
-## 2. ROMA_MAX_DEPTH — Decomposition depth
+### `sharp` — balanced quality/speed (~60-90s)
 
-```
-ROMA_MAX_DEPTH=1   # recommended
-ROMA_MAX_DEPTH=2   # more subtasks, slower, rarely worth it
-```
+| Stage | Role | Provider | Model |
+|-------|------|----------|-------|
+| Atomizer | orchestration | openrouter | `gemini-2.5-flash-lite` ← blitz orch |
+| Planner | orchestration | openrouter | `gemini-2.5-flash-lite` ← blitz orch |
+| Executor ×2 (parallel) | reasoning | openrouter | `claude-haiku-4-5` |
+| Aggregator | reasoning | openrouter | `claude-haiku-4-5` |
+| Sentiment extraction | JSON parse | grok | `grok-3-mini-fast` |
+| Probability extraction | JSON parse | grok | `grok-3-mini-fast` |
 
-Controls how many times ROMA can recursively split a task into
-subtasks. **0 means unlimited — never use 0.**
-
-- **Depth 1**: Atomizer decides atomic vs. one decomposition level.
-  One set of executor calls. Recommended for all live trading.
-- **Depth 2**: Each subtask can itself be split again. Roughly doubles
-  the number of LLM calls and wall time. Only useful for thorough
-  post-session analysis where time doesn't matter.
-
-Depth has compound effects: depth 2 with beam_width 2 = up to 4
-executor calls instead of 2.
+> Sentiment runs at `sharp` tier; probability runs at `sharp` tier (same here).
 
 ---
 
-## 3. ROMA_BEAM_WIDTH — Parallel executor subtasks
+### `keen` — analysis quality (~90-150s)
 
-```
-ROMA_BEAM_WIDTH=2   # default — 2 executor subtasks run in parallel
-ROMA_BEAM_WIDTH=3   # more coverage, ~1.5× cost, same wall time (parallel)
-ROMA_BEAM_WIDTH=1   # fewest tokens; useful when rate-limit constrained
-```
+| Stage | Role | Provider | Model |
+|-------|------|----------|-------|
+| Atomizer | orchestration | openrouter | `claude-haiku-4-5` ← sharp orch |
+| Planner | orchestration | openrouter | `claude-haiku-4-5` ← sharp orch |
+| Executor ×2 (parallel) | reasoning | openrouter | `claude-sonnet-4-6` |
+| Aggregator | reasoning | openrouter | `claude-sonnet-4-6` |
+| Sentiment extraction | JSON parse | grok | `grok-3-mini-fast` |
+| Probability extraction | JSON parse | grok | `grok-3-mini-fast` |
 
-When ROMA decomposes a task, beam_width is the number of subtask
-executor calls it runs simultaneously. Because they're parallel, going
-from 1→2→3 beams barely changes wall time but increases coverage and
-token cost proportionally.
-
-Beam 3 is useful for smart/keen modes where you want the aggregator
-to synthesize more independent analytical threads. For blitz it
-adds cost without much quality gain.
+> Sentiment runs at `sharp` tier (haiku); probability at `keen` (sonnet).
 
 ---
 
-## 4. Model stack — Per-tier provider and model selection
+### `smart` — deep analysis, off live-window (~150-240s)
+
+| Stage | Role | Provider | Model |
+|-------|------|----------|-------|
+| Atomizer | orchestration | openrouter | `claude-sonnet-4-6` ← keen orch |
+| Planner | orchestration | openrouter | `claude-sonnet-4-6` ← keen orch |
+| Executor ×2 (parallel) | reasoning | openrouter | `claude-sonnet-4-6` |
+| Aggregator | reasoning | openrouter | `claude-sonnet-4-6` |
+| Sentiment extraction | JSON parse | grok | `grok-3-mini-fast` |
+| Probability extraction | JSON parse | grok | `grok-3-mini-fast` |
+
+> Sentiment runs at `keen` tier (sonnet); probability at `smart` (sonnet).
+> All-Sonnet stack — maximum reasoning depth.
+
+---
+
+## Tiering rules (hardcoded)
 
 ```
-AI_PROVIDER=grok          # primary: used for extraction (fast, reliable tool-call JSON)
-AI_PROVIDER2=openrouter   # split: both Sentiment + Probability ROMA solves go here
+Orchestration tier (atomizer/planner):
+  blitz→blitz | sharp→blitz | keen→sharp | smart→keen
+
+Sentiment vs Probability tier:
+  blitz→blitz/blitz | sharp→sharp/sharp | keen→sharp/keen | smart→keen/smart
 ```
 
-The **model stack** is the set of models assigned to each tier across
-both providers. It's independent from ROMA_MODE — the mode selects
-*which row* of the stack to use; the stack defines *what's in each row*.
+So `keen` mode runs sentiment at `sharp` (haiku) for speed, probability at `keen`
+(sonnet) for quality — the decision-critical stage gets the better model.
 
-### Current stack (OpenRouter, via AI_PROVIDER2)
+---
 
-| Tier  | Model                          | Why |
-|-------|-------------------------------|-----|
-| blitz | `google/gemini-2.5-flash-lite` | Fastest; handles complex financial context with ChatAdapter; proven ~20-30s/stage |
-| sharp | `anthropic/claude-haiku-4-5`   | Claude quality at low latency; excellent instruction-following |
-| keen  | `anthropic/claude-sonnet-4-6`  | Sonnet reasoning; best quality/speed balance for serious analysis |
-| smart | `anthropic/claude-sonnet-4-6`  | Best available; use for deep review outside live windows |
+## Knobs
 
-### Swapping the stack
+### ROMA_MODE
+Sets which row of the model stack all stages use. Changing this is the primary
+speed/quality dial.
 
-You can mix providers per-tier. Examples:
+### ROMA_MAX_DEPTH
+How many recursive decomposition levels ROMA can apply.
+- `1` — one split (recommended for live trading). Atomizer decides atomic vs. 1 level of subtasks.
+- `2` — subtasks can themselves be split again. ~2× LLM calls, ~2× wall time.
+- Never `0` — treated as unlimited recursion by the SDK.
+
+### ROMA_BEAM_WIDTH
+Number of executor subtasks run in parallel when ROMA decomposes a task.
+- `2` (default) — 2 executor calls run simultaneously, aggregator synthesizes both.
+- `3` — more analytical threads, ~1.5× token cost, same wall time (parallel).
+- `1` — single executor path; useful when rate-limit constrained.
+
+### Model stack
+Which model sits at each tier for each provider. Change the env vars to swap
+a model without changing mode logic:
 
 ```
-# All-Gemini stack (fastest overall, good quality)
+# OpenRouter (current — AI_PROVIDER2=openrouter)
 OPENROUTER_BLITZ_MODEL=google/gemini-2.5-flash-lite
-OPENROUTER_FAST_MODEL=google/gemini-2.5-flash
-OPENROUTER_MID_MODEL=google/gemini-2.5-pro-preview
-OPENROUTER_MODEL=google/gemini-2.5-pro-preview
+OPENROUTER_FAST_MODEL=anthropic/claude-haiku-4-5
+OPENROUTER_MID_MODEL=anthropic/claude-sonnet-4-6
+OPENROUTER_MODEL=anthropic/claude-sonnet-4-6
 
-# All-Grok stack via direct xAI (no OpenRouter overhead)
-# Set AI_PROVIDER2= (empty) and AI_PROVIDER=grok
+# Grok direct (AI_PROVIDER=grok — extraction only currently)
 GROK_BLITZ_MODEL=grok-3-mini-fast
 GROK_FAST_MODEL=grok-3-mini-fast
 GROK_MID_MODEL=grok-3
 GROK_SMART_MODEL=grok-4-0709
 ```
 
-### When to think about the stack vs the mode
-
-- **Change the mode** when you want a consistent speed/quality shift
-  across all calls (blitz for fast live trading, smart for review).
-- **Change the stack** when a specific model is underperforming on a
-  particular analysis type, or when a new model releases that's
-  meaningfully faster or better at financial reasoning.
-- **Mix stacks** when your blitz-tier model is good enough for
-  orchestration (atomizer/planner) but you want a stronger model for
-  the executor/aggregator — that's the tiered config pattern already
-  implemented (analysis_llm vs orchestration_llm in main.py).
-
----
-
-## How the knobs combine
-
-A pipeline call in `blitz` mode with `ROMA_MAX_DEPTH=1` and
-`ROMA_BEAM_WIDTH=2` using the default OpenRouter stack:
-
-```
-Atomizer  [gemini-flash-lite, 900 tok]   →  is it atomic?
-                                              ↓ no
-Planner   [gemini-flash-lite, 1200 tok]  →  split into 2 subtasks
-                                              ↓
-Executor  [gemini-flash-lite, 3000 tok]  ×2 in parallel
-                                              ↓
-Aggregator[gemini-flash-lite, 1500 tok]  →  synthesize
-```
-
-Estimated wall time per solve: ~30-45s.
-Two solves (Sentiment + Probability) run in parallel → total ~45s.
-
-Switching to `keen` mode uses `claude-sonnet-4-6` for the executor
-and aggregator, with `claude-haiku-4-5` for atomizer/planner:
-
-```
-Atomizer  [haiku-4-5,     1000 tok]
-Planner   [haiku-4-5,     1400 tok]
-Executor  [sonnet-4-6,    4000 tok] ×2 parallel
-Aggregator[sonnet-4-6,    2000 tok]
-```
-
-Estimated wall time per solve: ~45-75s. Total ~75s.
+**When to swap the stack vs change the mode:**
+- Swap the stack when a specific model releases or degrades at a given tier.
+- Change the mode when you want a uniform speed/quality shift across the whole pipeline.
+- Mix them: run `keen` mode but swap the keen executor to a faster model to get keen-quality
+  orchestration with faster execution.
