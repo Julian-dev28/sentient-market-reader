@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import type { PipelineState, AgentStatus } from '@/lib/types'
+import type { PipelineState, PartialPipelineAgents, AgentStatus } from '@/lib/types'
 
 // ── ROMA stage definitions ──────────────────────────────────────────────────
 const ROMA_STAGES = [
@@ -288,22 +288,25 @@ function AgentCard({
   agent,
   result,
   index,
+  pipelineRunning,
 }: {
   agent: typeof AGENTS[0]
   result?: PipelineState['agents'][keyof PipelineState['agents']]
   index: number
+  pipelineRunning?: boolean
 }) {
   const status: AgentStatus = result?.status ?? 'idle'
   const done    = status === 'done'
   const skipped = status === 'skipped'
-  const active  = !done && !skipped
+  const pending = pipelineRunning && !done && !skipped  // running but no result yet
+  const active  = !done && !skipped && !pending
 
   return (
     <div style={{
       padding: '18px 18px 16px',
       borderRadius: 12,
-      background: (done || skipped) ? agent.bg : 'rgba(255,255,255,0.5)',
-      border: `1px solid ${(done || skipped) ? agent.border : 'var(--border)'}`,
+      background: (done || skipped) ? agent.bg : pending ? 'var(--bg-secondary)' : 'rgba(255,255,255,0.5)',
+      border: `1px solid ${(done || skipped) ? agent.border : pending ? 'var(--border-bright)' : 'var(--border)'}`,
       position: 'relative', overflow: 'hidden',
       transition: 'background 0.35s, border-color 0.35s, box-shadow 0.35s',
       boxShadow: done ? `0 2px 16px rgba(${agent.rgb},0.1)` : 'none',
@@ -361,6 +364,11 @@ function AgentCard({
       <div style={{ borderTop: `1px solid rgba(${agent.rgb},0.15)`, paddingTop: 10 }}>
         {result ? (
           <AgentBullets agentKey={agent.key} output={result.output} color={agent.color} />
+        ) : pending ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text-muted)' }}>
+            <span style={{ animation: 'spin-slow 1s linear infinite', display: 'inline-block', fontSize: 13 }}>◌</span>
+            running…
+          </div>
         ) : (
           <div style={{ fontSize: 11, color: 'var(--text-light)', fontStyle: 'italic' }}>
             Waiting for pipeline run…
@@ -379,7 +387,15 @@ function AgentCard({
 }
 
 // ── Main export ─────────────────────────────────────────────────────────────
-export default function AgentPipeline({ pipeline, isRunning }: { pipeline: PipelineState | null; isRunning: boolean }) {
+export default function AgentPipeline({
+  pipeline,
+  isRunning,
+  streamingAgents,
+}: {
+  pipeline: PipelineState | null
+  isRunning: boolean
+  streamingAgents?: PartialPipelineAgents
+}) {
   const [elapsedMs, setElapsedMs] = useState(0)
   const startRef = useRef<number | null>(null)
 
@@ -413,9 +429,13 @@ export default function AgentPipeline({ pipeline, isRunning }: { pipeline: Pipel
       </div>
 
       {/* Body */}
-      {isRunning ? (
+      {isRunning && !Object.keys(streamingAgents ?? {}).length ? (
+        // Nothing streamed yet — show animated loader for brief initial period
         <RomaLoader elapsed={elapsedMs} />
-      ) : pipeline ? (
+      ) : (isRunning || pipeline) ? (
+        // Streaming in progress OR cycle complete: show agent cards
+        // During streaming: use streamingAgents for live results, pending state for the rest
+        // After completion: use pipeline.agents for the final authoritative results
         <>
           <div style={{
             display: 'grid',
@@ -423,12 +443,12 @@ export default function AgentPipeline({ pipeline, isRunning }: { pipeline: Pipel
             gap: 12,
           }}>
             {AGENTS.map((agent, i) => {
-              const result = pipeline.agents[agent.key]
-              return <AgentCard key={agent.key} agent={agent} result={result} index={i} />
+              const result = pipeline?.agents[agent.key] ?? streamingAgents?.[agent.key]
+              return <AgentCard key={agent.key} agent={agent} result={result} index={i} pipelineRunning={isRunning} />
             })}
           </div>
 
-          {pipeline.cycleCompletedAt && pipeline.cycleStartedAt && (() => {
+          {pipeline?.cycleCompletedAt && pipeline?.cycleStartedAt && (() => {
             const ms   = new Date(pipeline.cycleCompletedAt!).getTime() - new Date(pipeline.cycleStartedAt).getTime()
             const mins = Math.floor(ms / 60000)
             const secs = Math.floor((ms % 60000) / 1000)
@@ -454,6 +474,7 @@ export default function AgentPipeline({ pipeline, isRunning }: { pipeline: Pipel
           })()}
         </>
       ) : (
+        // No pipeline yet and not running
         <div style={{ padding: '32px 0', textAlign: 'center' }}>
           <div style={{ fontSize: 10, letterSpacing: '0.07em', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 6 }}>// AWAITING</div>
           <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Awaiting first ROMA cycle…</div>

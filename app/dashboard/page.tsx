@@ -27,6 +27,7 @@ export default function Home() {
   const [orModelsLoading, setOrModelsLoading] = useState(false)
   const [orModelSearch, setOrModelSearch]   = useState('')
   const [orModelOpen, setOrModelOpen]       = useState(false)
+  const [orModelCat, setOrModelCat]         = useState<'all'|'fast'|'balanced'|'reasoning'|'large'>('all')
   const orModelRef                          = useRef<HTMLDivElement>(null)
 
   // Sync from localStorage after hydration
@@ -67,7 +68,7 @@ export default function Home() {
   }, [orModelOpen])
 
   const romaMode: string = 'keen'
-  const { pipeline, trades, isRunning, serverLocked, nextCycleIn, error, stats, runCycle, stopCycle } = usePipeline(
+  const { pipeline, streamingAgents, trades, isRunning, serverLocked, nextCycleIn, error, stats, runCycle, stopCycle } = usePipeline(
     liveMode, romaMode, botActive, aiRisk, undefined, undefined, sentMode, probMode, orModel || undefined,
   )
 
@@ -546,9 +547,10 @@ export default function Home() {
                       position: 'absolute', top: '100%', left: 0, marginTop: 4, zIndex: 200,
                       background: 'var(--bg-card)', border: '1px solid var(--border)',
                       borderRadius: 10, boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
-                      width: '100%', minWidth: 280, display: 'flex', flexDirection: 'column',
+                      width: '100%', minWidth: 300, display: 'flex', flexDirection: 'column',
                     }}>
-                      <div style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)' }}>
+                      {/* Search */}
+                      <div style={{ padding: '8px 10px 6px', borderBottom: '1px solid var(--border)' }}>
                         <input
                           autoFocus
                           placeholder={orModelsLoading ? 'Loading models…' : `Search ${orModels.length} models…`}
@@ -561,9 +563,32 @@ export default function Home() {
                             color: 'var(--text-primary)', outline: 'none',
                           }}
                         />
+                        {/* Category chips */}
+                        <div style={{ display: 'flex', gap: 5, marginTop: 7, flexWrap: 'wrap' }}>
+                          {([
+                            { id: 'all',       label: 'All' },
+                            { id: 'fast',      label: 'Fast' },
+                            { id: 'balanced',  label: 'Balanced' },
+                            { id: 'reasoning', label: 'Reasoning' },
+                            { id: 'large',     label: 'Large' },
+                          ] as const).map(cat => (
+                            <button key={cat.id} onClick={() => setOrModelCat(cat.id)}
+                              style={{
+                                padding: '3px 9px', borderRadius: 20, fontSize: 10, fontWeight: 700,
+                                cursor: 'pointer', border: 'none',
+                                background: orModelCat === cat.id ? 'var(--blue)' : 'var(--bg-secondary)',
+                                color: orModelCat === cat.id ? '#fff' : 'var(--text-muted)',
+                                transition: 'all 0.12s',
+                              }}>
+                              {cat.label}
+                            </button>
+                          ))}
+                        </div>
                       </div>
+
+                      {/* Results */}
                       <div style={{ maxHeight: 280, overflowY: 'auto' }}>
-                        {('auto'.includes(orModelSearch.toLowerCase()) || orModelSearch === '') && (
+                        {orModelCat === 'all' && orModelSearch === '' && (
                           <div
                             onClick={() => { handleOrModelChange(''); setOrModelOpen(false) }}
                             style={{
@@ -578,8 +603,24 @@ export default function Home() {
                         )}
                         {(() => {
                           const q = orModelSearch.toLowerCase()
+
+                          function catMatch(id: string, name: string): boolean {
+                            if (orModelCat === 'all') return true
+                            const s = (id + ' ' + name).toLowerCase()
+                            if (orModelCat === 'fast')
+                              return /flash|mini|haiku|scout|fast|lite|small|1\.5b|3b|7b|8b/.test(s)
+                            if (orModelCat === 'reasoning')
+                              return /\br1\b|o3|o4|thinking|qwq|\breasonin|\bdeepseek-r/.test(s)
+                            if (orModelCat === 'large')
+                              return /opus|gpt-4o[^-m]|gpt-4\.5|qwen3-max|\bmax\b|mistral-large|maverick|70b|72b|90b|123b|180b|671b|405b/.test(s)
+                            if (orModelCat === 'balanced')
+                              return !/flash|mini|haiku|scout|fast|lite|small|1\.5b|3b|7b|8b|\br1\b|o3|o4|thinking|qwq|opus|gpt-4o[^-m]|gpt-4\.5|qwen3-max|\bmax\b|mistral-large|maverick|70b|72b|90b|123b|180b|671b|405b/.test(s)
+                            return true
+                          }
+
                           const filtered = orModels.filter(m =>
-                            m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q)
+                            catMatch(m.id, m.name) &&
+                            (q === '' || m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q))
                           )
                           if (!filtered.length && !orModelsLoading) {
                             return <div style={{ padding: '10px 12px', fontSize: 11, color: 'var(--text-muted)' }}>No models found</div>
@@ -739,7 +780,7 @@ export default function Home() {
             </div>
 
             <PriceChart priceHistory={priceHistory} strikePrice={strikePrice} currentPrice={currentBTCPrice} />
-            <AgentPipeline pipeline={pipeline} isRunning={isRunning} />
+            <AgentPipeline pipeline={pipeline} isRunning={isRunning} streamingAgents={streamingAgents} />
           </div>
 
           {/* ─── RIGHT ─── */}
