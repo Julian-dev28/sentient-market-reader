@@ -26,6 +26,7 @@ from pydantic import BaseModel
 from roma_dspy.core.engine.solve import solve, ROMAConfig
 from roma_dspy.resilience.circuit_breaker import module_circuit_breaker
 from roma_dspy.config.schemas.base import RuntimeConfig, LLMConfig
+from roma_dspy.types.adapter_type import AdapterType
 from roma_dspy.config.schemas.agents import AgentConfig, AgentsConfig
 from dotenv import load_dotenv
 
@@ -142,6 +143,8 @@ def build_llm_config(roma_mode: str = "keen", provider_override: Optional[str] =
                 model=f"openrouter/{model}",
                 api_key=api_key,
                 base_url="https://openrouter.ai/api/v1",
+                adapter_type=AdapterType.CHAT,         # force ChatAdapter — JSONAdapter fails on non-grok models via OpenRouter
+                use_native_function_calling=False,      # prevents DSPy from auto-switching to tool-call format
             ),
             f"openrouter/{model}",
         )
@@ -206,28 +209,29 @@ def build_roma_config_tiered(analysis_llm: LLMConfig, orchestration_llm: LLMConf
       Atomizer + Planner  → orchestration_llm (fast/cheap — just task decomposition)
       Executor + Aggregator → analysis_llm (quality model — the actual reasoning)
 
-    Token budgets are tightened for faster modes to reduce generation time:
-      blitz: executor 900, aggregator 900  (fast signal, no essays)
-      sharp: executor 900, aggregator 900
-      keen:  executor 900, aggregator 900 (default)
-      smart: executor 600, aggregator 600
+    Token budgets — just above the truncation point, not so high that generation time blows up:
+      blitz: executor 700,  aggregator 600   (atomic fast signal)
+      sharp: executor 1000, aggregator 800   (~10s/call at 100 tok/s)
+      keen:  executor 1100, aggregator 900
+      smart: executor 1200, aggregator 1000
     """
     _token_budgets = {
-        "blitz": {"executor": 900,  "aggregator": 900},
-        "sharp": {"executor": 900,  "aggregator": 900},
-        "keen":  {"executor": 900,  "aggregator": 900},
-        "smart": {"executor": 600,  "aggregator": 600},
+        "blitz": {"executor": 3000, "aggregator": 1500},
+        "sharp": {"executor": 3500, "aggregator": 1800},
+        "keen":  {"executor": 4000, "aggregator": 2000},
+        "smart": {"executor": 4500, "aggregator": 2500},
     }
     budgets = _token_budgets.get(roma_mode, _token_budgets["keen"])
 
     def make_cfg(llm: LLMConfig, temperature: float, max_tokens: int) -> AgentConfig:
-        return AgentConfig(llm=LLMConfig(
-            model=llm.model,
-            api_key=llm.api_key,
-            base_url=llm.base_url,
-            temperature=temperature,
-            max_tokens=max_tokens,
-        ))
+        import copy as _copy
+        cfg_llm = _copy.copy(llm)
+        try:
+            cfg_llm.temperature = temperature
+            cfg_llm.max_tokens = max_tokens
+        except Exception:
+            pass  # LLMConfig immutable — adapter still set via dspy.context in run_single_solve
+        return AgentConfig(llm=cfg_llm)
 
     # Executor must always emit sources field (Optional in signature but JSONAdapter enforces it)
     executor_cfg = make_cfg(analysis_llm, temperature=0.5, max_tokens=budgets["executor"])
@@ -236,11 +240,20 @@ def build_roma_config_tiered(analysis_llm: LLMConfig, orchestration_llm: LLMConf
         "The 'sources' field is required — if no sources were used, set it to an empty list: []"
     )
 
+    # Orchestration budgets — enough room to avoid truncation without blowing up generation time
+    orch_budgets = {
+        "blitz": {"atomizer": 900,  "planner": 1200},
+        "sharp": {"atomizer": 1000, "planner": 1400},
+        "keen":  {"atomizer": 1000, "planner": 1600},
+        "smart": {"atomizer": 1200, "planner": 2000},
+    }
+    ob = orch_budgets.get(roma_mode, orch_budgets["keen"])
+
     return ROMAConfig(
         runtime=RuntimeConfig(timeout=700),
         agents=AgentsConfig(
-            atomizer=make_cfg(orchestration_llm, temperature=0.1, max_tokens=500),
-            planner=make_cfg(orchestration_llm,  temperature=0.3, max_tokens=1000),
+            atomizer=make_cfg(orchestration_llm, temperature=0.1, max_tokens=ob["atomizer"]),
+            planner=make_cfg(orchestration_llm,  temperature=0.3, max_tokens=ob["planner"]),
             executor=executor_cfg,
             aggregator=make_cfg(analysis_llm,    temperature=0.2, max_tokens=budgets["aggregator"]),
             verifier=make_cfg(orchestration_llm, temperature=0.1, max_tokens=500),
@@ -271,6 +284,7 @@ class AnalyzeRequest(BaseModel):
     goal: str
     context: str
     max_depth: Optional[int] = 1
+    beam_width: Optional[int] = None       # parallel executor beams; None = SDK default (typically 1-2)
     roma_mode: Optional[str] = "keen"      # blitz | sharp | keen | smart — analysis model tier
     orch_mode: Optional[str] = None        # orchestration model tier (atomizer/planner); defaults to one tier below roma_mode
     provider: Optional[str] = None         # overrides AI_PROVIDER env (single-provider support)
@@ -302,10 +316,14 @@ def reset_breakers():
 
 @app.get("/health")
 def health():
+    primary   = os.getenv("AI_PROVIDER", "grok")
+    provider2 = os.getenv("AI_PROVIDER2", "")
+    roma_mode = os.getenv("ROMA_MODE", "keen")
     return {
         "status": "ok",
-        "provider": _provider_label,
-        "model": _provider_label if _llm_config else "unconfigured",
+        "provider": primary,
+        "provider2": provider2 or None,
+        "roma_mode": roma_mode,
         "sdk": "roma-dspy",
     }
 
@@ -344,12 +362,35 @@ def analyze(req: AnalyzeRequest):
 Market context:
 {req.context}"""
 
+    # beam_width: how many parallel executor subtasks ROMA runs simultaneously
+    # Higher = more parallelism, more tokens, faster wall-time for multi-subtask goals
+    beam_width = req.beam_width or int(os.getenv("ROMA_BEAM_WIDTH", "2"))
+
     def run_single_solve(prov: str) -> tuple[str, object]:
         """Run one ROMA solve for a given provider; returns (provider_label, result)."""
         a_llm, p_label = build_llm_config(roma_mode, prov)
         o_llm, _       = build_llm_config(orch_mode, prov)
         cfg = build_roma_config_tiered(a_llm, o_llm, roma_mode)
-        return p_label, solve(full_prompt, max_depth=req.max_depth, config=cfg)
+        solve_kwargs: dict = {"max_depth": req.max_depth, "config": cfg}
+
+        # For OpenRouter, force ChatAdapter at the DSPy global level for the entire solve.
+        # Per-agent adapter_type config alone isn't enough — context propagation through
+        # ROMA's async retry decorators loses the per-agent setting. Wrapping the full
+        # solve() in dspy.context(adapter=ChatAdapter()) ensures all predictor calls
+        # inside this solve use the text-format adapter, preventing JSONAdapter parse errors.
+        use_chat_adapter = prov == "openrouter"
+        ctx_adapter = dspy.ChatAdapter() if use_chat_adapter else None
+
+        def _solve():
+            try:
+                return solve(full_prompt, beam_width=beam_width, **solve_kwargs)
+            except TypeError:
+                return solve(full_prompt, **solve_kwargs)
+
+        if ctx_adapter is not None:
+            with dspy.context(adapter=ctx_adapter):
+                return p_label, _solve()
+        return p_label, _solve()
 
     def extract_answer(result: object) -> tuple[str, bool, list]:
         """Extract answer string, was_atomic flag, and subtasks from a solve result."""

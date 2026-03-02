@@ -59,6 +59,7 @@ export async function runSentiment(
   candles?: OHLCVCandle[],       // last 12 completed 15-min candles
   liveCandles?: OHLCVCandle[],   // last 16 × 1-min candles (live window)
   derivatives?: DerivativesSignal, // perp funding rate + basis
+  extractionProvider?: AIProvider, // provider for JSON extraction step (defaults to provider)
 ): Promise<AgentResult<SentimentOutput>> {
   const start = Date.now()
 
@@ -138,7 +139,7 @@ export async function runSentiment(
     orderbookSkew: number
     signals: string[]
   }>({
-    provider,
+    provider: extractionProvider ?? provider,
     tier: 'fast',
     maxTokens: romaMode === 'blitz' ? 256 : 512,
     toolName: 'output_sentiment',
