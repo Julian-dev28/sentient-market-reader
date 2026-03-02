@@ -11,8 +11,10 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
+    "appwrite": "^22.4.1",
     "lucide-react": "^0.575.0",
     "next": "16.1.6",
+    "node-appwrite": "^22.1.2",
     "openai": "^6.25.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
