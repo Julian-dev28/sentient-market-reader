@@ -80,13 +80,16 @@ export async function runAgentPipeline(
   const pfResult = runPriceFeed(quote, mdResult.output.strikePrice)
 
   const probProvider = provider2 ?? provider
+  // When provider2 is set, route BOTH sentiment and probability through it so both
+  // parallel stages hit different API rate-limit pools → wall time = max(sent, prob).
+  // Primary provider (grok) is preserved for JSON extraction in both agents.
+  const sentProvider = provider2 ?? provider
   const sentProviders = providers && providers.length > 1 ? providers : undefined
 
   // ── Stages 3 + 4: Sentiment + Probability in parallel ─────────────────
-  // When provider2 is set (e.g. openrouter), each solve hits a different API
-  // pool — wall time drops from ~60s to ~30s (both solves run simultaneously).
-  // Probability runs without sentiment context when parallel; it reasons
-  // directly from BTC position, time decay, and market odds instead.
+  // Both solves run on the split provider (openrouter) simultaneously.
+  // Extraction (JSON parsing) stays on the primary provider for reliability.
+  // Wall time = max(sentimentMs, probabilityMs) instead of sent + prob.
   const [sentResult, probResult] = await Promise.all([
     runSentiment(
       quote,
@@ -95,13 +98,14 @@ export async function runAgentPipeline(
       mdResult.output.minutesUntilExpiry,
       mdResult.output.activeMarket,
       orderbook,
-      provider,
+      sentProvider,
       sentMode,
       sentProviders,
       prevContext,
       candles,
       liveCandles,
       derivatives ?? undefined,
+      provider,  // extractionProvider — always primary (grok) for reliable tool-call JSON
     ),
     runProbabilityModel(
       null,   // parallel mode — no sentiment context available yet
