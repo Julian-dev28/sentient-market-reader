@@ -48,7 +48,7 @@ app.add_middleware(
 
 # ── LLM configuration ────────────────────────────────────────────────────────
 
-def build_llm_config(roma_mode: str = "keen", provider_override: Optional[str] = None) -> tuple[LLMConfig, str]:
+def build_llm_config(roma_mode: str = "keen", provider_override: Optional[str] = None, model_override: Optional[str] = None) -> tuple[LLMConfig, str]:
     """
     Build an LLMConfig from environment variables.
     Mirrors the TypeScript llm-client providers exactly:
@@ -130,7 +130,9 @@ def build_llm_config(roma_mode: str = "keen", provider_override: Optional[str] =
         api_key = os.getenv("OPENROUTER_API_KEY")
         if not api_key:
             raise ValueError("OPENROUTER_API_KEY not set")
-        if roma_mode == "blitz":
+        if model_override:
+            model = model_override
+        elif roma_mode == "blitz":
             model = os.getenv("OPENROUTER_BLITZ_MODEL", os.getenv("OPENROUTER_MODEL", "x-ai/grok-3-mini"))
         elif roma_mode == "sharp":
             model = os.getenv("OPENROUTER_FAST_MODEL",  os.getenv("OPENROUTER_MODEL", "x-ai/grok-3-mini"))
@@ -289,6 +291,7 @@ class AnalyzeRequest(BaseModel):
     orch_mode: Optional[str] = None        # orchestration model tier (atomizer/planner); defaults to one tier below roma_mode
     provider: Optional[str] = None         # overrides AI_PROVIDER env (single-provider support)
     providers: Optional[list[str]] = None  # multi-provider parallel solve — runs each provider simultaneously and merges answers
+    model_override: Optional[str] = None   # override specific model ID for openrouter provider (e.g. "google/gemini-2.5-pro")
 
 
 class SubtaskResult(BaseModel):
@@ -368,7 +371,7 @@ Market context:
 
     def run_single_solve(prov: str) -> tuple[str, object]:
         """Run one ROMA solve for a given provider; returns (provider_label, result)."""
-        a_llm, p_label = build_llm_config(roma_mode, prov)
+        a_llm, p_label = build_llm_config(roma_mode, prov, req.model_override)
         o_llm, _       = build_llm_config(orch_mode, prov)
         cfg = build_roma_config_tiered(a_llm, o_llm, roma_mode)
         solve_kwargs: dict = {"max_depth": req.max_depth, "config": cfg}

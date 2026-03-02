@@ -34,6 +34,7 @@ export async function callPythonRoma(
   modeOverride?: string,
   provider?: string,
   providers?: string[],
+  modelOverride?: string,  // override the model used by the python service (openrouter only)
 ): Promise<PythonRomaResponse> {
   const romaMode = modeOverride ?? process.env.ROMA_MODE ?? 'smart'
   const beamWidth = parseInt(process.env.ROMA_BEAM_WIDTH ?? '2')
@@ -43,6 +44,7 @@ export async function callPythonRoma(
       const body: Record<string, unknown> = { goal, context, max_depth: maxDepth, beam_width: beamWidth, roma_mode: romaMode }
       if (providers && providers.length > 0) body.providers = providers
       else if (provider) body.provider = provider
+      if (modelOverride) body.model_override = modelOverride
       const res = await fetch(`${PYTHON_ROMA_URL}/analyze`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

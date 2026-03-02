@@ -22,12 +22,16 @@ export default function Home() {
   const [aiRisk, setAiRisk]                 = useState(false)
   const [sentMode, setSentMode]             = useState<string | undefined>(undefined)
   const [probMode, setProbMode]             = useState<string | undefined>(undefined)
+  const [orModel, setOrModel]               = useState<string>('')
+  const [showSettings, setShowSettings]     = useState(false)
 
   // Sync from localStorage after hydration (client-only)
   useEffect(() => {
     if (localStorage.getItem('sentient-live-mode') === 'true') setLiveMode(true)
     const m = localStorage.getItem('sentient-roma-mode')
     if (m === 'blitz' || m === 'sharp' || m === 'keen' || m === 'smart') setRomaMode(m)
+    const om = localStorage.getItem('sentient-or-model')
+    if (om) setOrModel(om)
   }, [])
 
   function handleModeChange(m: 'blitz' | 'sharp' | 'keen' | 'smart') {
@@ -35,8 +39,14 @@ export default function Home() {
     localStorage.setItem('sentient-roma-mode', m)
   }
 
+  function handleOrModelChange(m: string) {
+    setOrModel(m)
+    if (m) localStorage.setItem('sentient-or-model', m)
+    else localStorage.removeItem('sentient-or-model')
+  }
+
   const { pipeline, trades, isRunning, serverLocked, nextCycleIn, error, stats, runCycle, stopCycle } = usePipeline(
-    liveMode, romaMode, botActive, aiRisk, undefined, undefined, sentMode, probMode,
+    liveMode, romaMode, botActive, aiRisk, undefined, undefined, sentMode, probMode, orModel || undefined,
   )
 
   // ── Trade alert pop-up ─────────────────────────────────────────────────────
@@ -474,130 +484,203 @@ export default function Home() {
           {/* ─── CENTER ─── */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
 
-            {/* ── Row 1: description ── */}
-            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-              5-min cycles · 3 signals per 15-min window · CF Benchmarks settlement
-            </div>
+            {/* ── Control bar: mode + gear + run + expiry ── */}
+            <div style={{ position: 'relative' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
 
-            {/* ── Row 2: AI Risk + mode selector + stage overrides + expiry + run ── */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              {/* AI Risk checkbox */}
-              <label style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontSize: 11, fontWeight: 700, color: aiRisk ? 'var(--brown)' : 'var(--text-muted)', userSelect: 'none' }}
-                title="Use ROMA AI risk manager instead of deterministic Kelly + limits">
-                <input
-                  type="checkbox"
-                  checked={aiRisk}
-                  onChange={e => setAiRisk(e.target.checked)}
-                  style={{ accentColor: 'var(--brown)', width: 13, height: 13, cursor: 'pointer' }}
-                />
-                AI Risk
-              </label>
+                {/* ROMA mode selector */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 3, background: 'var(--bg-secondary)', borderRadius: 9, padding: '3px 4px', border: '1px solid var(--border)' }}>
+                  {(['blitz', 'sharp', 'keen', 'smart'] as const).map(m => (
+                    <button key={m} onClick={() => handleModeChange(m)}
+                      title={m === 'blitz' ? '~30s' : m === 'sharp' ? '~60s' : m === 'keen' ? '~90s' : '~2 min'}
+                      style={{
+                        padding: '5px 14px', borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                        border: romaMode === m ? '1px solid var(--brown)' : '1px solid transparent',
+                        background: romaMode === m ? 'var(--brown)' : 'transparent',
+                        color: romaMode === m ? '#fff' : 'var(--text-muted)',
+                        transition: 'all 0.15s', textTransform: 'capitalize',
+                      }}>
+                      {m}
+                    </button>
+                  ))}
+                </div>
 
-              {/* ROMA mode selector */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'var(--bg-secondary)', borderRadius: 10, padding: '4px 5px', border: '1px solid var(--border)' }}>
-                {(['blitz', 'sharp', 'keen', 'smart'] as const).map(m => (
-                  <button key={m} onClick={() => handleModeChange(m)}
-                    title={m === 'blitz' ? 'grok-4-1-fast-non-reasoning (~30–60s)' : m === 'sharp' ? 'grok-3-mini-fast (~1–2 min)' : m === 'keen' ? 'grok-3 (~1–3 min)' : 'grok-4-0709 (~1–3 min, highest quality)'}
+                {/* Settings gear */}
+                <button
+                  onClick={() => setShowSettings(v => !v)}
+                  title="Advanced settings"
+                  style={{
+                    width: 30, height: 30, borderRadius: 7, cursor: 'pointer',
+                    border: showSettings ? '1px solid var(--brown)' : '1px solid var(--border)',
+                    background: showSettings ? 'var(--brown-pale)' : 'var(--bg-secondary)',
+                    color: showSettings ? 'var(--brown)' : 'var(--text-muted)',
+                    fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    transition: 'all 0.15s',
+                  }}>
+                  ⚙
+                </button>
+
+                {/* Run / Stop + expiry — pushed right */}
+                <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <button
+                    onClick={isRunning ? stopCycle : (serverLocked ? undefined : () => {
+                      if (secondsUntilExpiry > 0 && secondsUntilExpiry < 120) {
+                        setShowLateWarning(true)
+                      } else {
+                        runCycle()
+                      }
+                    })}
+                    disabled={serverLocked && !isRunning}
                     style={{
-                      padding: '6px 16px', borderRadius: 7, fontSize: 13, fontWeight: 700, cursor: 'pointer',
-                      border: romaMode === m ? '1px solid var(--brown)' : '1px solid transparent',
-                      background: romaMode === m ? 'var(--brown)' : 'transparent',
-                      color: romaMode === m ? '#fff' : 'var(--text-muted)',
-                      transition: 'all 0.15s', textTransform: 'capitalize',
-                    }}>
-                    {m}
+                      padding: '7px 20px', borderRadius: 9, background: 'transparent',
+                      border: isRunning ? '1.5px solid var(--pink)' : serverLocked ? '1.5px solid var(--border)' : '1.5px solid var(--green)',
+                      color: isRunning ? 'var(--pink)' : serverLocked ? 'var(--text-muted)' : 'var(--green-dark)',
+                      cursor: isRunning ? 'pointer' : serverLocked ? 'not-allowed' : 'pointer',
+                      fontSize: 12, fontWeight: 700,
+                      display: 'flex', alignItems: 'center', gap: 6,
+                      transition: 'all 0.2s', letterSpacing: '0.02em',
+                    }}
+                  >
+                    {isRunning
+                      ? <><span>■</span> Stop</>
+                      : serverLocked
+                      ? <><span style={{ animation: 'spin-slow 1s linear infinite', display: 'inline-block' }}>◌</span> Running...</>
+                      : '▶ Run Cycle'}
                   </button>
-                ))}
+
+                  {secondsUntilExpiry > 0 && (() => {
+                    const m = Math.floor(secondsUntilExpiry / 60)
+                    const s = secondsUntilExpiry % 60
+                    const urgent = secondsUntilExpiry < 120
+                    const color  = secondsUntilExpiry < 60 ? 'var(--pink)' : secondsUntilExpiry < 120 ? 'var(--amber)' : 'var(--green-dark)'
+                    return (
+                      <div style={{
+                        display: 'flex', alignItems: 'center', gap: 5,
+                        padding: '5px 10px', borderRadius: 8,
+                        background: urgent ? 'var(--pink-pale)' : 'var(--bg-secondary)',
+                        border: `1px solid ${urgent ? '#3a1020' : 'var(--border)'}`,
+                      }}>
+                        <span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Exp</span>
+                        <span style={{
+                          fontFamily: 'var(--font-geist-mono)', fontSize: 14, fontWeight: 800, color,
+                          animation: urgent ? 'urgentPulse 1s ease infinite' : 'none',
+                        }}>
+                          {m}:{String(s).padStart(2, '0')}
+                        </span>
+                      </div>
+                    )
+                  })()}
+                </div>
               </div>
 
-              {/* Per-stage mode overrides */}
-              {(['sent', 'prob'] as const).map(stage => {
-                const val    = stage === 'sent' ? sentMode : probMode
-                const setVal = stage === 'sent' ? setSentMode : setProbMode
-                return (
-                  <div key={stage} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                      {stage === 'sent' ? 'Sent' : 'Prob'}
-                    </span>
-                    <select
-                      value={val ?? ''}
-                      onChange={e => setVal(e.target.value || undefined)}
-                      title={stage === 'sent' ? 'Sentiment stage model tier (auto = one tier below Prob)' : 'Probability stage model tier (auto = matches main mode)'}
+              {/* Settings dropdown */}
+              {showSettings && (
+                <div className="animate-fade-in" style={{
+                  position: 'absolute', top: '100%', left: 0, marginTop: 6, zIndex: 50,
+                  background: 'var(--bg-card)', border: '1px solid var(--border)',
+                  borderRadius: 12, padding: '16px 18px',
+                  display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap',
+                  boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+                }}>
+                  {/* AI Risk */}
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 11, fontWeight: 700, color: aiRisk ? 'var(--brown)' : 'var(--text-muted)', userSelect: 'none' }}
+                    title="Use ROMA AI risk manager instead of deterministic Kelly + limits">
+                    <input type="checkbox" checked={aiRisk} onChange={e => setAiRisk(e.target.checked)}
+                      style={{ accentColor: 'var(--brown)', width: 13, height: 13, cursor: 'pointer' }} />
+                    AI Risk
+                  </label>
+
+                  <div style={{ width: 1, height: 20, background: 'var(--border)' }} />
+
+                  {/* SENT + PROB overrides */}
+                  {(['sent', 'prob'] as const).map(stage => {
+                    const val    = stage === 'sent' ? sentMode : probMode
+                    const setVal = stage === 'sent' ? setSentMode : setProbMode
+                    return (
+                      <div key={stage} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                        <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                          {stage === 'sent' ? 'Sent' : 'Prob'}
+                        </span>
+                        <select value={val ?? ''} onChange={e => setVal(e.target.value || undefined)}
+                          style={{
+                            fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                            padding: '4px 6px', borderRadius: 6,
+                            border: val ? '1px solid var(--brown)' : '1px solid var(--border)',
+                            background: 'var(--bg-secondary)',
+                            color: val ? 'var(--brown)' : 'var(--text-muted)',
+                            outline: 'none',
+                          }}>
+                          <option value="">auto</option>
+                          <option value="blitz">blitz</option>
+                          <option value="sharp">sharp</option>
+                          <option value="keen">keen</option>
+                          <option value="smart">smart</option>
+                        </select>
+                      </div>
+                    )
+                  })}
+
+                  <div style={{ width: 1, height: 20, background: 'var(--border)' }} />
+
+                  {/* OR Model */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em' }}>OR Model</span>
+                    <select value={orModel} onChange={e => handleOrModelChange(e.target.value)}
                       style={{
                         fontSize: 11, fontWeight: 600, cursor: 'pointer',
-                        padding: '5px 6px', borderRadius: 7,
-                        border: val ? '1px solid var(--brown)' : '1px solid var(--border)',
-                        background: val ? 'var(--cream)' : 'var(--bg-secondary)',
-                        color: val ? 'var(--brown)' : 'var(--text-muted)',
+                        padding: '4px 6px', borderRadius: 6,
+                        border: orModel ? '1px solid var(--blue)' : '1px solid var(--border)',
+                        background: 'var(--bg-secondary)',
+                        color: orModel ? 'var(--blue-dark)' : 'var(--text-muted)',
                         outline: 'none',
-                      }}
-                    >
+                      }}>
                       <option value="">auto</option>
-                      <option value="blitz">blitz</option>
-                      <option value="sharp">sharp</option>
-                      <option value="keen">keen</option>
-                      <option value="smart">smart</option>
+                      <optgroup label="── Google ──">
+                        <option value="google/gemini-2.5-flash">Gemini 2.5 Flash ⚡</option>
+                        <option value="google/gemini-2.5-pro">Gemini 2.5 Pro</option>
+                        <option value="google/gemini-2.0-flash-001">Gemini 2.0 Flash</option>
+                      </optgroup>
+                      <optgroup label="── Anthropic ──">
+                        <option value="anthropic/claude-opus-4-5">Claude Opus 4.5</option>
+                        <option value="anthropic/claude-sonnet-4-5">Claude Sonnet 4.5</option>
+                        <option value="anthropic/claude-sonnet-4-6">Claude Sonnet 4.6</option>
+                        <option value="anthropic/claude-haiku-4-5-20251001">Claude Haiku 4.5</option>
+                      </optgroup>
+                      <optgroup label="── OpenAI ──">
+                        <option value="openai/o4-mini">o4-mini (reasoning)</option>
+                        <option value="openai/o3-mini">o3-mini (reasoning)</option>
+                        <option value="openai/gpt-4o">GPT-4o</option>
+                        <option value="openai/gpt-4o-mini">GPT-4o Mini</option>
+                      </optgroup>
+                      <optgroup label="── xAI ──">
+                        <option value="x-ai/grok-3">Grok-3</option>
+                        <option value="x-ai/grok-3-mini">Grok-3 Mini (reasoning)</option>
+                        <option value="x-ai/grok-3-mini-fast">Grok-3 Mini Fast</option>
+                      </optgroup>
+                      <optgroup label="── DeepSeek ──">
+                        <option value="deepseek/deepseek-r1">DeepSeek R1 (reasoning)</option>
+                        <option value="deepseek/deepseek-r1-distill-qwen-32b">DeepSeek R1 32B</option>
+                        <option value="deepseek/deepseek-chat-v3-5">DeepSeek V3.5</option>
+                      </optgroup>
+                      <optgroup label="── Meta ──">
+                        <option value="meta-llama/llama-4-maverick">Llama 4 Maverick</option>
+                        <option value="meta-llama/llama-4-scout">Llama 4 Scout</option>
+                        <option value="meta-llama/llama-3.3-70b-instruct">Llama 3.3 70B</option>
+                      </optgroup>
+                      <optgroup label="── Qwen ──">
+                        <option value="qwen/qwen3-max">Qwen3 Max</option>
+                        <option value="qwen/qwen3-30b-a3b">Qwen3 30B MoE</option>
+                        <option value="qwen/qwen3-14b">Qwen3 14B</option>
+                        <option value="qwen/qwq-32b">QwQ 32B (reasoning)</option>
+                      </optgroup>
+                      <optgroup label="── Mistral ──">
+                        <option value="mistralai/mistral-large-2411">Mistral Large</option>
+                        <option value="mistralai/mixtral-8x22b-instruct">Mixtral 8x22B</option>
+                      </optgroup>
                     </select>
                   </div>
-                )
-              })}
-
-              {/* Run Cycle + expiry pushed to right */}
-              <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
-              {/* Run Cycle button */}
-              <button
-                onClick={isRunning ? stopCycle : (serverLocked ? undefined : () => {
-                  if (secondsUntilExpiry > 0 && secondsUntilExpiry < 120) {
-                    setShowLateWarning(true)
-                  } else {
-                    runCycle()
-                  }
-                })}
-                disabled={serverLocked && !isRunning}
-                title={serverLocked && !isRunning ? 'Pipeline already running on server' : undefined}
-                style={{
-                  padding: '7px 20px', borderRadius: 9,
-                  background: 'transparent',
-                  border: isRunning ? '1.5px solid var(--pink)' : serverLocked ? '1.5px solid var(--border)' : '1.5px solid var(--green)',
-                  color: isRunning ? 'var(--pink)' : serverLocked ? 'var(--text-muted)' : 'var(--green-dark)',
-                  cursor: isRunning ? 'pointer' : serverLocked ? 'not-allowed' : 'pointer',
-                  fontSize: 12, fontWeight: 700,
-                  display: 'flex', alignItems: 'center', gap: 6,
-                  transition: 'all 0.2s', letterSpacing: '0.02em',
-                }}
-              >
-                {isRunning
-                  ? <><span style={{ display: 'inline-block' }}>■</span> Stop</>
-                  : serverLocked
-                  ? <><span style={{ animation: 'spin-slow 1s linear infinite', display: 'inline-block' }}>◌</span> Running...</>
-                  : '▶ Run Cycle'}
-              </button>
-
-              {/* Expiry countdown */}
-              {secondsUntilExpiry > 0 && (() => {
-                const m = Math.floor(secondsUntilExpiry / 60)
-                const s = secondsUntilExpiry % 60
-                const urgent = secondsUntilExpiry < 120
-                const color  = secondsUntilExpiry < 60 ? 'var(--pink)' : secondsUntilExpiry < 120 ? 'var(--amber)' : 'var(--green-dark)'
-                return (
-                  <div style={{
-                    display: 'flex', alignItems: 'center', gap: 5,
-                    padding: '5px 10px', borderRadius: 8,
-                    background: urgent ? 'var(--pink-pale)' : 'var(--bg-secondary)',
-                    border: `1px solid ${urgent ? '#e0b0bf' : 'var(--border)'}`,
-                  }}>
-                    <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Exp</span>
-                    <span style={{
-                      fontFamily: 'var(--font-geist-mono)', fontSize: 14, fontWeight: 800, color,
-                      animation: urgent ? 'urgentPulse 1s ease infinite' : 'none',
-                      letterSpacing: '-0.01em',
-                    }}>
-                      {m}:{String(s).padStart(2, '0')}
-                    </span>
-                  </div>
-                )
-              })()}
-              </div>
+                </div>
+              )}
             </div>
 
             <PriceChart priceHistory={priceHistory} strikePrice={strikePrice} currentPrice={currentBTCPrice} />
