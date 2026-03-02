@@ -55,6 +55,7 @@ export function usePipeline(
   orModel?: string,      // override OpenRouter model ID for sentiment + probability
 ) {
   const [pipeline, setPipeline]           = useState<PipelineState | null>(null)
+  const [history, setHistory]             = useState<PipelineState[]>([])
   const [streamingAgents, setStreamingAgents] = useState<PartialPipelineAgents>({})
   const [trades, setTrades]               = useState<TradeRecord[]>([])
   const [isRunning, setIsRunning]         = useState(false)
@@ -133,6 +134,7 @@ export function usePipeline(
 
       if (!data) throw new Error('Pipeline stream ended without result')
       setPipeline(data)
+      setHistory(prev => [data, ...prev])
 
       const exec = data.agents.execution.output
       const md   = data.agents.marketDiscovery.output
@@ -242,5 +244,5 @@ export function usePipeline(
 
   const stats = computeStats(trades)
 
-  return { pipeline, streamingAgents, trades, isRunning, serverLocked, nextCycleIn, error, stats, runCycle, stopCycle }
+  return { pipeline, history, streamingAgents, trades, isRunning, serverLocked, nextCycleIn, error, stats, runCycle, stopCycle }
 }
