@@ -52,6 +52,11 @@ export async function GET(req: NextRequest) {
   const p = process.env.AI_PROVIDER ?? 'grok'
   const validProviders = ['anthropic', 'openai', 'grok', 'openrouter', 'huggingface'] as const
   const provider: AIProvider = (validProviders as readonly string[]).includes(p) ? p as AIProvider : 'grok'
+
+  // ── Data-fetching phase (before stream starts) ──────────────────────────
+  // Any errors here return a plain HTTP response. Once we start the SSE stream,
+  // errors are sent as SSE events and the lock is released in the stream's finally.
+  let streamStarted = false
   try {
     // Try to fetch the currently active market using computed event_ticker
     let markets: KalshiMarket[] = []
@@ -64,13 +69,10 @@ export async function GET(req: NextRequest) {
     ).catch(() => null)
 
     // Accept markets that Kalshi considers 'active' and have live bid/ask pricing.
-    // Avoid yes_ask price range filtering — it rejects valid markets at the start
-    // (yes_ask=0 while initialized) and near close (yes_ask=98/99 in final seconds).
-    // Kalshi's own `status` field is the authoritative signal.
     const now = Date.now()
     const isTradeable = (m: KalshiMarket) =>
       m.status === 'active' &&
-      m.yes_ask > 0 &&   // must have live pricing (0 = not yet priced)
+      m.yes_ask > 0 &&
       (m.close_time ? new Date(m.close_time).getTime() > now : true)
 
     if (eventRes?.ok) {
@@ -95,10 +97,9 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'No active KXBTC15M markets found' }, { status: 503 })
     }
 
-    // Fetch BTC price — Coinbase primary, CMC fallback
+    // Fetch BTC price — Coinbase primary, fallbacks
     let quote: BTCQuote | null = null
 
-    // ── Primary: Coinbase ────────────────────────────────────────────────────
     const cbRes = await fetch('https://api.coinbase.com/v2/prices/BTC-USD/spot', { cache: 'no-store' }).catch(() => null)
     if (cbRes?.ok) {
       const cb = await cbRes.json()
@@ -106,7 +107,6 @@ export async function GET(req: NextRequest) {
       if (price > 0) quote = { price, percent_change_1h: 0, percent_change_24h: 0, volume_24h: 0, market_cap: price * 19_700_000, last_updated: new Date().toISOString() }
     }
 
-    // ── Fallback: CoinGecko (includes 24h change) ────────────────────────────
     if (!quote) {
       const cgRes = await fetch(
         'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd&include_24hr_change=true',
@@ -119,7 +119,6 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // ── Fallback 2: Jupiter DEX (wBTC on Solana) ─────────────────────────────
     if (!quote) {
       const jupKey = process.env.JUPITER_API_KEY
       if (jupKey) {
@@ -139,105 +138,110 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'BTC price unavailable — all sources failed' }, { status: 503 })
     }
 
-    // Fetch last 13 × 15-min candles (newest first) — Coinbase Exchange public API
-    // granularity=900s = 15 min. Fetch 13, use 12 (drop the still-open current candle).
+    // Fetch candles, live candles, derivatives, orderbook in parallel
+    const [candleRes, liveCandleRes, bybitRes, obRes] = await Promise.all([
+      fetch('https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=900&limit=13', { cache: 'no-store' }).catch(() => null),
+      fetch('https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=60&limit=16', { cache: 'no-store' }).catch(() => null),
+      fetch('https://api.bybit.com/v5/market/tickers?category=linear&symbol=BTCUSDT', { cache: 'no-store' }).catch(() => null),
+      fetch(`https://api.elections.kalshi.com/trade-api/v2/markets/${markets[0].ticker}/orderbook`, {
+        headers: { ...buildKalshiHeaders('GET', `/trade-api/v2/markets/${markets[0].ticker}/orderbook`), Accept: 'application/json' },
+        cache: 'no-store',
+      }).catch(() => null),
+    ])
+
     let candles: OHLCVCandle[] = []
-    const candleRes = await fetch(
-      'https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=900&limit=13',
-      { cache: 'no-store' }
-    ).catch(() => null)
     if (candleRes?.ok) {
       const raw = await candleRes.json()
-      // Skip index 0 (current incomplete candle), take next 12 completed ones
       candles = Array.isArray(raw) ? raw.slice(1, 13) as OHLCVCandle[] : []
     }
 
-    // Fetch last 16 × 1-min candles — covers the live 15-min Kalshi window at 1-min resolution.
-    // Index 0 is the currently open candle (may be partial); keep all 16 so agents see
-    // intra-window momentum right up to the present moment.
     let liveCandles: OHLCVCandle[] = []
-    const liveCandleRes = await fetch(
-      'https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=60&limit=16',
-      { cache: 'no-store' }
-    ).catch(() => null)
     if (liveCandleRes?.ok) {
       const raw = await liveCandleRes.json()
       liveCandles = Array.isArray(raw) ? raw as OHLCVCandle[] : []
     }
 
-    // Fetch BTC perpetual futures derivatives signal — Bybit public API (no auth required).
-    // Provides funding rate (positioning pressure) and basis (contango/backwardation).
     let derivatives: DerivativesSignal | null = null
-    const bybitRes = await fetch(
-      'https://api.bybit.com/v5/market/tickers?category=linear&symbol=BTCUSDT',
-      { cache: 'no-store' }
-    ).catch(() => null)
     if (bybitRes?.ok) {
       const data = await bybitRes.json()
       const ticker = data?.result?.list?.[0]
       if (ticker) {
-        const markPrice  = parseFloat(ticker.markPrice)
+        const markPrice = parseFloat(ticker.markPrice)
         const indexPrice = parseFloat(ticker.indexPrice)
         const fundingRate = parseFloat(ticker.fundingRate)
         if (markPrice > 0 && indexPrice > 0 && !isNaN(fundingRate)) {
-          derivatives = {
-            fundingRate,
-            basis: ((markPrice - indexPrice) / indexPrice) * 100,
-            markPrice,
-            indexPrice,
-            source: 'bybit',
-          }
+          derivatives = { fundingRate, basis: ((markPrice - indexPrice) / indexPrice) * 100, markPrice, indexPrice, source: 'bybit' }
         }
       }
     }
 
-    // Fetch orderbook for nearest market
     let orderbook: KalshiOrderbook | null = null
-    if (markets.length > 0) {
-      const obPath = `/trade-api/v2/markets/${markets[0].ticker}/orderbook`
-      const obRes = await fetch(
-        `https://api.elections.kalshi.com${obPath}`,
-        { headers: { ...buildKalshiHeaders('GET', obPath), Accept: 'application/json' }, cache: 'no-store' }
-      ).catch(() => null)
-      if (obRes?.ok) {
-        const data = await obRes.json()
-        orderbook = data.orderbook ?? null
-      }
+    if (obRes?.ok) {
+      const data = await obRes.json()
+      orderbook = data.orderbook ?? null
     }
 
+    // ── Parse query params ────────────────────────────────────────────────
     const romaMode = req.nextUrl.searchParams.get('mode') ?? process.env.ROMA_MODE ?? 'keen'
     const aiRisk   = req.nextUrl.searchParams.get('aiRisk') === 'true'
 
-    // Split-provider: provider2 for ProbabilityModel stage (eliminates inter-stage pause)
-    const p2raw    = req.nextUrl.searchParams.get('provider2') ?? process.env.AI_PROVIDER2
+    const p2raw = req.nextUrl.searchParams.get('provider2') ?? process.env.AI_PROVIDER2
     const provider2: AIProvider | undefined =
       p2raw && (validProviders as readonly string[]).includes(p2raw) ? p2raw as AIProvider : undefined
 
-    // Multi-provider parallel: comma-separated ?providers=grok,huggingface for Sentiment ensemble
     const providersRaw = req.nextUrl.searchParams.get('providers') ?? process.env.AI_PROVIDERS ?? ''
     const providers: AIProvider[] | undefined = providersRaw
       ? (providersRaw.split(',').filter(p => (validProviders as readonly string[]).includes(p)) as AIProvider[])
       : undefined
 
-    // Per-stage mode overrides — when set, bypass SENT_MODE_MAP auto-downgrade
     const validModes = ['blitz', 'sharp', 'keen', 'smart']
     const sentModeRaw = req.nextUrl.searchParams.get('sentMode')
     const probModeRaw = req.nextUrl.searchParams.get('probMode')
     const sentModeOverride = sentModeRaw && validModes.includes(sentModeRaw) ? sentModeRaw : undefined
     const probModeOverride = probModeRaw && validModes.includes(probModeRaw) ? probModeRaw : undefined
+    const orModelOverride  = req.nextUrl.searchParams.get('orModel') || undefined
 
-    const orModelRaw = req.nextUrl.searchParams.get('orModel')
-    const orModelOverride = orModelRaw || undefined
+    // ── SSE stream phase ──────────────────────────────────────────────────
+    // All data is fetched; start the event stream. Lock is released in stream's finally.
+    const encoder = new TextEncoder()
+    const stream = new ReadableStream({
+      async start(controller) {
+        function enc(event: string, data: unknown) {
+          controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`))
+        }
+        try {
+          const pipeline = await runAgentPipeline(
+            markets, quote!, orderbook, provider, romaMode, aiRisk,
+            provider2, providers, sentModeOverride, probModeOverride,
+            candles, liveCandles, derivatives, orModelOverride, req.signal,
+            (key, result) => enc('agent', { key, result }),
+          )
+          enc('done', pipeline)
+        } catch (err) {
+          if (err instanceof Error && err.name === 'AbortError') {
+            enc('aborted', {})
+          } else {
+            enc('error', { message: String(err) })
+          }
+        } finally {
+          releasePipelineLock()
+          controller.close()
+        }
+      },
+    })
 
-    const pipeline = await runAgentPipeline(markets, quote, orderbook, provider, romaMode, aiRisk, provider2, providers, sentModeOverride, probModeOverride, candles, liveCandles, derivatives, orModelOverride, req.signal)
-    return NextResponse.json(pipeline)
-  } catch (err) {
-    if (err instanceof Error && err.name === 'AbortError') {
-      return new Response(null, { status: 499 })  // client closed request
-    }
-    return NextResponse.json({ error: String(err) }, { status: 500 })
+    streamStarted = true
+    return new Response(stream, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache, no-transform',
+        'X-Accel-Buffering': 'no',  // disable nginx buffering
+      },
+    })
   } finally {
-    releasePipelineLock()
+    // Only release lock here if stream never started (data-fetch error path).
+    // If the stream started, it owns the lock and releases it in its own finally.
+    if (!streamStarted) releasePipelineLock()
   }
 }
 

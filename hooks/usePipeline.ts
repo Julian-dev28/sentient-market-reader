@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import type { PipelineState, TradeRecord, PerformanceStats } from '@/lib/types'
+import type { PipelineState, PartialPipelineAgents, TradeRecord, PerformanceStats } from '@/lib/types'
 
 const CYCLE_INTERVAL_MS = 5 * 60 * 1000  // 5-minute cycles
 const BOT_TRADE_DOLLARS = 100             // fixed $ size per bot trade
@@ -54,10 +54,11 @@ export function usePipeline(
   probMode?: string,     // explicit Probability stage mode (overrides romaMode)
   orModel?: string,      // override OpenRouter model ID for sentiment + probability
 ) {
-  const [pipeline, setPipeline]     = useState<PipelineState | null>(null)
-  const [trades, setTrades]         = useState<TradeRecord[]>([])
-  const [isRunning, setIsRunning]   = useState(false)
-  const [serverLocked, setServerLocked] = useState(false)
+  const [pipeline, setPipeline]           = useState<PipelineState | null>(null)
+  const [streamingAgents, setStreamingAgents] = useState<PartialPipelineAgents>({})
+  const [trades, setTrades]               = useState<TradeRecord[]>([])
+  const [isRunning, setIsRunning]         = useState(false)
+  const [serverLocked, setServerLocked]   = useState(false)
   const [nextCycleIn, setNextCycleIn] = useState(CYCLE_INTERVAL_MS / 1000)
   const [error, setError]           = useState<string | null>(null)
   const lastCycleRef                = useRef<number>(0)
@@ -73,6 +74,7 @@ export function usePipeline(
   const runCycle = useCallback(async () => {
     setIsRunning(true)
     setError(null)
+    setStreamingAgents({})
     const controller = new AbortController()
     abortRef.current = controller
     try {
@@ -83,13 +85,53 @@ export function usePipeline(
       if (sentMode) params.set('sentMode', sentMode)
       if (probMode) params.set('probMode', probMode)
       if (orModel) params.set('orModel', orModel)
-      const res = await fetch(`/api/pipeline?${params}`, { cache: 'no-store', signal: controller.signal })
+      const res = await fetch(`/api/pipeline?${params}`, {
+        cache: 'no-store',
+        signal: controller.signal,
+        headers: { Accept: 'text/event-stream' },
+      })
       if (!res.ok) {
         if (res.status === 503) throw new Error('No active KXBTC15M market — trading hours are ~11:30 AM–midnight ET weekdays')
         const body = await res.json().catch(() => ({}))
         throw new Error(body.error ?? `Pipeline error ${res.status}`)
       }
-      const data: PipelineState = await res.json()
+
+      // ── Stream SSE events ─────────────────────────────────────────────
+      const reader = res.body!.getReader()
+      const decoder = new TextDecoder()
+      let buf = ''
+      let data: PipelineState | null = null
+      try {
+        outer: while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buf += decoder.decode(value, { stream: true })
+          const parts = buf.split('\n\n')
+          buf = parts.pop() ?? ''
+          for (const chunk of parts) {
+            if (!chunk.trim()) continue
+            const lines  = chunk.split('\n')
+            const evType = lines.find(l => l.startsWith('event: '))?.slice(7)?.trim()
+            const raw    = lines.find(l => l.startsWith('data: '))?.slice(6)
+            if (!evType || raw == null) continue
+            const payload = JSON.parse(raw)
+            if (evType === 'agent') {
+              setStreamingAgents(prev => ({ ...prev, [payload.key]: payload.result }))
+            } else if (evType === 'done') {
+              data = payload as PipelineState
+              break outer
+            } else if (evType === 'error') {
+              throw new Error(payload.message)
+            } else if (evType === 'aborted') {
+              throw Object.assign(new Error('Pipeline stopped'), { name: 'AbortError' })
+            }
+          }
+        }
+      } finally {
+        reader.cancel()
+      }
+
+      if (!data) throw new Error('Pipeline stream ended without result')
       setPipeline(data)
 
       const exec = data.agents.execution.output
@@ -200,5 +242,5 @@ export function usePipeline(
 
   const stats = computeStats(trades)
 
-  return { pipeline, trades, isRunning, serverLocked, nextCycleIn, error, stats, runCycle, stopCycle }
+  return { pipeline, streamingAgents, trades, isRunning, serverLocked, nextCycleIn, error, stats, runCycle, stopCycle }
 }

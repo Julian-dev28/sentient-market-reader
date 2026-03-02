@@ -59,6 +59,8 @@ export async function runAgentPipeline(
   derivatives?: DerivativesSignal | null,  // perp futures funding rate + basis
   orModelOverride?: string,    // override OpenRouter model ID for sentiment + probability stages
   signal?: AbortSignal,        // abort signal — cancels in-flight ROMA fetches when client disconnects
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  emit?: (key: string, result: AgentResult<any>) => void,  // SSE streaming callback
 ): Promise<PipelineState> {
   const cycleId = ++cycleCounter
   const cycleStartedAt = new Date().toISOString()
@@ -77,9 +79,11 @@ export async function runAgentPipeline(
 
   // ── Stage 1: Market Discovery ──────────────────────────────────────────
   const mdResult = await runMarketDiscovery(markets)
+  emit?.('marketDiscovery', mdResult)
 
   // ── Stage 2: Price Feed ────────────────────────────────────────────────
   const pfResult = runPriceFeed(quote, mdResult.output.strikePrice)
+  emit?.('priceFeed', pfResult)
 
   const probProvider = provider2 ?? provider
   // When provider2 is set, route BOTH sentiment and probability through it so both
@@ -110,7 +114,7 @@ export async function runAgentPipeline(
       provider,  // extractionProvider — always primary (grok) for reliable tool-call JSON
       orModelOverride,
       signal,
-    ),
+    ).then(r => { emit?.('sentiment', r); return r }),
     runProbabilityModel(
       null,   // parallel mode — no sentiment context available yet
       null,
@@ -126,7 +130,7 @@ export async function runAgentPipeline(
       derivatives ?? undefined,
       orModelOverride,
       signal,
-    ),
+    ).then(r => { emit?.('probability', r); return r }),
   ])
 
   // ── Stage 5: Risk Manager ──────────────────────────────────────────────
@@ -155,6 +159,7 @@ export async function runAgentPipeline(
         limitPrice,
         sentResult.output.score,
       )
+  emit?.('risk', riskResult)
 
   // ── Stage 6: Execution ─────────────────────────────────────────────────
   const execResult = runExecution(
@@ -163,6 +168,7 @@ export async function runAgentPipeline(
     mdResult.output.activeMarket,
     riskResult.output.approved,
   )
+  emit?.('execution', execResult)
 
   // Store result for next cycle's context
   setLastAnalysis({

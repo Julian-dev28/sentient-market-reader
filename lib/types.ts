@@ -134,6 +134,9 @@ export interface ExecutionOutput {
 
 // ─── Pipeline State ────────────────────────────────────────────────────────
 
+/** Partial agents map — populated incrementally during SSE streaming */
+export type PartialPipelineAgents = Partial<PipelineState['agents']>
+
 export interface PipelineState {
   cycleId: number
   cycleStartedAt: string
