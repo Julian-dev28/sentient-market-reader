@@ -447,7 +447,11 @@ export default function Home() {
                     </div>
                   ))}
                 </div>
-                <div style={{ marginTop: 8, fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.5 }}>{exec.rationale}</div>
+                <div style={{ marginTop: 8, fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                  {liveMode
+                    ? exec.rationale.replace('Paper trade only — no real order placed.', 'Live mode — real order placed via Kalshi API.')
+                    : exec.rationale}
+                </div>
 
                 {/* Prices at pipeline run */}
                 {md?.activeMarket && (

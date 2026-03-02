@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { runAgentPipeline } from '@/lib/agents'
 import { buildKalshiHeaders } from '@/lib/kalshi-auth'
-import type { KalshiMarket, KalshiOrderbook, BTCQuote } from '@/lib/types'
+import type { KalshiMarket, KalshiOrderbook, BTCQuote, OHLCVCandle } from '@/lib/types'
 import type { AIProvider } from '@/lib/llm-client'
 import { tryLockPipeline, releasePipelineLock } from '@/lib/pipeline-lock'
 
@@ -139,6 +139,19 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'BTC price unavailable — all sources failed' }, { status: 503 })
     }
 
+    // Fetch last 13 × 15-min candles (newest first) — Coinbase Exchange public API
+    // granularity=900s = 15 min. Fetch 13, use 12 (drop the still-open current candle).
+    let candles: OHLCVCandle[] = []
+    const candleRes = await fetch(
+      'https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=900&limit=13',
+      { cache: 'no-store' }
+    ).catch(() => null)
+    if (candleRes?.ok) {
+      const raw = await candleRes.json()
+      // Skip index 0 (current incomplete candle), take next 12 completed ones
+      candles = Array.isArray(raw) ? raw.slice(1, 13) as OHLCVCandle[] : []
+    }
+
     // Fetch orderbook for nearest market
     let orderbook: KalshiOrderbook | null = null
     if (markets.length > 0) {
@@ -174,7 +187,7 @@ export async function GET(req: NextRequest) {
     const sentModeOverride = sentModeRaw && validModes.includes(sentModeRaw) ? sentModeRaw : undefined
     const probModeOverride = probModeRaw && validModes.includes(probModeRaw) ? probModeRaw : undefined
 
-    const pipeline = await runAgentPipeline(markets, quote, orderbook, provider, romaMode, aiRisk, provider2, providers, sentModeOverride, probModeOverride)
+    const pipeline = await runAgentPipeline(markets, quote, orderbook, provider, romaMode, aiRisk, provider2, providers, sentModeOverride, probModeOverride, candles)
     return NextResponse.json(pipeline)
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 })

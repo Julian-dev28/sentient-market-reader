@@ -207,16 +207,16 @@ def build_roma_config_tiered(analysis_llm: LLMConfig, orchestration_llm: LLMConf
       Executor + Aggregator → analysis_llm (quality model — the actual reasoning)
 
     Token budgets are tightened for faster modes to reduce generation time:
-      blitz: executor 600, aggregator 800  (fast signal, no essays)
-      sharp: executor 1000, aggregator 1500
-      keen:  executor 2000, aggregator 4000 (default)
-      smart: executor 2000, aggregator 4000
+      blitz: executor 900, aggregator 900  (fast signal, no essays)
+      sharp: executor 900, aggregator 900
+      keen:  executor 900, aggregator 900 (default)
+      smart: executor 600, aggregator 600
     """
     _token_budgets = {
-        "blitz": {"executor": 600,  "aggregator": 800},
-        "sharp": {"executor": 1000, "aggregator": 1500},
-        "keen":  {"executor": 2000, "aggregator": 4000},
-        "smart": {"executor": 2000, "aggregator": 4000},
+        "blitz": {"executor": 900,  "aggregator": 900},
+        "sharp": {"executor": 900,  "aggregator": 900},
+        "keen":  {"executor": 900,  "aggregator": 900},
+        "smart": {"executor": 600,  "aggregator": 600},
     }
     budgets = _token_budgets.get(roma_mode, _token_budgets["keen"])
 

@@ -37,6 +37,9 @@ export interface KalshiOrderbook {
 
 // ─── CoinMarketCap Types ───────────────────────────────────────────────────
 
+// [timestamp, low, high, open, close, volume] — Coinbase Exchange format, newest first
+export type OHLCVCandle = [number, number, number, number, number, number]
+
 export interface BTCQuote {
   price: number
   percent_change_1h: number

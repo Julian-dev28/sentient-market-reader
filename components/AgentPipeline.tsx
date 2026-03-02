@@ -428,11 +428,30 @@ export default function AgentPipeline({ pipeline, isRunning }: { pipeline: Pipel
             })}
           </div>
 
-          {pipeline.cycleCompletedAt && (
-            <div style={{ marginTop: 12, fontSize: 9, color: 'var(--text-muted)', fontFamily: 'var(--font-geist-mono)', textAlign: 'right', opacity: 0.6 }}>
-              completed {new Date(pipeline.cycleCompletedAt).toLocaleTimeString('en-US', { hour12: false })}
-            </div>
-          )}
+          {pipeline.cycleCompletedAt && pipeline.cycleStartedAt && (() => {
+            const ms   = new Date(pipeline.cycleCompletedAt!).getTime() - new Date(pipeline.cycleStartedAt).getTime()
+            const mins = Math.floor(ms / 60000)
+            const secs = Math.floor((ms % 60000) / 1000)
+            const ds   = Math.floor((ms % 1000) / 100)
+            const str  = mins > 0 ? `${mins}m ${secs}s` : `${secs}.${ds}s`
+            return (
+              <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
+                <div style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 8,
+                  padding: '6px 12px', borderRadius: 8,
+                  background: 'rgba(74,148,112,0.07)',
+                  border: '1px solid rgba(74,148,112,0.22)',
+                }}>
+                  <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 10.5, color: 'var(--green-dark)', lineHeight: 1.4 }}>
+                    › pipeline complete — {str}
+                  </span>
+                </div>
+                <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 9, color: 'var(--text-muted)', opacity: 0.5 }}>
+                  {new Date(pipeline.cycleCompletedAt!).toLocaleTimeString('en-US', { hour12: false })}
+                </span>
+              </div>
+            )
+          })()}
         </>
       ) : (
         <div style={{ padding: '32px 0', textAlign: 'center' }}>
