@@ -285,6 +285,37 @@ export default function MarketCard({ market, orderbook, strikePrice, currentBTCP
     } finally { setter(false) }
   }
 
+  /** Cancel all resting sell orders, then place fresh 99¢ limit sells for every open position. */
+  async function batchLimitSell() {
+    setLimitingAll(true)
+    try {
+      const d = await fetch('/api/positions', { cache: 'no-store' }).then(r => r.json())
+      const restingSells = (d.orders ?? []).filter(
+        (o: { action: string; status: string }) => o.action === 'sell' && o.status === 'resting'
+      )
+      // Cancel existing resting sell orders so we don't double-up
+      await Promise.all(
+        restingSells.map((o: { order_id: string }) =>
+          fetch(`/api/cancel-order/${o.order_id}`, { method: 'DELETE' })
+        )
+      )
+      // Place fresh 99¢ limit sells for all open positions
+      await Promise.all(
+        (d.positions ?? [])
+          .filter((pos: { position: number }) => pos.position !== 0)
+          .map((pos: { ticker: string; position: number }) => {
+            const side  = pos.position > 0 ? 'yes' : 'no'
+            const count = Math.abs(pos.position)
+            return fetch('/api/limit-sell-order', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ ticker: pos.ticker, side, count }),
+            })
+          })
+      )
+    } finally { setLimitingAll(false) }
+  }
+
   function handleRefresh() {
     if (spinning) return
     setSpinning(true)
@@ -412,9 +443,21 @@ export default function MarketCard({ market, orderbook, strikePrice, currentBTCP
             {/* Global position actions */}
             {liveMode && (
               <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                <button
+                  disabled={limitingAll}
+                  onClick={batchLimitSell}
+                  style={{
+                    flex: 1, padding: '10px 0', borderRadius: 9, cursor: limitingAll ? 'not-allowed' : 'pointer',
+                    border: '1px solid #7a8fb5', background: limitingAll ? '#7a8fb512' : '#7a8fb512',
+                    fontSize: 12, fontWeight: 700, color: '#7a8fb5', transition: 'all 0.15s',
+                  }}
+                  onMouseEnter={e => { if (!limitingAll) { e.currentTarget.style.background = '#7a8fb5'; e.currentTarget.style.color = '#fff' } }}
+                  onMouseLeave={e => { e.currentTarget.style.background = '#7a8fb512'; e.currentTarget.style.color = '#7a8fb5' }}
+                >
+                  {limitingAll ? '…' : '⬆ Limit All 99¢'}
+                </button>
                 {[
-                  { label: '⬆ Limit All 99¢', busy: limitingAll, route: '/api/limit-sell-order', setter: setLimitingAll, color: '#7a8fb5' },
-                  { label: '■ Sell All',        busy: sellingAll,  route: '/api/sell-order',       setter: setSellingAll,  color: '#b5687a' },
+                  { label: '■ Sell All', busy: sellingAll, route: '/api/sell-order', setter: setSellingAll, color: '#b5687a' },
                 ].map(({ label, busy, route, setter, color }) => (
                   <button key={route} disabled={busy} onClick={() => batchSell(route, setter)}
                     style={{
