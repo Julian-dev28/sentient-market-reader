@@ -270,8 +270,9 @@ function TradeBox({ yesBid, yesAsk, noBid, noAsk, ticker, liveMode }: {
 export default function MarketCard({ market, orderbook, strikePrice, currentBTCPrice, secondsUntilExpiry, liveMode, onRefresh }: MarketCardProps) {
   const [countdown, setCountdown] = useState(secondsUntilExpiry)
   const [spinning, setSpinning] = useState(false)
-  const [sellingAll, setSellingAll]   = useState(false)
-  const [limitingAll, setLimitingAll] = useState(false)
+  const [sellingAll, setSellingAll]     = useState(false)
+  const [limitingAll, setLimitingAll]   = useState(false)
+  const [cancelingAll, setCancelingAll] = useState(false)
 
   async function batchSell(route: string, setter: (v: boolean) => void) {
     setter(true)
@@ -314,6 +315,20 @@ export default function MarketCard({ market, orderbook, strikePrice, currentBTCP
           })
       )
     } finally { setLimitingAll(false) }
+  }
+
+  async function cancelAllOrders() {
+    setCancelingAll(true)
+    try {
+      const d = await fetch('/api/positions', { cache: 'no-store' }).then(r => r.json())
+      await Promise.all(
+        (d.orders ?? [])
+          .filter((o: { status: string }) => o.status === 'resting')
+          .map((o: { order_id: string }) =>
+            fetch(`/api/cancel-order/${o.order_id}`, { method: 'DELETE' })
+          )
+      )
+    } finally { setCancelingAll(false) }
   }
 
   function handleRefresh() {
@@ -455,6 +470,19 @@ export default function MarketCard({ market, orderbook, strikePrice, currentBTCP
                   onMouseLeave={e => { e.currentTarget.style.background = '#7a8fb512'; e.currentTarget.style.color = '#7a8fb5' }}
                 >
                   {limitingAll ? '…' : '⬆ Limit All 99¢'}
+                </button>
+                <button
+                  disabled={cancelingAll}
+                  onClick={cancelAllOrders}
+                  style={{
+                    flex: 1, padding: '10px 0', borderRadius: 9, cursor: cancelingAll ? 'not-allowed' : 'pointer',
+                    border: '1px solid #a07840', background: '#a0784012',
+                    fontSize: 12, fontWeight: 700, color: '#a07840', transition: 'all 0.15s',
+                  }}
+                  onMouseEnter={e => { if (!cancelingAll) { e.currentTarget.style.background = '#a07840'; e.currentTarget.style.color = '#fff' } }}
+                  onMouseLeave={e => { e.currentTarget.style.background = '#a0784012'; e.currentTarget.style.color = '#a07840' }}
+                >
+                  {cancelingAll ? '…' : '✕ Cancel All'}
                 </button>
                 {[
                   { label: '■ Sell All', busy: sellingAll, route: '/api/sell-order', setter: setSellingAll, color: '#b5687a' },
