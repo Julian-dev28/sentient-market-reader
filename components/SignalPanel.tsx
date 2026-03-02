@@ -339,13 +339,26 @@ export default function SignalPanel({ probability, sentiment }: SignalPanelProps
 
           {/* Provider attribution */}
           {probability && (
-            <div style={{ marginTop: 10, display: 'flex', gap: 10 }}>
-              <span style={{ fontSize: 8, color: 'var(--text-muted)', fontFamily: 'var(--font-geist-mono)' }}>
-                prob · {probability.provider.split('/').pop()}
-              </span>
-              <span style={{ fontSize: 8, color: 'var(--text-muted)', fontFamily: 'var(--font-geist-mono)' }}>
-                sent · {sentiment.provider.split('/').pop()}
-              </span>
+            <div style={{ marginTop: 10, display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+              {[
+                { label: 'prob', provider: probability.provider },
+                { label: 'sent', provider: sentiment.provider },
+              ].map(({ label, provider }) => {
+                const isOR  = provider.startsWith('openrouter')
+                const model = provider.split('/').pop()
+                return (
+                  <span key={label} style={{
+                    fontSize: 8, fontFamily: 'var(--font-geist-mono)', fontWeight: isOR ? 700 : 400,
+                    color:      isOR ? 'var(--blue-dark)'  : 'var(--text-muted)',
+                    background: isOR ? 'var(--blue-pale)'  : 'transparent',
+                    border:     isOR ? '1px solid #a8cce0' : 'none',
+                    padding:    isOR ? '1px 5px' : '0',
+                    borderRadius: 3,
+                  }}>
+                    {label} · {isOR ? `OR/${model}` : model}
+                  </span>
+                )
+              })}
             </div>
           )}
         </>
