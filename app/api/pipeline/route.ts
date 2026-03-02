@@ -226,7 +226,10 @@ export async function GET(req: NextRequest) {
     const sentModeOverride = sentModeRaw && validModes.includes(sentModeRaw) ? sentModeRaw : undefined
     const probModeOverride = probModeRaw && validModes.includes(probModeRaw) ? probModeRaw : undefined
 
-    const pipeline = await runAgentPipeline(markets, quote, orderbook, provider, romaMode, aiRisk, provider2, providers, sentModeOverride, probModeOverride, candles, liveCandles, derivatives)
+    const orModelRaw = req.nextUrl.searchParams.get('orModel')
+    const orModelOverride = orModelRaw || undefined
+
+    const pipeline = await runAgentPipeline(markets, quote, orderbook, provider, romaMode, aiRisk, provider2, providers, sentModeOverride, probModeOverride, candles, liveCandles, derivatives, orModelOverride)
     return NextResponse.json(pipeline)
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 })
