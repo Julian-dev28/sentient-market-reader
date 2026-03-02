@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import { Inter, Geist_Mono } from 'next/font/google'
+import { AppwriteProvider } from '@/contexts/AppwriteContext'
 import './globals.css'
 
 const inter = Inter({
@@ -20,7 +21,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={`${inter.variable} ${geistMono.variable}`}>
-      <body>{children}</body>
+      <body><AppwriteProvider>{children}</AppwriteProvider></body>
     </html>
   )
 }

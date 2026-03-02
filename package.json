@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "setup-appwrite": "node scripts/setup-appwrite.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
