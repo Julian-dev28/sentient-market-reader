@@ -24,6 +24,11 @@ export default function Home() {
   const [probMode, setProbMode]             = useState<string | undefined>(undefined)
   const [orModel, setOrModel]               = useState<string>('')
   const [showSettings, setShowSettings]     = useState(false)
+  const [orModels, setOrModels]             = useState<{ id: string; name: string }[]>([])
+  const [orModelsLoading, setOrModelsLoading] = useState(false)
+  const [orModelSearch, setOrModelSearch]   = useState('')
+  const [orModelOpen, setOrModelOpen]       = useState(false)
+  const orModelRef                          = useRef<HTMLDivElement>(null)
 
   // Sync from localStorage after hydration (client-only)
   useEffect(() => {
@@ -44,6 +49,29 @@ export default function Home() {
     if (m) localStorage.setItem('sentient-or-model', m)
     else localStorage.removeItem('sentient-or-model')
   }
+
+  // Fetch OpenRouter model list when settings panel opens (lazy — only once)
+  useEffect(() => {
+    if (!showSettings || orModels.length > 0 || orModelsLoading) return
+    setOrModelsLoading(true)
+    fetch('/api/openrouter-models')
+      .then(r => r.json())
+      .then(d => { if (d.models?.length) setOrModels(d.models) })
+      .catch(() => {})
+      .finally(() => setOrModelsLoading(false))
+  }, [showSettings, orModels.length, orModelsLoading])
+
+  // Close OR model dropdown on outside click
+  useEffect(() => {
+    if (!orModelOpen) return
+    function handleClick(e: MouseEvent) {
+      if (orModelRef.current && !orModelRef.current.contains(e.target as Node)) {
+        setOrModelOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [orModelOpen])
 
   const { pipeline, trades, isRunning, serverLocked, nextCycleIn, error, stats, runCycle, stopCycle } = usePipeline(
     liveMode, romaMode, botActive, aiRisk, undefined, undefined, sentMode, probMode, orModel || undefined,
@@ -622,62 +650,111 @@ export default function Home() {
 
                   <div style={{ width: 1, height: 20, background: 'var(--border)' }} />
 
-                  {/* OR Model */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                  {/* OR Model — searchable custom dropdown */}
+                  <div ref={orModelRef} style={{ display: 'flex', alignItems: 'center', gap: 5, position: 'relative' }}>
                     <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em' }}>OR Model</span>
-                    <select value={orModel} onChange={e => handleOrModelChange(e.target.value)}
+                    {/* Trigger button */}
+                    <button
+                      onClick={() => { setOrModelOpen(v => !v); setOrModelSearch('') }}
                       style={{
                         fontSize: 11, fontWeight: 600, cursor: 'pointer',
-                        padding: '4px 6px', borderRadius: 6,
+                        padding: '4px 10px', borderRadius: 6, minWidth: 200, textAlign: 'left',
                         border: orModel ? '1px solid var(--blue)' : '1px solid var(--border)',
                         background: 'var(--bg-secondary)',
                         color: orModel ? 'var(--blue-dark)' : 'var(--text-muted)',
-                        outline: 'none',
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6,
+                      }}
+                    >
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {orModel ? (orModels.find(m => m.id === orModel)?.name ?? orModel) : 'auto (env default)'}
+                      </span>
+                      <span style={{ opacity: 0.5, flexShrink: 0 }}>{orModelOpen ? '▲' : '▼'}</span>
+                    </button>
+
+                    {/* Dropdown panel */}
+                    {orModelOpen && (
+                      <div className="animate-fade-in" style={{
+                        position: 'absolute', top: '100%', left: 0, marginTop: 4, zIndex: 200,
+                        background: 'var(--bg-card)', border: '1px solid var(--border)',
+                        borderRadius: 10, boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+                        width: 280, display: 'flex', flexDirection: 'column',
                       }}>
-                      <option value="">auto</option>
-                      <optgroup label="── Google ──">
-                        <option value="google/gemini-2.5-flash">Gemini 2.5 Flash ⚡</option>
-                        <option value="google/gemini-2.5-pro">Gemini 2.5 Pro</option>
-                        <option value="google/gemini-2.0-flash-001">Gemini 2.0 Flash</option>
-                      </optgroup>
-                      <optgroup label="── Anthropic ──">
-                        <option value="anthropic/claude-opus-4-5">Claude Opus 4.5</option>
-                        <option value="anthropic/claude-sonnet-4-5">Claude Sonnet 4.5</option>
-                        <option value="anthropic/claude-sonnet-4-6">Claude Sonnet 4.6</option>
-                        <option value="anthropic/claude-haiku-4-5-20251001">Claude Haiku 4.5</option>
-                      </optgroup>
-                      <optgroup label="── OpenAI ──">
-                        <option value="openai/o4-mini">o4-mini (reasoning)</option>
-                        <option value="openai/o3-mini">o3-mini (reasoning)</option>
-                        <option value="openai/gpt-4o">GPT-4o</option>
-                        <option value="openai/gpt-4o-mini">GPT-4o Mini</option>
-                      </optgroup>
-                      <optgroup label="── xAI ──">
-                        <option value="x-ai/grok-3">Grok-3</option>
-                        <option value="x-ai/grok-3-mini">Grok-3 Mini (reasoning)</option>
-                        <option value="x-ai/grok-3-mini-fast">Grok-3 Mini Fast</option>
-                      </optgroup>
-                      <optgroup label="── DeepSeek ──">
-                        <option value="deepseek/deepseek-r1">DeepSeek R1 (reasoning)</option>
-                        <option value="deepseek/deepseek-r1-distill-qwen-32b">DeepSeek R1 32B</option>
-                        <option value="deepseek/deepseek-chat-v3-5">DeepSeek V3.5</option>
-                      </optgroup>
-                      <optgroup label="── Meta ──">
-                        <option value="meta-llama/llama-4-maverick">Llama 4 Maverick</option>
-                        <option value="meta-llama/llama-4-scout">Llama 4 Scout</option>
-                        <option value="meta-llama/llama-3.3-70b-instruct">Llama 3.3 70B</option>
-                      </optgroup>
-                      <optgroup label="── Qwen ──">
-                        <option value="qwen/qwen3-max">Qwen3 Max</option>
-                        <option value="qwen/qwen3-30b-a3b">Qwen3 30B MoE</option>
-                        <option value="qwen/qwen3-14b">Qwen3 14B</option>
-                        <option value="qwen/qwq-32b">QwQ 32B (reasoning)</option>
-                      </optgroup>
-                      <optgroup label="── Mistral ──">
-                        <option value="mistralai/mistral-large-2411">Mistral Large</option>
-                        <option value="mistralai/mixtral-8x22b-instruct">Mixtral 8x22B</option>
-                      </optgroup>
-                    </select>
+                        {/* Search input */}
+                        <div style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)' }}>
+                          <input
+                            autoFocus
+                            placeholder={orModelsLoading ? 'Loading models…' : 'Search models…'}
+                            value={orModelSearch}
+                            onChange={e => setOrModelSearch(e.target.value)}
+                            style={{
+                              width: '100%', boxSizing: 'border-box',
+                              padding: '5px 8px', borderRadius: 6, fontSize: 11,
+                              border: '1px solid var(--border)', background: 'var(--bg-secondary)',
+                              color: 'var(--text-primary)', outline: 'none',
+                            }}
+                          />
+                        </div>
+
+                        {/* Results list */}
+                        <div style={{ maxHeight: 260, overflowY: 'auto' }}>
+                          {/* Auto option */}
+                          {('auto'.includes(orModelSearch.toLowerCase()) || orModelSearch === '') && (
+                            <div
+                              onClick={() => { handleOrModelChange(''); setOrModelOpen(false) }}
+                              style={{
+                                padding: '7px 12px', fontSize: 11, cursor: 'pointer',
+                                color: !orModel ? 'var(--blue-dark)' : 'var(--text-muted)',
+                                background: !orModel ? 'var(--cream)' : 'transparent',
+                              }}
+                              onMouseEnter={e => { if (orModel) (e.currentTarget as HTMLElement).style.background = 'var(--bg-secondary)' }}
+                              onMouseLeave={e => { if (orModel) (e.currentTarget as HTMLElement).style.background = 'transparent' }}
+                            >
+                              auto (env default)
+                            </div>
+                          )}
+
+                          {/* Filtered + grouped model list */}
+                          {(() => {
+                            const q = orModelSearch.toLowerCase()
+                            const filtered = orModels.filter(m =>
+                              m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q)
+                            )
+                            if (!filtered.length && !orModelsLoading) {
+                              return <div style={{ padding: '10px 12px', fontSize: 11, color: 'var(--text-muted)' }}>No models found</div>
+                            }
+                            const groups: Record<string, typeof filtered> = {}
+                            for (const m of filtered) {
+                              const p = m.id.split('/')[0]
+                              if (!groups[p]) groups[p] = []
+                              groups[p].push(m)
+                            }
+                            return Object.entries(groups).sort(([a], [b]) => a.localeCompare(b)).map(([provider, models]) => (
+                              <div key={provider}>
+                                <div style={{ padding: '5px 12px 2px', fontSize: 9, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                                  {provider}
+                                </div>
+                                {models.map(m => (
+                                  <div
+                                    key={m.id}
+                                    onClick={() => { handleOrModelChange(m.id); setOrModelOpen(false) }}
+                                    style={{
+                                      padding: '6px 12px 6px 18px', fontSize: 11, cursor: 'pointer',
+                                      color: orModel === m.id ? 'var(--blue-dark)' : 'var(--text-secondary)',
+                                      background: orModel === m.id ? 'var(--cream)' : 'transparent',
+                                      fontWeight: orModel === m.id ? 700 : 400,
+                                    }}
+                                    onMouseEnter={e => { if (orModel !== m.id) (e.currentTarget as HTMLElement).style.background = 'var(--bg-secondary)' }}
+                                    onMouseLeave={e => { if (orModel !== m.id) (e.currentTarget as HTMLElement).style.background = 'transparent' }}
+                                  >
+                                    {m.name}
+                                  </div>
+                                ))}
+                              </div>
+                            ))
+                          })()}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
