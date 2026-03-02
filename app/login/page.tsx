@@ -38,7 +38,7 @@ export default function LoginPage() {
         sessionStorage.setItem('appwrite-session', data.sessionToken)
       }
 
-      router.push('/dashboard')
+      router.push('/settings')
       router.refresh()
     } catch {
       setError('Network error — please try again')
