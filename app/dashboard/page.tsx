@@ -13,6 +13,7 @@ import PerformancePanel from '@/components/PerformancePanel'
 import PositionsPanel from '@/components/PositionsPanel'
 import PipelineHistory from '@/components/PipelineHistory'
 import ChallengePanel from '@/components/ChallengePanel'
+import StrategyPanel from '@/components/StrategyPanel'
 
 export default function Home() {
   const [liveMode, setLiveMode]           = useState(false)
@@ -828,14 +829,19 @@ export default function Home() {
             <PriceChart priceHistory={priceHistory} strikePrice={strikePrice} currentPrice={currentBTCPrice} />
             <AgentPipeline pipeline={pipeline} isRunning={isRunning} streamingAgents={streamingAgents} />
             <PipelineHistory history={history} />
+
+            {/* ── Performance + Trade Log wide pane ── */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <PerformancePanel stats={stats} trades={trades} />
+              <TradeLog trades={trades} />
+            </div>
           </div>
 
           {/* ─── RIGHT ─── */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <PositionsPanel liveMode={liveMode} />
             <ChallengePanel stats={stats} trades={trades} />
-            <PerformancePanel stats={stats} trades={trades} />
-            <TradeLog trades={trades} />
+            <StrategyPanel stats={stats} trades={trades} />
           </div>
         </div>
       </main>
