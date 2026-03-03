@@ -372,6 +372,8 @@ export default function MarketCard({ market, orderbook, strikePrice, currentBTCP
       else if (e.code === 'Digit4') { e.preventDefault(); batchLimitSell() }
       else if (e.code === 'Digit5') { e.preventDefault(); cancelAllOrders() }
       else if (e.code === 'Digit6') { e.preventDefault(); batchSell('/api/sell-order', setSellingAll) }
+      else if (e.code === 'KeyY')   { e.preventDefault(); setSide('yes') }
+      else if (e.code === 'KeyN')   { e.preventDefault(); setSide('no') }
     }
 
     window.addEventListener('keydown', onKey)
@@ -611,6 +613,7 @@ export default function MarketCard({ market, orderbook, strikePrice, currentBTCP
             }}>{side.toUpperCase()}</span>
             <span style={{ fontSize: 9, color: 'var(--border)', fontFamily: 'var(--font-geist-mono)' }}>·</span>
             {[
+              ['⇧Y', 'YES'], ['⇧N', 'NO'],
               ['⇧1', '$10'], ['⇧2', '$20'], ['⇧3', '$50'],
               ['⇧4', 'Limit'], ['⇧5', 'Cancel'], ['⇧6', 'Sell'],
             ].map(([key, label]) => (
