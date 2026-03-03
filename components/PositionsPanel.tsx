@@ -160,9 +160,15 @@ export default function PositionsPanel({ liveMode }: { liveMode: boolean }) {
           {positions.slice(0, 6).map((pos, i) => {
             const isYes  = pos.position > 0
             const qty    = Math.abs(pos.position)
-            const cost   = (pos.market_exposure / 100).toFixed(2)
+            const costDollars = pos.market_exposure / 100
+            const cost   = costDollars.toFixed(2)
             const rpnl   = pos.realized_pnl / 100
             const fees   = (pos.fees_paid / 100).toFixed(2)
+            const portfolioPct = totalEquity && totalEquity > 0
+              ? Math.min(100, (costDollars / totalEquity) * 100)
+              : 0
+            const portfolioPctStr = portfolioPct > 0 ? portfolioPct.toFixed(1) : null
+            const barColor = isYes ? 'var(--green)' : 'var(--pink)'
             return (
               <div key={pos.ticker} style={{
                 padding: '8px 0',
@@ -177,14 +183,35 @@ export default function PositionsPanel({ liveMode }: { liveMode: boolean }) {
                       {qty}×
                     </span>
                   </div>
-                  <div style={{ textAlign: 'right' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     {rpnl !== 0 && (
                       <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 11, fontWeight: 700, color: rpnl >= 0 ? 'var(--green-dark)' : 'var(--pink)' }}>
-                        {rpnl >= 0 ? '+' : ''}${rpnl.toFixed(2)} realized
+                        {rpnl >= 0 ? '+' : ''}${rpnl.toFixed(2)}
+                      </span>
+                    )}
+                    {portfolioPctStr && (
+                      <span title={`${portfolioPctStr}% of total equity`} style={{
+                        fontSize: 9, fontWeight: 700, fontFamily: 'var(--font-geist-mono)',
+                        padding: '2px 6px', borderRadius: 4,
+                        background: isYes ? 'var(--green-pale)' : 'var(--pink-pale)',
+                        color: isYes ? 'var(--green-dark)' : 'var(--pink)',
+                        border: `1px solid ${isYes ? '#9ecfb8' : '#e0b0bf'}`,
+                      }}>
+                        {portfolioPctStr}%
                       </span>
                     )}
                   </div>
                 </div>
+                {/* Portfolio allocation bar */}
+                {portfolioPct > 0 && (
+                  <div style={{ height: 3, borderRadius: 2, background: 'var(--border)', marginBottom: 5, overflow: 'hidden' }}>
+                    <div style={{
+                      height: '100%', width: `${portfolioPct}%`, borderRadius: 2,
+                      background: barColor, opacity: 0.75,
+                      transition: 'width 0.6s ease',
+                    }} />
+                  </div>
+                )}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span style={{ fontSize: 9, color: 'var(--text-muted)', fontFamily: 'var(--font-geist-mono)' }}>
                     {fmtTicker(pos.ticker)}

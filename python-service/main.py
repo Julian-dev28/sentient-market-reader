@@ -225,9 +225,17 @@ def build_roma_config_tiered(analysis_llm: LLMConfig, orchestration_llm: LLMConf
     }
     budgets = _token_budgets.get(roma_mode, _token_budgets["keen"])
 
+    def _is_reasoning_model(model: str) -> bool:
+        """OpenAI o-series reasoning models require temperature=1.0 and max_tokens>=16000."""
+        import re
+        return bool(re.search(r'[/:]o[1-9](-|$|mini|preview|high)', model))
+
     def make_cfg(llm: LLMConfig, temperature: float, max_tokens: int) -> AgentConfig:
         import copy as _copy
         cfg_llm = _copy.copy(llm)
+        if _is_reasoning_model(getattr(cfg_llm, 'model', '')):
+            temperature = 1.0
+            max_tokens  = max(16000, max_tokens)
         try:
             cfg_llm.temperature = temperature
             cfg_llm.max_tokens = max_tokens

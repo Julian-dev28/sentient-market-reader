@@ -16,6 +16,8 @@ export interface PythonRomaResponse {
 }
 
 /** Reset the circuit breakers in the Python service after a transient failure. */
+const romaCache = new Map<string, PythonRomaResponse>();
+
 async function resetCircuitBreakers(): Promise<void> {
   await fetch(`${PYTHON_ROMA_URL}/reset`, { method: 'POST' }).catch(() => {/* best-effort */})
 }
@@ -42,6 +44,8 @@ export async function callPythonRoma(
   const fetchSignal = signal
     ? AbortSignal.any([signal, AbortSignal.timeout(220_000)])
     : AbortSignal.timeout(220_000)
+  const key = [goal, context, maxDepth, romaMode, provider, providers?.join(','), modelOverride ?? ''].join('|')
+  if (romaCache.has(key)) return romaCache.get(key)!
   let lastErr: unknown
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
@@ -63,7 +67,9 @@ export async function callPythonRoma(
         }
         throw err
       }
-      return await res.json()
+      const response = await res.json()
+      romaCache.set(key, response)
+      return response
     } catch (err) {
       lastErr = err
       // Don't retry on abort — the caller intentionally cancelled
@@ -79,11 +85,17 @@ export async function callPythonRoma(
 /** Format a roma-dspy response as a human-readable trace string */
 export function formatRomaTrace(result: PythonRomaResponse): string {
   if (result.was_atomic) {
-    return `[roma-dspy · ${result.provider}: solved atomically — ${result.duration_ms}ms]\n\n${result.answer}`
+    return `[roma-dspy · ${result.provider}: solved atomically — ${result.duration_ms}ms]
+
+${result.answer}`
   }
   return (
-    `[roma-dspy · ${result.provider}: ${result.subtasks.length} subtasks — ${result.duration_ms}ms]\n` +
+    `[roma-dspy · ${result.provider}: ${result.subtasks.length} subtasks — ${result.duration_ms}ms]
+` +
     result.subtasks.map(t => `• ${t.id}: ${t.goal}\n  → ${t.result}`).join('\n') +
-    `\n\n[Aggregated Answer]\n${result.answer}`
+    `
+
+[Aggregated Answer]
+${result.answer}`
   )
 }

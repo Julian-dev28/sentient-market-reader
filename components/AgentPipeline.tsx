@@ -397,6 +397,7 @@ export default function AgentPipeline({
   streamingAgents?: PartialPipelineAgents
 }) {
   const [elapsedMs, setElapsedMs] = useState(0)
+  const [dataAgeSec, setDataAgeSec] = useState(0)
   const startRef = useRef<number | null>(null)
 
   useEffect(() => {
@@ -407,6 +408,16 @@ export default function AgentPipeline({
       return () => clearInterval(id)
     }
   }, [isRunning])
+
+  // Tick data age since pipeline last completed
+  useEffect(() => {
+    if (!pipeline?.cycleCompletedAt) return
+    const completedAt = new Date(pipeline.cycleCompletedAt).getTime()
+    const tick = () => setDataAgeSec(Math.floor((Date.now() - completedAt) / 1000))
+    tick()
+    const id = setInterval(tick, 1000)
+    return () => clearInterval(id)
+  }, [pipeline?.cycleCompletedAt])
 
   return (
     <div className="card" style={{ padding: '18px 18px 16px' }}>
@@ -455,22 +466,56 @@ export default function AgentPipeline({
             const mins = Math.floor(ms / 60000)
             const secs = Math.floor((ms % 60000) / 1000)
             const ds   = Math.floor((ms % 1000) / 100)
-            const str  = mins > 0 ? `${mins}m ${secs}s` : `${secs}.${ds}s`
+            const runStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}.${ds}s`
+
+            const ageMins = Math.floor(dataAgeSec / 60)
+            const ageSecs = dataAgeSec % 60
+            const ageStr  = ageMins > 0 ? `${ageMins}m ${ageSecs}s ago` : `${ageSecs}s ago`
+            const stale   = dataAgeSec >= 300   // >5 min
+            const aging   = dataAgeSec >= 150   // >2.5 min
+            const ageColor = stale ? 'var(--pink)' : aging ? 'var(--amber)' : 'var(--text-muted)'
+            const ageBg    = stale ? 'rgba(212,85,130,0.07)' : aging ? 'rgba(212,135,44,0.07)' : 'transparent'
+            const ageBdr   = stale ? 'rgba(212,85,130,0.3)'  : aging ? 'rgba(212,135,44,0.3)'  : 'transparent'
+
             return (
-              <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
-                <div style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 8,
-                  padding: '6px 12px', borderRadius: 8,
-                  background: 'rgba(74,148,112,0.07)',
-                  border: '1px solid rgba(74,148,112,0.22)',
-                }}>
-                  <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 10.5, color: 'var(--green-dark)', lineHeight: 1.4 }}>
-                    › pipeline complete — {str}
+              <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                {/* Data age — hidden while pipeline is running */}
+                {isRunning ? (
+                  <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 10, color: 'var(--text-muted)', opacity: 0.5 }}>
+                    updating…
+                  </span>
+                ) : (
+                  <div style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                    padding: '4px 10px', borderRadius: 7,
+                    background: ageBg, border: `1px solid ${ageBdr}`,
+                    transition: 'all 0.4s ease',
+                  }}>
+                    <span style={{ fontSize: 9, color: ageColor, opacity: stale || aging ? 1 : 0.55, transition: 'color 0.4s' }}>
+                      {stale ? '⚠' : '◷'}
+                    </span>
+                    <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 10, color: ageColor, transition: 'color 0.4s' }}>
+                      {ageStr}
+                    </span>
+                  </div>
+                )}
+
+                {/* Pipeline run time + completion clock */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                    padding: '4px 10px', borderRadius: 7,
+                    background: 'rgba(74,148,112,0.07)',
+                    border: '1px solid rgba(74,148,112,0.18)',
+                  }}>
+                    <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 10, color: 'var(--green-dark)' }}>
+                      › {runStr}
+                    </span>
+                  </div>
+                  <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 9, color: 'var(--text-muted)', opacity: 0.45 }}>
+                    {new Date(pipeline.cycleCompletedAt!).toLocaleTimeString('en-US', { hour12: false })}
                   </span>
                 </div>
-                <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 9, color: 'var(--text-muted)', opacity: 0.5 }}>
-                  {new Date(pipeline.cycleCompletedAt!).toLocaleTimeString('en-US', { hour12: false })}
-                </span>
               </div>
             )
           })()}

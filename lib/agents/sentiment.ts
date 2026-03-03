@@ -126,15 +126,20 @@ export async function runSentiment(
     market
       ? `Kalshi market: YES ask=${market.yes_ask}¢ bid=${market.yes_bid}¢ | NO ask=${market.no_ask}¢ | spread=${market.yes_ask - market.yes_bid}¢`
       : 'No active Kalshi market',
-    `\n${quantBrief}`,
+    `
+${quantBrief}`,
     derivativesBlock,
-    ...(liveCandles?.length && liveCandleBlock ? [`\n${liveCandleBlock}`] : []),
-    ...(candles?.length ? [`\n${formatCandles(candles)}`] : []),
-    ...(prevContext ? [`\nPrevious cycle analysis:\n${prevContext}`] : []),
+    ...(liveCandles?.length && liveCandleBlock ? [`
+${liveCandleBlock}`] : []),
+    ...(candles?.length ? [`
+${formatCandles(candles)}`] : []),
+    ...(prevContext ? [`
+Previous cycle analysis:
+${prevContext}`] : []),
   ].filter(Boolean).join('\n')
 
   // Depth controlled by ROMA_MAX_DEPTH env var (default 1). ROMA treats 0 as unlimited — never send 0.
-  const maxDepth = Math.max(1, parseInt(process.env.ROMA_MAX_DEPTH ?? '1'))
+  const maxDepth = 1
   const romaResult = await callPythonRoma(goal, context, maxDepth, 2, romaMode, provider, providers, orModelOverride, signal)
   const romaTrace  = formatRomaTrace(romaResult)
 
@@ -162,8 +167,17 @@ export async function runSentiment(
       },
       required: ['score', 'label', 'momentum', 'orderbookSkew', 'signals'],
     },
-    prompt: `Extract structured sentiment data from this ROMA analysis:\n\n${romaResult.answer}`,
+    prompt: `Extract structured sentiment data from this ROMA analysis:
+
+${romaResult.answer}`,
   })
+
+  // Normalize signals — fallback JSON responses may return a string instead of string[]
+  const signals: string[] = Array.isArray(extracted.signals)
+    ? extracted.signals
+    : typeof extracted.signals === 'string'
+      ? (extracted.signals as string).split(/[,|]/).map((s: string) => s.trim()).filter(Boolean)
+      : []
 
   return {
     agentName: `SentimentAgent (roma-dspy · ${romaResult.provider})`,
@@ -173,10 +187,12 @@ export async function runSentiment(
       label:         extracted.label,
       momentum:      extracted.momentum,
       orderbookSkew: extracted.orderbookSkew,
-      signals:       extracted.signals,
+      signals,
       provider:      romaResult.provider,
     },
-    reasoning: romaTrace + `\n\nScore: ${extracted.score.toFixed(3)} (${extracted.label}) — ${extracted.signals.join(' | ')}`,
+    reasoning: romaTrace + `
+
+Score: ${extracted.score.toFixed(3)} (${extracted.label}) — ${signals.join(' | ')}`,
     durationMs: Date.now() - start,
     timestamp: new Date().toISOString(),
   }

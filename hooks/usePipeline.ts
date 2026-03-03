@@ -45,13 +45,10 @@ function simulateOutcome(trade: TradeRecord, settlementPrice: number): TradeReco
  */
 export function usePipeline(
   liveMode: boolean,
-  romaMode: string = 'keen',
   autoTrade: boolean = false,
   aiRisk: boolean = false,
   provider2?: string,    // split-provider for ProbabilityModel
   providers?: string[],  // multi-provider parallel for Sentiment
-  sentMode?: string,     // explicit Sentiment stage mode (overrides SENT_MODE_MAP auto-downgrade)
-  probMode?: string,     // explicit Probability stage mode (overrides romaMode)
   orModel?: string,      // override OpenRouter model ID for sentiment + probability
   btcPrice?: number,     // live BTC price — used for strike-flip detection
   strikePrice?: number,  // current market strike price
@@ -130,12 +127,10 @@ export function usePipeline(
     const controller = new AbortController()
     abortRef.current = controller
     try {
-      const params = new URLSearchParams({ mode: romaMode })
+      const params = new URLSearchParams()
       if (aiRisk) params.set('aiRisk', 'true')
       if (provider2) params.set('provider2', provider2)
       if (providers && providers.length > 1) params.set('providers', providers.join(','))
-      if (sentMode) params.set('sentMode', sentMode)
-      if (probMode) params.set('probMode', probMode)
       if (orModel) params.set('orModel', orModel)
       const res = await fetch(`/api/pipeline?${params}`, {
         cache: 'no-store',
@@ -271,7 +266,7 @@ export function usePipeline(
       try { localStorage.setItem('sentient-last-cycle', String(Date.now())) } catch {}
       setNextCycleIn(CYCLE_INTERVAL_MS / 1000)
     }
-  }, [liveMode, romaMode, autoTrade, aiRisk, provider2, providers, sentMode, probMode, orModel])
+  }, [liveMode, autoTrade, aiRisk, provider2, providers, orModel])
 
   // Check server lock state on mount so the button reflects server reality
   useEffect(() => {
