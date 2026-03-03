@@ -146,8 +146,10 @@ export default function SignalPanel({ probability, sentiment }: SignalPanelProps
               fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5,
               marginTop: 2,
             }}>
-              {rec === 'YES' && <>ROMA thinks BTC will end <strong style={{ color: recColor }}>above the strike</strong> — and the market is underpricing that outcome.</>}
-              {rec === 'NO'  && <>ROMA thinks BTC will end <strong style={{ color: recColor }}>below the strike</strong> — and the market is overpricing the YES side.</>}
+              {rec === 'YES' && probability.pModel >= 0.5 && <>ROMA thinks YES wins at <strong style={{ color: recColor }}>{Math.round(probability.pModel * 100)}%</strong> — and the market is underpricing that outcome at {Math.round(probability.pMarket * 100)}¢.</>}
+              {rec === 'YES' && probability.pModel < 0.5  && <>ROMA values YES at <strong style={{ color: recColor }}>{Math.round(probability.pModel * 100)}%</strong> — the market is underpricing it at {Math.round(probability.pMarket * 100)}¢.</>}
+              {rec === 'NO'  && probability.pModel >= 0.5 && <>ROMA still thinks YES wins at <strong style={{ color: recColor }}>{Math.round(probability.pModel * 100)}%</strong>, but the market prices it at {Math.round(probability.pMarket * 100)}¢ — YES is overpriced. Buying NO captures that gap.</>}
+              {rec === 'NO'  && probability.pModel < 0.5  && <>ROMA thinks BTC will end <strong style={{ color: recColor }}>below the strike</strong> ({Math.round(probability.pModel * 100)}% YES) — and the market is overpricing YES at {Math.round(probability.pMarket * 100)}¢.</>}
               {rec === 'NO_TRADE' && <>ROMA and market agree closely — no exploitable edge found. Sitting this one out.</>}
             </div>
 
