@@ -833,7 +833,7 @@ export default function Home() {
             {/* ── Challenge + Strategy — beneath pipeline ── */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <ChallengePanel stats={stats} trades={trades} />
-              <StrategyPanel stats={stats} trades={trades} />
+              <StrategyPanel stats={stats} trades={trades} market={activeMarket} />
             </div>
           </div>
 
