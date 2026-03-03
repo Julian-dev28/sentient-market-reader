@@ -3,9 +3,8 @@
 import type { PerformanceStats, TradeRecord } from '@/lib/types'
 import { useState, useEffect } from 'react'
 
-const STARTING_CAPITAL = 1000             // $1 000 session bank
-const CHALLENGE_GOAL   = STARTING_CAPITAL * 0.25  // 25% = $250
-const ULTIMATE_GOAL    = 1000             // $1 000
+const FALLBACK_CAPITAL = 1000   // used when balance hasn't loaded yet
+const ULTIMATE_GOAL    = 1000   // $1 000 absolute P&L goal
 
 const RANKS = [
   { min: -Infinity, label: 'Bag Holder',   icon: '💀', color: '#c07070' },
@@ -46,6 +45,18 @@ function MeterBar({ value, max, color, glow }: { value: number; max: number; col
 }
 
 export default function ChallengePanel({ stats, trades }: { stats: PerformanceStats; trades: TradeRecord[] }) {
+  const [portfolioValue, setPortfolioValue] = useState<number | null>(null)
+
+  useEffect(() => {
+    fetch('/api/balance', { cache: 'no-store' })
+      .then(r => r.json())
+      .then(d => { if (d.portfolio_value) setPortfolioValue(d.portfolio_value / 100) })
+      .catch(() => {})
+  }, [])
+
+  const startingCapital = portfolioValue ?? FALLBACK_CAPITAL
+  const challengeGoal   = Math.round(startingCapital * 0.25 * 100) / 100  // 25% of account
+
   const settled    = trades.filter(t => t.outcome !== 'PENDING')
   const winTrades  = settled.filter(t => t.outcome === 'WIN')
   const pnl        = stats.totalPnl
@@ -61,11 +72,11 @@ export default function ChallengePanel({ stats, trades }: { stats: PerformanceSt
     ? winTrades.reduce((s, t) => s + (t.pnl ?? 0), 0) / winTrades.length
     : 50
 
-  const challengePct        = Math.min(100, (pnl / CHALLENGE_GOAL) * 100)
+  const challengePct        = Math.min(100, (pnl / challengeGoal) * 100)
   const ultimatePct         = Math.min(100, (pnl / ULTIMATE_GOAL) * 100)
-  const challengeRemaining  = Math.max(0, CHALLENGE_GOAL - pnl)
+  const challengeRemaining  = Math.max(0, challengeGoal - pnl)
   const ultimateRemaining   = Math.max(0, ULTIMATE_GOAL - pnl)
-  const challengeDone       = pnl >= CHALLENGE_GOAL
+  const challengeDone       = pnl >= challengeGoal
   const ultimateDone        = pnl >= ULTIMATE_GOAL
 
   const winsNeededChallenge = avgWinPnl > 0 ? Math.ceil(challengeRemaining / avgWinPnl) : null
@@ -116,13 +127,13 @@ export default function ChallengePanel({ stats, trades }: { stats: PerformanceSt
       <div style={{ marginBottom: 14 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 5 }}>
           <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-            {challengeDone ? '✓ Challenge Complete!' : `Challenge — 25%`}
+            {challengeDone ? '✓ Challenge Complete!' : `Challenge — 25% of $${startingCapital.toFixed(0)}`}
           </span>
           <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 11, fontWeight: 700, color: challengeDone ? 'var(--green)' : 'var(--amber)' }}>
-            ${pnl.toFixed(0)} / ${CHALLENGE_GOAL}
+            ${pnl.toFixed(0)} / ${challengeGoal.toFixed(0)}
           </span>
         </div>
-        <MeterBar value={pnl} max={CHALLENGE_GOAL} color={challengeDone ? 'var(--green)' : 'var(--amber)'} glow={challengeDone} />
+        <MeterBar value={pnl} max={challengeGoal} color={challengeDone ? 'var(--green)' : 'var(--amber)'} glow={challengeDone} />
         <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
           <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>
             {challengeDone ? '🎉 Goal reached!' : `$${challengeRemaining.toFixed(0)} to go`}
