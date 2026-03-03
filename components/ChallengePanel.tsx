@@ -3,22 +3,26 @@
 import type { PerformanceStats, TradeRecord } from '@/lib/types'
 import { useState, useEffect } from 'react'
 
-const FALLBACK_CAPITAL = 1000   // used when balance hasn't loaded yet
-const ULTIMATE_GOAL    = 1000   // $1 000 absolute P&L goal
+// $160k/year broken down
+const ANNUAL_GOAL  = 160_000
+const DAILY_GOAL   = ANNUAL_GOAL / 365          // $438.36
+const WEEKLY_GOAL  = ANNUAL_GOAL / 52           // $3,076.92
+const MONTHLY_GOAL = ANNUAL_GOAL / 12           // $13,333.33
 
 const RANKS = [
-  { min: -Infinity, label: 'Bag Holder',   icon: '💀', color: '#c07070' },
-  { min: 0,         label: 'Rookie',       icon: '🌱', color: 'var(--text-muted)' },
-  { min: 5,         label: 'Paper Trader', icon: '📄', color: 'var(--brown)' },
-  { min: 15,        label: 'Edge Hunter',  icon: '🎯', color: 'var(--amber)' },
-  { min: 30,        label: 'Quant Pro',    icon: '⚡', color: 'var(--blue)' },
-  { min: 60,        label: 'Quant Shark',  icon: '🦈', color: 'var(--green)' },
-  { min: 90,        label: 'LEGEND',       icon: '🏆', color: '#d4a800' },
+  { min: -Infinity, label: 'Unpaid Intern',   icon: '💼', color: '#a07070' },
+  { min: 0.25,      label: 'Junior Analyst',  icon: '📋', color: 'var(--text-muted)' },
+  { min: 1,         label: 'Analyst',         icon: '📊', color: 'var(--brown)' },
+  { min: 5,         label: 'Senior Analyst',  icon: '🔍', color: 'var(--amber)' },
+  { min: 10,        label: 'Manager',         icon: '💡', color: 'var(--blue)' },
+  { min: 25,        label: 'Director',        icon: '⚡', color: '#7b5ea7' },
+  { min: 50,        label: 'VP',              icon: '🏦', color: 'var(--green)' },
+  { min: 100,       label: 'CEO',             icon: '👑', color: '#d4a800' },
 ]
 
-function getRank(pctToUltimate: number) {
+function getRank(pctOfAnnual: number) {
   let rank = RANKS[0]
-  for (const r of RANKS) { if (pctToUltimate >= r.min) rank = r }
+  for (const r of RANKS) { if (pctOfAnnual >= r.min) rank = r }
   return rank
 }
 
@@ -27,11 +31,11 @@ function MeterBar({ value, max, color, glow }: { value: number; max: number; col
   const pct = Math.max(0, Math.min(100, (value / max) * 100))
   useEffect(() => { const id = setTimeout(() => setWidth(pct), 120); return () => clearTimeout(id) }, [pct])
   return (
-    <div style={{ height: 10, borderRadius: 5, background: 'var(--bg-secondary)', overflow: 'hidden', position: 'relative' }}>
+    <div style={{ height: 10, borderRadius: 5, background: 'var(--bg-secondary)', overflow: 'hidden' }}>
       <div style={{
         height: '100%', width: `${width}%`, background: color, borderRadius: 5,
         transition: 'width 0.9s cubic-bezier(0.34,1.56,0.64,1)',
-        boxShadow: glow ? `0 0 8px ${color}88` : 'none',
+        boxShadow: glow ? `0 0 10px ${color}99` : 'none',
         position: 'relative',
       }}>
         <div style={{
@@ -44,57 +48,70 @@ function MeterBar({ value, max, color, glow }: { value: number; max: number; col
   )
 }
 
+function StatRow({ label, value, color, highlight }: { label: string; value: string; color?: string; highlight?: boolean }) {
+  return (
+    <div style={{
+      padding: '7px 11px', borderRadius: 8,
+      background: highlight ? 'rgba(212,135,44,0.07)' : 'var(--bg-secondary)',
+      border: highlight ? '1px solid rgba(212,135,44,0.3)' : '1px solid var(--border)',
+      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+    }}>
+      <span style={{ fontSize: 10, color: 'var(--text-secondary)' }}>{label}</span>
+      <span style={{ fontSize: 11, fontFamily: 'var(--font-geist-mono)', fontWeight: 800, color: color ?? 'var(--text-primary)' }}>
+        {value}
+      </span>
+    </div>
+  )
+}
+
 export default function ChallengePanel({ stats, trades }: { stats: PerformanceStats; trades: TradeRecord[] }) {
-  const [portfolioValue, setPortfolioValue] = useState<number | null>(null)
+  const settled   = trades.filter(t => t.outcome !== 'PENDING')
+  const winTrades = settled.filter(t => t.outcome === 'WIN')
+  const pnl       = stats.totalPnl
 
-  useEffect(() => {
-    fetch('/api/balance', { cache: 'no-store' })
-      .then(r => r.json())
-      .then(d => { if (d.portfolio_value) setPortfolioValue(d.portfolio_value / 100) })
-      .catch(() => {})
-  }, [])
-
-  const startingCapital = portfolioValue ?? FALLBACK_CAPITAL
-  const challengeGoal   = Math.round(startingCapital * 0.25 * 100) / 100  // 25% of account
-
-  const settled    = trades.filter(t => t.outcome !== 'PENDING')
-  const winTrades  = settled.filter(t => t.outcome === 'WIN')
-  const pnl        = stats.totalPnl
-
-  // Win streak (consecutive wins from the end)
+  // Win streak
   let streak = 0
   for (let i = settled.length - 1; i >= 0; i--) {
     if (settled[i].outcome === 'WIN') streak++; else break
   }
 
-  // Avg payout per winning trade (or estimate $50 if no history)
+  // Avg payout per winning trade ($50 estimate if no history)
   const avgWinPnl = winTrades.length > 0
     ? winTrades.reduce((s, t) => s + (t.pnl ?? 0), 0) / winTrades.length
     : 50
 
-  const challengePct        = Math.min(100, (pnl / challengeGoal) * 100)
-  const ultimatePct         = Math.min(100, (pnl / ULTIMATE_GOAL) * 100)
-  const challengeRemaining  = Math.max(0, challengeGoal - pnl)
-  const ultimateRemaining   = Math.max(0, ULTIMATE_GOAL - pnl)
-  const challengeDone       = pnl >= challengeGoal
-  const ultimateDone        = pnl >= ULTIMATE_GOAL
+  const dailyPct   = Math.min(100, (pnl / DAILY_GOAL)  * 100)
+  const annualPct  = Math.min(100, (pnl / ANNUAL_GOAL) * 100)
+  const dailyDone  = pnl >= DAILY_GOAL
+  const annualDone = pnl >= ANNUAL_GOAL
 
-  const winsNeededChallenge = avgWinPnl > 0 ? Math.ceil(challengeRemaining / avgWinPnl) : null
-  const winsNeededUltimate  = avgWinPnl > 0 ? Math.ceil(ultimateRemaining  / avgWinPnl) : null
-  const rank = getRank(Math.max(0, ultimatePct))
+  const dailyRemaining  = Math.max(0, DAILY_GOAL  - pnl)
+  const weeklyRemaining = Math.max(0, WEEKLY_GOAL - pnl)
+  const annualRemaining = Math.max(0, ANNUAL_GOAL - pnl)
 
-  // Next rank threshold
-  const rankIdx     = RANKS.indexOf(rank)
-  const nextRank    = RANKS[rankIdx + 1] ?? null
-  const toNextRank  = nextRank ? (nextRank.min / 100) * ULTIMATE_GOAL - pnl : null
+  const winsToDay    = avgWinPnl > 0 ? Math.ceil(dailyRemaining  / avgWinPnl) : null
+  const winsToWeek   = avgWinPnl > 0 ? Math.ceil(weeklyRemaining / avgWinPnl) : null
+  const daysAtPace   = (pnl > 0 && avgWinPnl > 0 && settled.length > 0)
+    ? Math.ceil(annualRemaining / (pnl / Math.max(1, settled.length) * 3))  // ~3 trades/day pace
+    : null
+
+  const rank    = getRank(Math.max(0, annualPct))
+  const rankIdx = RANKS.indexOf(rank)
+  const nextRank = RANKS[rankIdx + 1] ?? null
+  const toNextRank = nextRank ? (nextRank.min / 100) * ANNUAL_GOAL - pnl : null
 
   return (
     <div className="card">
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-          <span style={{ fontSize: 14 }}>🎯</span>
-          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>Daily Challenge</span>
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+            <span style={{ fontSize: 14 }}>💰</span>
+            <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>$160k Challenge</span>
+          </div>
+          <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2, marginLeft: 21 }}>
+            ${DAILY_GOAL.toFixed(2)}/day · ${WEEKLY_GOAL.toFixed(0)}/wk · ${MONTHLY_GOAL.toFixed(0)}/mo
+          </div>
         </div>
         {/* Rank badge */}
         <div style={{
@@ -103,7 +120,7 @@ export default function ChallengePanel({ stats, trades }: { stats: PerformanceSt
           background: 'var(--bg-secondary)', border: '1px solid var(--border)',
         }}>
           <span style={{ fontSize: 12 }}>{rank.icon}</span>
-          <span style={{ fontSize: 10, fontWeight: 800, color: rank.color, letterSpacing: '0.02em' }}>{rank.label}</span>
+          <span style={{ fontSize: 10, fontWeight: 800, color: rank.color }}>{rank.label}</span>
         </div>
       </div>
 
@@ -113,7 +130,6 @@ export default function ChallengePanel({ stats, trades }: { stats: PerformanceSt
           marginBottom: 12, padding: '7px 12px', borderRadius: 9,
           background: 'var(--green-pale)', border: '1px solid #a8d8b5',
           display: 'flex', alignItems: 'center', gap: 7,
-          animation: 'scaleIn 0.2s ease',
         }}>
           <span style={{ fontSize: 14 }}>{'🔥'.repeat(Math.min(streak, 5))}</span>
           <div>
@@ -123,44 +139,44 @@ export default function ChallengePanel({ stats, trades }: { stats: PerformanceSt
         </div>
       )}
 
-      {/* ── Challenge goal ── */}
+      {/* ── Daily goal ── */}
       <div style={{ marginBottom: 14 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 5 }}>
           <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-            {challengeDone ? '✓ Challenge Complete!' : `Challenge — 25% of $${startingCapital.toFixed(0)}`}
+            {dailyDone ? '✓ Daily Target Hit!' : 'Today\'s Target'}
           </span>
-          <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 11, fontWeight: 700, color: challengeDone ? 'var(--green)' : 'var(--amber)' }}>
-            ${pnl.toFixed(0)} / ${challengeGoal.toFixed(0)}
+          <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 11, fontWeight: 700, color: dailyDone ? 'var(--green)' : 'var(--amber)' }}>
+            ${pnl.toFixed(2)} / ${DAILY_GOAL.toFixed(2)}
           </span>
         </div>
-        <MeterBar value={pnl} max={challengeGoal} color={challengeDone ? 'var(--green)' : 'var(--amber)'} glow={challengeDone} />
+        <MeterBar value={pnl} max={DAILY_GOAL} color={dailyDone ? 'var(--green)' : 'var(--amber)'} glow={dailyDone} />
         <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
           <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>
-            {challengeDone ? '🎉 Goal reached!' : `$${challengeRemaining.toFixed(0)} to go`}
+            {dailyDone ? '🎉 Daily salary earned!' : `$${dailyRemaining.toFixed(2)} to go`}
           </span>
           <span style={{ fontSize: 9, fontFamily: 'var(--font-geist-mono)', fontWeight: 700, color: 'var(--amber)' }}>
-            {challengePct.toFixed(1)}%
+            {dailyPct.toFixed(1)}%
           </span>
         </div>
       </div>
 
-      {/* ── Ultimate goal ── */}
+      {/* ── Annual goal ── */}
       <div style={{ marginBottom: 14 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 5 }}>
           <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-            {ultimateDone ? '🏆 LEGEND!' : 'Ultimate Goal — $1,000'}
+            {annualDone ? '👑 CEO!' : 'Annual — $160,000'}
           </span>
-          <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 11, fontWeight: 700, color: ultimateDone ? '#d4a800' : 'var(--blue)' }}>
-            ${pnl.toFixed(0)} / $1,000
+          <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 11, fontWeight: 700, color: annualDone ? '#d4a800' : 'var(--blue)' }}>
+            ${pnl.toFixed(0)} / $160k
           </span>
         </div>
-        <MeterBar value={pnl} max={ULTIMATE_GOAL} color={ultimateDone ? '#d4a800' : 'var(--blue)'} glow={ultimateDone} />
+        <MeterBar value={pnl} max={ANNUAL_GOAL} color={annualDone ? '#d4a800' : 'var(--blue)'} glow={annualDone} />
         <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
           <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>
-            {ultimateDone ? '🏆 LEGEND status reached!' : `$${ultimateRemaining.toFixed(0)} to go`}
+            {annualDone ? '👑 CEO status!' : `$${annualRemaining.toLocaleString('en-US', { maximumFractionDigits: 0 })} to go`}
           </span>
           <span style={{ fontSize: 9, fontFamily: 'var(--font-geist-mono)', fontWeight: 700, color: 'var(--blue)' }}>
-            {ultimatePct.toFixed(1)}%
+            {annualPct.toFixed(3)}%
           </span>
         </div>
       </div>
@@ -173,10 +189,10 @@ export default function ChallengePanel({ stats, trades }: { stats: PerformanceSt
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         }}>
           <span style={{ fontSize: 10, color: 'var(--text-secondary)' }}>
-            Next rank: <span style={{ fontWeight: 700, color: nextRank.color }}>{nextRank.icon} {nextRank.label}</span>
+            Next: <span style={{ fontWeight: 700, color: nextRank.color }}>{nextRank.icon} {nextRank.label}</span>
           </span>
           <span style={{ fontSize: 10, fontFamily: 'var(--font-geist-mono)', fontWeight: 700, color: 'var(--text-muted)' }}>
-            ${toNextRank.toFixed(0)} away
+            ${toNextRank.toLocaleString('en-US', { maximumFractionDigits: 0 })} away
           </span>
         </div>
       )}
@@ -184,68 +200,25 @@ export default function ChallengePanel({ stats, trades }: { stats: PerformanceSt
       {/* ── Route to goal ── */}
       <div style={{ borderTop: '1px solid var(--border)', paddingTop: 10 }}>
         <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>
-          Route to Goal
+          Route to $160k
         </div>
-
         <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-          {/* Avg win */}
-          <div style={{
-            padding: '8px 11px', borderRadius: 8,
-            background: 'var(--bg-secondary)', border: '1px solid var(--border)',
-            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-          }}>
-            <span style={{ fontSize: 10, color: 'var(--text-secondary)' }}>
-              {winTrades.length > 0 ? 'Avg win payout' : 'Est. win payout'}
-            </span>
-            <span style={{ fontSize: 10, fontFamily: 'var(--font-geist-mono)', fontWeight: 700, color: 'var(--green)' }}>
-              +${avgWinPnl.toFixed(0)} / trade
-            </span>
-          </div>
-
-          {/* Wins to challenge */}
-          {!challengeDone && winsNeededChallenge !== null && (
-            <div style={{
-              padding: '8px 11px', borderRadius: 8,
-              background: 'rgba(212,135,44,0.07)', border: '1px solid rgba(212,135,44,0.3)',
-              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-            }}>
-              <span style={{ fontSize: 10, color: 'var(--text-secondary)' }}>
-                Wins to clear challenge
-              </span>
-              <span style={{ fontSize: 13, fontFamily: 'var(--font-geist-mono)', fontWeight: 800, color: 'var(--amber)' }}>
-                ×{winsNeededChallenge}
-              </span>
-            </div>
+          <StatRow
+            label={winTrades.length > 0 ? 'Avg win / trade' : 'Est. win / trade'}
+            value={`+$${avgWinPnl.toFixed(0)}`}
+            color="var(--green)"
+          />
+          {!dailyDone && winsToDay !== null && (
+            <StatRow label="Wins to hit today's target" value={`×${winsToDay}`} color="var(--amber)" highlight />
           )}
-
-          {/* Wins to ultimate */}
-          {!ultimateDone && winsNeededUltimate !== null && (
-            <div style={{
-              padding: '8px 11px', borderRadius: 8,
-              background: 'rgba(74,127,165,0.07)', border: '1px solid rgba(74,127,165,0.25)',
-              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-            }}>
-              <span style={{ fontSize: 10, color: 'var(--text-secondary)' }}>
-                Wins to $1k goal
-              </span>
-              <span style={{ fontSize: 13, fontFamily: 'var(--font-geist-mono)', fontWeight: 800, color: 'var(--blue)' }}>
-                ×{winsNeededUltimate}
-              </span>
-            </div>
+          {winsToWeek !== null && (
+            <StatRow label="Wins to hit weekly target" value={`×${winsToWeek}`} color="var(--blue)" />
           )}
-
-          {/* Best single trade potential */}
+          {daysAtPace !== null && (
+            <StatRow label="Days at current pace → $160k" value={`~${daysAtPace.toLocaleString()} days`} color="var(--text-muted)" />
+          )}
           {stats.bestTrade > 0 && (
-            <div style={{
-              padding: '8px 11px', borderRadius: 8,
-              background: 'var(--bg-secondary)', border: '1px solid var(--border)',
-              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-            }}>
-              <span style={{ fontSize: 10, color: 'var(--text-secondary)' }}>Best single trade</span>
-              <span style={{ fontSize: 10, fontFamily: 'var(--font-geist-mono)', fontWeight: 700, color: 'var(--green)' }}>
-                +${stats.bestTrade.toFixed(0)}
-              </span>
-            </div>
+            <StatRow label="Best single trade" value={`+$${stats.bestTrade.toFixed(0)}`} color="var(--green)" />
           )}
         </div>
       </div>
