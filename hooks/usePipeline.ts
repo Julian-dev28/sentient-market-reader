@@ -57,7 +57,13 @@ export function usePipeline(
   const [pipeline, setPipeline]           = useState<PipelineState | null>(null)
   const [history, setHistory]             = useState<PipelineState[]>([])
   const [streamingAgents, setStreamingAgents] = useState<PartialPipelineAgents>({})
-  const [trades, setTrades]               = useState<TradeRecord[]>([])
+  const [trades, setTrades]               = useState<TradeRecord[]>(() => {
+    if (typeof window === 'undefined') return []
+    try {
+      const saved = localStorage.getItem('sentient-trades')
+      return saved ? (JSON.parse(saved) as TradeRecord[]) : []
+    } catch { return [] }
+  })
   const [isRunning, setIsRunning]         = useState(false)
   const [serverLocked, setServerLocked]   = useState(false)
   const [nextCycleIn, setNextCycleIn] = useState(CYCLE_INTERVAL_MS / 1000)
@@ -67,6 +73,11 @@ export function usePipeline(
   const autoIntervalRef             = useRef<ReturnType<typeof setInterval> | null>(null)
   const runCycleRef                 = useRef<(() => Promise<void>) | null>(null)
   const abortRef                    = useRef<AbortController | null>(null)
+
+  // Persist trades across page refreshes
+  useEffect(() => {
+    try { localStorage.setItem('sentient-trades', JSON.stringify(trades)) } catch {}
+  }, [trades])
 
   const stopCycle = useCallback(() => {
     abortRef.current?.abort()
