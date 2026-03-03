@@ -1,7 +1,18 @@
 'use client'
 
-import type { PerformanceStats, TradeRecord } from '@/lib/types'
+import type { PerformanceStats, TradeRecord, KalshiMarket } from '@/lib/types'
 import { useState, useEffect } from 'react'
+
+const BOT_TRADE_DOLLARS = 100  // mirrors usePipeline constant
+
+/** Compute expected win/loss for a $100 bot trade at a given ask price (cents). */
+function tradeDefaults(askCents: number) {
+  const contracts     = Math.max(1, Math.floor(BOT_TRADE_DOLLARS / (askCents / 100)))
+  const estimatedCost = contracts * askCents / 100
+  const win           = contracts - estimatedCost   // each contract settles at $1
+  const loss          = estimatedCost
+  return { win, loss, contracts }
+}
 
 const DAILY_GOAL   = 160_000 / 365   // $438.36
 const WEEKLY_GOAL  = 160_000 / 52
@@ -36,7 +47,11 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   )
 }
 
-export default function StrategyPanel({ stats, trades }: { stats: PerformanceStats; trades: TradeRecord[] }) {
+export default function StrategyPanel({ stats, trades, market }: {
+  stats: PerformanceStats
+  trades: TradeRecord[]
+  market?: KalshiMarket | null
+}) {
   const [portfolioValue, setPortfolioValue] = useState<number | null>(null)
 
   useEffect(() => {
@@ -51,8 +66,12 @@ export default function StrategyPanel({ stats, trades }: { stats: PerformanceSta
   const winTrades  = settled.filter(t => t.outcome === 'WIN')
   const lossTrades = settled.filter(t => t.outcome === 'LOSS')
 
-  const avgWinPnl  = winTrades.length  > 0 ? winTrades.reduce((s, t)  => s + (t.pnl ?? 0), 0) / winTrades.length  : 50
-  const avgLossPnl = lossTrades.length > 0 ? Math.abs(lossTrades.reduce((s, t) => s + (t.pnl ?? 0), 0) / lossTrades.length) : 30
+  // Use live ask price to compute realistic default win/loss for a $100 trade
+  const liveAsk    = market?.yes_ask ?? 50   // fallback to 50¢ if no market
+  const defaults   = tradeDefaults(liveAsk)
+
+  const avgWinPnl  = winTrades.length  > 0 ? winTrades.reduce((s, t)  => s + (t.pnl ?? 0), 0) / winTrades.length  : defaults.win
+  const avgLossPnl = lossTrades.length > 0 ? Math.abs(lossTrades.reduce((s, t) => s + (t.pnl ?? 0), 0) / lossTrades.length) : defaults.loss
   const winRate    = stats.totalTrades > 0 ? stats.winRate : 0.52   // default estimate
   const ev         = winRate * avgWinPnl - (1 - winRate) * avgLossPnl  // expected value per trade
 
@@ -153,8 +172,11 @@ export default function StrategyPanel({ stats, trades }: { stats: PerformanceSta
         />
         <Row
           label="Avg win / loss"
-          value={`+$${avgWinPnl.toFixed(0)} / -$${avgLossPnl.toFixed(0)}`}
+          value={`+$${avgWinPnl.toFixed(2)} / -$${avgLossPnl.toFixed(2)}`}
           color="var(--text-primary)"
+          sub={settled.length === 0
+            ? `est. from ${defaults.contracts} contracts @ ${liveAsk}¢ ask ($${BOT_TRADE_DOLLARS} trade)`
+            : undefined}
         />
         <Row
           label="Profit factor"
@@ -166,13 +188,17 @@ export default function StrategyPanel({ stats, trades }: { stats: PerformanceSta
           label="Expected value / trade"
           value={ev > 0 ? `+$${ev.toFixed(2)}` : `$${ev.toFixed(2)}`}
           color={ev > 0 ? 'var(--green)' : 'var(--pink)'}
-          sub={stats.totalTrades === 0 ? 'estimated (no settled trades yet)' : undefined}
+          sub={stats.totalTrades === 0 ? `est. at ${liveAsk}¢ ask · 52% win rate` : undefined}
         />
         <Row
           label="Half-Kelly fraction"
-          value={`${halfKelly}% of bankroll`}
+          value={portfolioValue
+            ? `${halfKelly}% = $${(portfolioValue * Number(halfKelly) / 100).toFixed(2)}`
+            : `${halfKelly}% of bankroll`}
           color="var(--brown)"
-          sub="theoretical optimal position size"
+          sub={portfolioValue
+            ? `of $${portfolioValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} portfolio`
+            : 'theoretical optimal position size'}
         />
       </Section>
 
