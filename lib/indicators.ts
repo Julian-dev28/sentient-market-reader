@@ -149,6 +149,138 @@ export function computeCUSUM(
   }
 }
 
+// ── Bipower Variation (Barndorff-Nielsen & Shephard, 2004) ────────────────────
+// Jump-robust realized volatility: BV = (π/2) × mean(|r_i| × |r_{i+1}|)
+// Regular realized variance (RV) is inflated by jumps; BV filters them out.
+// Jump ratio JR = RV/BV − 1 ≥ 0 measures the fraction of variance from discrete jumps.
+// Use bvVol (not gkVol) in option pricing when jumps are detected.
+export function computeBipowerVariation(candles: OHLCVCandle[]): {
+  bv: number        // bipower variation (jump-robust variance)
+  rv: number        // total realized variance
+  jumpRatio: number // RV/BV − 1: proportion of variance attributable to jumps
+  bvVol: number     // sqrt(BV): jump-robust per-candle vol
+} | null {
+  const closes = [...candles].reverse().map(c => c[4])
+  if (closes.length < 4) return null
+  const lr: number[] = []
+  for (let i = 1; i < closes.length; i++) {
+    if (closes[i - 1] > 0) lr.push(Math.log(closes[i] / closes[i - 1]))
+  }
+  if (lr.length < 3) return null
+  const rv = lr.reduce((s, r) => s + r * r, 0) / lr.length
+  const bv = (Math.PI / 2) * lr.slice(1).reduce((s, r, i) => s + Math.abs(lr[i]) * Math.abs(r), 0) / (lr.length - 1)
+  const jumpRatio = Math.max(0, rv / Math.max(bv, 1e-20) - 1)
+  return { bv, rv, jumpRatio, bvVol: Math.sqrt(Math.max(bv, 0)) }
+}
+
+// ── Realized skewness + excess kurtosis ──────────────────────────────────────
+// γ₁ = E[(r−μ)³] / σ³  (negative = left-tail heavier, BTC typically slightly negative)
+// γ₂ = E[(r−μ)⁴] / σ⁴ − 3  (positive = fat tails, BTC typically 2–6)
+export function computeSkewKurt(candles: OHLCVCandle[]): {
+  skew: number
+  excessKurt: number
+} | null {
+  const closes = [...candles].reverse().map(c => c[4])
+  if (closes.length < 5) return null
+  const lr: number[] = []
+  for (let i = 1; i < closes.length; i++) {
+    if (closes[i - 1] > 0) lr.push(Math.log(closes[i] / closes[i - 1]))
+  }
+  const n = lr.length
+  if (n < 4) return null
+  const mean = lr.reduce((s, r) => s + r, 0) / n
+  const m2 = lr.reduce((s, r) => s + (r - mean) ** 2, 0) / n
+  const m3 = lr.reduce((s, r) => s + (r - mean) ** 3, 0) / n
+  const m4 = lr.reduce((s, r) => s + (r - mean) ** 4, 0) / n
+  if (m2 <= 0) return null
+  return { skew: m3 / m2 ** 1.5, excessKurt: m4 / m2 ** 2 - 3 }
+}
+
+// ── Cornish-Fisher d₂ adjustment ──────────────────────────────────────────────
+// Maps a standard normal quantile to the equivalent quantile of a distribution
+// with observed skew γ₁ and excess kurtosis γ₂ (Edgeworth expansion, 2nd order).
+// d₂_CF = z + (γ₁/6)(z²−1) + (γ₂/24)(z³−3z) − (γ₁²/36)(2z³−5z)
+// Applying normalCDF(d₂_CF) yields a skew/kurtosis-corrected option price.
+function cornishFisherAdjust(d2: number, skew: number, excessKurt: number): number {
+  const z = d2
+  return z
+    + (skew / 6)          * (z * z - 1)
+    + (excessKurt / 24)   * (z ** 3 - 3 * z)
+    - ((skew * skew) / 36) * (2 * z ** 3 - 5 * z)
+}
+
+// ── Skew/kurtosis-adjusted binary option (Cornish-Fisher) ────────────────────
+// Same d₂ formula as log-normal binary, but adjusted for empirical higher moments.
+// Captures the asymmetric crash risk and fat-tail structure of BTC returns.
+export function computeSkewAdjBinary(
+  spot: number,
+  strike: number,
+  sigmaAnnualized: number,
+  minutesLeft: number,
+  skew: number,
+  excessKurt: number,
+): { pYesSkewAdj: number; d2: number; d2CF: number } | null {
+  if (spot <= 0 || strike <= 0 || sigmaAnnualized <= 0 || minutesLeft <= 0) return null
+  const T  = minutesLeft / (365 * 24 * 60)
+  const d2 = (Math.log(spot / strike) - 0.5 * sigmaAnnualized ** 2 * T) /
+             (sigmaAnnualized * Math.sqrt(T))
+  const d2CF = cornishFisherAdjust(d2, skew, excessKurt)
+  return { pYesSkewAdj: normalCDF(d2CF), d2, d2CF }
+}
+
+// ── Binary option Greeks (Delta, Theta) ───────────────────────────────────────
+// Delta Δ = ∂P/∂S = φ(d₂)/(σ·S·√T)  — probability gain per $1 BTC price move
+// Theta Θ = ∂P/∂t (per minute) = −φ(d₂)·σ/(2√T) × (1 / (365·24·60))
+// High |Δ| → near the strike, very price-sensitive.
+// High |Θ| → time is rapidly collapsing the distribution toward the current spot.
+export function computeBinaryGreeks(
+  spot: number,
+  strike: number,
+  sigmaAnnualized: number,
+  minutesLeft: number,
+): { delta: number; thetaPerMin: number; d2: number } | null {
+  if (spot <= 0 || strike <= 0 || sigmaAnnualized <= 0 || minutesLeft <= 0) return null
+  const T   = minutesLeft / (365 * 24 * 60)
+  const sqT = Math.sqrt(T)
+  const d2  = (Math.log(spot / strike) - 0.5 * sigmaAnnualized ** 2 * T) /
+              (sigmaAnnualized * sqT)
+  const phi = Math.exp(-0.5 * d2 * d2) / Math.sqrt(2 * Math.PI)
+  return {
+    delta:      phi / (sigmaAnnualized * spot * sqT),
+    thetaPerMin: -(phi * sigmaAnnualized * spot) / (2 * sqT) / (365 * 24 * 60),
+    d2,
+  }
+}
+
+// ── Volatility of Volatility (VoV) ────────────────────────────────────────────
+// Coefficient of variation of |log-returns|: VoV = std(|r|) / mean(|r|)
+// High VoV → vol is itself unstable → quant pricing models less reliable this cycle.
+// Low VoV  → vol is stable → models can be trusted more.
+export function computeVolOfVol(candles: OHLCVCandle[]): number | null {
+  const closes = [...candles].reverse().map(c => c[4])
+  if (closes.length < 5) return null
+  const absRets: number[] = []
+  for (let i = 1; i < closes.length; i++) {
+    if (closes[i - 1] > 0) absRets.push(Math.abs(Math.log(closes[i] / closes[i - 1])))
+  }
+  if (absRets.length < 4) return null
+  const mean = absRets.reduce((s, r) => s + r, 0) / absRets.length
+  const std  = Math.sqrt(absRets.reduce((s, r) => s + (r - mean) ** 2, 0) / absRets.length)
+  return mean > 0 ? std / mean : null
+}
+
+// ── Orderbook-implied probability ─────────────────────────────────────────────
+// Converts pressure-weighted orderbook imbalance to a P(YES) point estimate.
+// Buyers paying up for YES = crowd expects YES; pressure maps linearly to [0.20, 0.80].
+// Treated as a weak auxiliary signal in the LOP (lower weight than pricing models).
+export function computeOrderbookImpliedProb(
+  obImbalance: { simple: number; pressureWeighted: number } | null,
+): number | null {
+  if (!obImbalance) return null
+  const pw = Math.max(-1, Math.min(1, obImbalance.pressureWeighted))
+  return Math.max(0.05, Math.min(0.95, 0.5 + pw * 0.30))
+}
+
 // ── Internal EMA helper (oldest-first closes array) ──────────────────────────
 function emaFromCloses(closes: number[], period: number): number[] {
   if (closes.length < period) return []
@@ -394,10 +526,18 @@ export interface QuantSignals {
   // Pricing models
   brownianPrior: { pQuant: number; sigmaCandle: number; sigmaPerMin: number } | null
   lnBinary:      { pYes: number; d2: number } | null
-  fatTailBinary: { pYesFat: number; d2: number } | null  // Student-t (ν=4) — preferred for BTC fat tails
+  fatTailBinary: { pYesFat: number; d2: number } | null                    // Student-t (ν=4)
+  skewAdjBinary: { pYesSkewAdj: number; d2: number; d2CF: number } | null  // Cornish-Fisher
+  binaryGreeks:  { delta: number; thetaPerMin: number; d2: number } | null // Δ and Θ
   // Long-memory & regime
-  hurstExponent: number | null   // H>0.5 trending, H<0.5 mean-reverting, H≈0.5 random walk
-  cusum:         { posScore: number; negScore: number; jumpDetected: boolean; direction: 'up' | 'down' | 'none' } | null
+  hurstExponent:  number | null
+  cusum:          { posScore: number; negScore: number; jumpDetected: boolean; direction: 'up' | 'down' | 'none' } | null
+  // Higher-moment volatility
+  bipowerVar:    { bv: number; rv: number; jumpRatio: number; bvVol: number } | null
+  skewKurt:      { skew: number; excessKurt: number } | null
+  volOfVol:      number | null  // coefficient of variation of |returns|
+  // Auxiliary probability
+  obImpliedProb: number | null  // orderbook-implied P(YES) ∈ [0.05, 0.95]
 }
 
 export function computeQuantSignals(
@@ -424,6 +564,31 @@ export function computeQuantSignals(
     ? brownianPrior.sigmaPerMin * Math.sqrt(minutesLeft) * spot
     : null
 
+  // Higher-moment analysis
+  const bipowerVar = candles ? computeBipowerVariation(candles) : null
+  const skewKurt   = candles ? computeSkewKurt(candles) : null
+  const volOfVol   = candles ? computeVolOfVol(candles) : null
+
+  // Cornish-Fisher skew/kurtosis-adjusted binary
+  // When jumps detected, prefer bipower vol (jump-robust) over GK vol
+  const bvAnnualized = bipowerVar
+    ? bipowerVar.bvVol * Math.sqrt(35_040)
+    : gkVolAnnualized
+  const sigmaForSkewAdj = (bipowerVar && bipowerVar.jumpRatio > 0.3)
+    ? (bvAnnualized ?? gkVolAnnualized)
+    : gkVolAnnualized
+  const skewAdjBinary = sigmaForSkewAdj !== null && skewKurt !== null
+    ? computeSkewAdjBinary(spot, strike, sigmaForSkewAdj, minutesLeft, skewKurt.skew, skewKurt.excessKurt)
+    : null
+
+  // Binary Greeks — use bipower vol when jumps present, else GK
+  const binaryGreeks = sigmaForSkewAdj !== null
+    ? computeBinaryGreeks(spot, strike, sigmaForSkewAdj, minutesLeft)
+    : null
+
+  const obImbalance   = computeOrderbookImbalance(orderbook)
+  const obImpliedProb = computeOrderbookImpliedProb(obImbalance)
+
   return {
     gkVol15m,
     gkVolAnnualized,
@@ -436,12 +601,18 @@ export function computeQuantSignals(
     vwap:       candles ? computeVWAP(candles) : null,
     autocorr:   candles ? computeReturnAutoCorr(candles) : null,
     velocity:   liveCandles ? computePriceVelocity(liveCandles) : null,
-    obImbalance: computeOrderbookImbalance(orderbook),
+    obImbalance,
     brownianPrior,
     lnBinary,
     fatTailBinary,
+    skewAdjBinary,
+    binaryGreeks,
     hurstExponent: candles ? computeHurst(candles) : null,
     cusum:         candles ? computeCUSUM(candles) : null,
+    bipowerVar,
+    skewKurt,
+    volOfVol,
+    obImpliedProb,
   }
 }
 
@@ -474,7 +645,44 @@ export function formatQuantBrief(
     const diff = sig.lnBinary ? ((sig.fatTailBinary.pYesFat - sig.lnBinary.pYes) * 100) : 0
     lines.push(
       `  Fat-tail binary P(YES):    ${(sig.fatTailBinary.pYesFat * 100).toFixed(2)}%` +
-      `  [ν=4 Student-t · ${diff >= 0 ? '+' : ''}${diff.toFixed(2)}pp vs normal — PREFERRED for BTC fat tails]`
+      `  [ν=4 Student-t · ${diff >= 0 ? '+' : ''}${diff.toFixed(2)}pp vs normal]`
+    )
+  }
+  if (sig.skewAdjBinary) {
+    const cf = sig.skewAdjBinary
+    const sk = sig.skewKurt
+    lines.push(
+      `  Cornish-Fisher P(YES):     ${(cf.pYesSkewAdj * 100).toFixed(2)}%` +
+      `  [d₂=${cf.d2.toFixed(3)} → d₂_CF=${cf.d2CF.toFixed(3)}` +
+      (sk ? `  γ₁=${cf.d2 < cf.d2CF ? '+' : ''}${sk.skew.toFixed(3)} γ₂=${sk.excessKurt.toFixed(2)}` : '') +
+      `]`
+    )
+  }
+  if (sig.bipowerVar) {
+    const bv = sig.bipowerVar
+    const jr = bv.jumpRatio
+    lines.push(
+      `  Bipower variation vol:     ${(bv.bvVol * 100).toFixed(4)}%/candle (jump-robust)` +
+      `  [JR=${jr.toFixed(3)} — ${jr > 0.3 ? '⚠ JUMP VARIANCE DOMINATES: use bvVol for pricing' : jr > 0.1 ? 'moderate jump component' : 'continuous diffusion regime'}]`
+    )
+  }
+  if (sig.binaryGreeks) {
+    const g = sig.binaryGreeks
+    lines.push(
+      `  Binary Greeks:  Δ=${g.delta.toFixed(6)}/$ BTC  Θ=${(g.thetaPerMin * 100).toFixed(6)}pp/min` +
+      `  [Δ near-ATM if Δ×$1000>0.5%; Θ shows P decay rate — high Θ = fast time kill]`
+    )
+  }
+  if (sig.obImpliedProb !== null) {
+    lines.push(
+      `  Orderbook P(YES):          ${(sig.obImpliedProb * 100).toFixed(1)}%  [crowd depth pressure — auxiliary signal]`
+    )
+  }
+  if (sig.volOfVol !== null) {
+    const vov = sig.volOfVol
+    lines.push(
+      `  Vol-of-Vol (VoV):          ${vov.toFixed(3)}` +
+      `  [${vov > 1.0 ? '⚠ HIGH — vol unstable, quant models less reliable' : vov > 0.6 ? 'moderate vol instability' : 'stable vol — quant models reliable'}]`
     )
   }
   if (sig.gkVol15m !== null) {

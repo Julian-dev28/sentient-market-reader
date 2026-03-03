@@ -159,48 +159,61 @@ export async function runProbabilityModel(
   const pBrownian = quant.brownianPrior?.pQuant ?? null
   const pLN       = quant.lnBinary?.pYes ?? null
   const pFatTail  = quant.fatTailBinary?.pYesFat ?? null
+  const pSkewAdj  = quant.skewAdjBinary?.pYesSkewAdj ?? null
+  const pOB       = quant.obImpliedProb ?? null
 
-  // Prefer fat-tail over normal LN binary (BTC ν≈4); weight fat-tail 55% vs brownian 45%
-  const pQuantCombined =
-    pBrownian !== null && pFatTail !== null ? logOpinionPool(pBrownian, pFatTail, 0.45, 0.55) :
-    pBrownian !== null && pLN      !== null ? logOpinionPool(pBrownian, pLN,      0.50, 0.50) :
-    (pFatTail ?? pBrownian ?? pLN)
+  // Physics priors — priority: Cornish-Fisher (skew+kurt+σ) > fat-tail (ν=4+σ) > LN (σ only) > Brownian
+  const pPhysicsCombined =
+    pSkewAdj  !== null && pFatTail  !== null ? logOpinionPool(pSkewAdj, pFatTail,   0.50, 0.50) :
+    pSkewAdj  !== null && pBrownian !== null ? logOpinionPool(pSkewAdj, pBrownian,  0.55, 0.45) :
+    pBrownian !== null && pFatTail  !== null ? logOpinionPool(pBrownian, pFatTail,  0.45, 0.55) :
+    pBrownian !== null && pLN       !== null ? logOpinionPool(pBrownian, pLN,       0.50, 0.50) :
+    (pSkewAdj ?? pFatTail ?? pBrownian ?? pLN)
+
+  // Blend in orderbook crowd signal at low weight (15%) — orthogonal auxiliary input
+  const pQuantCombined = pPhysicsCombined !== null && pOB !== null
+    ? logOpinionPool(pPhysicsCombined, pOB, 0.85, 0.15)
+    : pPhysicsCombined
 
   if (pQuantCombined !== null) {
     // ── Time-based quant weight (physics dominates near expiry) ──────────────
-    //   α = 0.15 at 15 min remaining → 0.70 at 0 min remaining
     let alpha = Math.max(0.15, Math.min(0.70, 1 - minutesUntilExpiry / 15))
 
-    // ── Hurst adjustment: long-memory regime modulates quant vs LLM trust ────
-    //   H > 0.6 (persistent trend): LLM sees trend context → reduce quant anchor −0.08
-    //   H < 0.4 (mean-reverting):   physics dominates, patterns repeat → increase +0.08
+    // ── Hurst: long-memory regime modulates quant vs LLM trust ───────────────
     const hurst = quant.hurstExponent
     let hurstNote = ''
     if (hurst !== null) {
-      if      (hurst > 0.6) { alpha = Math.max(0.10, alpha - 0.08); hurstNote = ` H=${hurst.toFixed(3)}(persistent↓α)` }
-      else if (hurst < 0.4) { alpha = Math.min(0.80, alpha + 0.08); hurstNote = ` H=${hurst.toFixed(3)}(mrv↑α)`       }
-      else                  {                                         hurstNote = ` H=${hurst.toFixed(3)}(rw)`          }
+      if      (hurst > 0.6) { alpha = Math.max(0.10, alpha - 0.08); hurstNote = ` H=${hurst.toFixed(3)}(persist↓α)` }
+      else if (hurst < 0.4) { alpha = Math.min(0.80, alpha + 0.08); hurstNote = ` H=${hurst.toFixed(3)}(mrv↑α)`    }
+      else                  {                                         hurstNote = ` H=${hurst.toFixed(3)}(rw)`       }
     }
 
-    // ── CUSUM jump: diffusion models break during structural breaks ───────────
-    //   Sudden jumps violate the continuous-diffusion assumption → reduce quant anchor −0.12
+    // ── Vol-of-Vol: unstable vol → less reliable quant models ────────────────
+    let vovNote = ''
+    const vov = quant.volOfVol
+    if (vov !== null && vov > 1.0) {
+      alpha = Math.max(0.08, alpha - 0.08)
+      vovNote = ` VoV=${vov.toFixed(2)}(unstable↓α)`
+    }
+
+    // ── CUSUM: structural break invalidates diffusion models ──────────────────
     let cusumNote = ''
     if (quant.cusum?.jumpDetected) {
       alpha = Math.max(0.08, alpha - 0.12)
       cusumNote = ` JUMP(${quant.cusum.direction}↓α)`
     }
 
-    // ── Final blend via Log Opinion Pool (not linear average) ────────────────
-    //   LOP: p_final ∝ pLLM^(1-α) × pQuant^α
+    // ── Final blend: LLM^(1-α) × Quant^α via Log Opinion Pool ───────────────
     const pBlended = logOpinionPool(pLLM, pQuantCombined, 1 - alpha, alpha)
     pModel = Math.max(0, Math.min(1, pBlended))
 
     quantBlendNote =
-      ` | P_brownian=${pBrownian !== null ? (pBrownian * 100).toFixed(1) + '%' : 'n/a'}` +
+      ` | P_CF=${pSkewAdj !== null ? (pSkewAdj * 100).toFixed(1) + '%' : 'n/a'}` +
       ` P_fatTail=${pFatTail !== null ? (pFatTail * 100).toFixed(1) + '%' : 'n/a'}` +
-      ` P_lnBS=${pLN !== null ? (pLN * 100).toFixed(1) + '%' : 'n/a'}` +
+      ` P_brownian=${pBrownian !== null ? (pBrownian * 100).toFixed(1) + '%' : 'n/a'}` +
+      (pOB !== null ? ` P_OB=${(pOB * 100).toFixed(1)}%` : '') +
       ` P_quant=${(pQuantCombined * 100).toFixed(1)}%(LOP)` +
-      ` α=${alpha.toFixed(2)}${hurstNote}${cusumNote}` +
+      ` α=${alpha.toFixed(2)}${hurstNote}${vovNote}${cusumNote}` +
       ` → P_blend=${(pBlended * 100).toFixed(1)}%`
   }
 
