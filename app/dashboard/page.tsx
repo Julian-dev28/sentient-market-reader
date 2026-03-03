@@ -22,8 +22,6 @@ export default function Home() {
   const [showBotWarning, setShowBotWarning] = useState(false)
   const [showLateWarning, setShowLateWarning] = useState(false)
   const [aiRisk, setAiRisk]                 = useState(false)
-  const [sentMode, setSentMode]             = useState<string | undefined>(undefined)
-  const [probMode, setProbMode]             = useState<string | undefined>(undefined)
   const [orModel, setOrModel]               = useState<string>('')
   const [showSettings, setShowSettings]     = useState(false)
   const [orModels, setOrModels]             = useState<{ id: string; name: string }[]>([])
@@ -81,8 +79,6 @@ export default function Home() {
     return () => document.removeEventListener('mousedown', handleClick)
   }, [orModelOpen])
 
-  const romaMode: string = 'keen'
-
   // ── Market tick — runs BEFORE usePipeline so btcPrice/strikePrice are available
   // for strike-flip detection. useMarketTick auto-discovers the active market when
   // ticker is null; switches to the specific ticker once pipeline has run.
@@ -94,7 +90,7 @@ export default function Home() {
     : 0) || liveMarket?.floor_strike || 0
 
   const { pipeline, history, streamingAgents, trades, isRunning, serverLocked, nextCycleIn, error, stats, strikeFlipped, dismissStrikeFlip, runCycle, stopCycle } = usePipeline(
-    liveMode, romaMode, botActive, aiRisk, undefined, undefined, sentMode, probMode, orModel || undefined,
+    liveMode, botActive, aiRisk, undefined, undefined, orModel || undefined,
     liveBTCPrice || undefined, liveStrikePrice || undefined,
   )
 
@@ -222,6 +218,8 @@ export default function Home() {
         nextCycleIn={nextCycleIn}
         liveMode={liveMode}
         onToggleLive={handleToggleLive}
+        lastCompletedAt={pipeline?.cycleCompletedAt}
+        onRunCycle={isRunning || serverLocked ? undefined : runCycle}
       />
 
       {/* Live mode warning modal */}
@@ -332,7 +330,7 @@ export default function Home() {
               Under 2 Minutes Remaining
             </div>
             <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 20 }}>
-              The current 15-minute window closes in <strong>less than 2 minutes</strong>. The pipeline takes {romaMode === 'blitz' ? '~30–60s' : romaMode === 'sharp' ? '~1–2 min' : '~1–3 min'} to complete — it will not finish before the market settles.
+              The current 15-minute window closes in <strong>less than 2 minutes</strong>. The pipeline takes ~1–3 min to complete — it will not finish before the market settles.
               <br /><br />
               Any signal generated will likely be <strong>outdated by the time it completes</strong>.
             </div>
@@ -870,36 +868,6 @@ export default function Home() {
                     AI Risk
                   </label>
 
-                  <div style={{ width: 1, height: 20, background: 'var(--border)' }} />
-
-                  {/* Stage token-budget tier overrides */}
-                  {(['sent', 'prob'] as const).map(stage => {
-                    const val    = stage === 'sent' ? sentMode : probMode
-                    const setVal = stage === 'sent' ? setSentMode : setProbMode
-                    return (
-                      <div key={stage} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                        <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em' }}
-                          title={stage === 'sent' ? 'Token budget tier for Sentiment stage' : 'Token budget tier for Probability stage'}>
-                          {stage === 'sent' ? 'Sent' : 'Prob'}
-                        </span>
-                        <select value={val ?? ''} onChange={e => setVal(e.target.value || undefined)}
-                          style={{
-                            fontSize: 11, fontWeight: 600, cursor: 'pointer',
-                            padding: '4px 6px', borderRadius: 6,
-                            border: val ? '1px solid var(--brown)' : '1px solid var(--border)',
-                            background: 'var(--bg-secondary)',
-                            color: val ? 'var(--brown)' : 'var(--text-muted)',
-                            outline: 'none',
-                          }}>
-                          <option value="">auto</option>
-                          <option value="blitz">blitz</option>
-                          <option value="sharp">sharp</option>
-                          <option value="keen">keen</option>
-                          <option value="smart">smart</option>
-                        </select>
-                      </div>
-                    )
-                  })}
                 </div>
               )}
             </div>

@@ -11,6 +11,7 @@
  */
 
 import type { KalshiOrderbook, OHLCVCandle } from './types'
+import crypto from 'crypto'
 
 // ── Normal CDF (Abramowitz & Stegun, error < 7.5e-8) ─────────────────────────
 export function normalCDF(z: number): number {
@@ -69,18 +70,19 @@ export function studentTCDF(t: number, nu: number): number {
 // ── Fat-tail binary option pricing (Student-t digital) ────────────────────────
 // Identical to log-normal binary but uses Student-t CDF(d₂, ν) instead of Φ(d₂).
 // More accurate for BTC because normal CDF systematically underestimates strike crossings.
+// nu: degrees of freedom, calibrated to observed excess kurtosis for dynamic fitting.
 export function computeFatTailBinary(
   spot: number,
   strike: number,
   sigmaAnnualized: number,
   minutesLeft: number,
   nu = 4,
-): { pYesFat: number; d2: number } | null {
+): { pYesFat: number; d2: number; nu: number } | null {
   if (spot <= 0 || strike <= 0 || sigmaAnnualized <= 0 || minutesLeft <= 0) return null
   const T  = minutesLeft / (365 * 24 * 60)
   const d2 = (Math.log(spot / strike) - 0.5 * sigmaAnnualized ** 2 * T) /
-             (sigmaAnnualized * Math.sqrt(T))
-  return { pYesFat: studentTCDF(d2, nu), d2 }
+              (sigmaAnnualized * Math.sqrt(T))
+  return { pYesFat: studentTCDF(d2, nu), d2, nu }
 }
 
 // ── Logarithmic Opinion Pool ──────────────────────────────────────────────────
@@ -526,7 +528,7 @@ export interface QuantSignals {
   // Pricing models
   brownianPrior: { pQuant: number; sigmaCandle: number; sigmaPerMin: number } | null
   lnBinary:      { pYes: number; d2: number } | null
-  fatTailBinary: { pYesFat: number; d2: number } | null                    // Student-t (ν=4)
+  fatTailBinary: { pYesFat: number; d2: number; nu: number } | null                    // Student-t (dynamic ν)
   skewAdjBinary: { pYesSkewAdj: number; d2: number; d2CF: number } | null  // Cornish-Fisher
   binaryGreeks:  { delta: number; thetaPerMin: number; d2: number } | null // Δ and Θ
   // Long-memory & regime
@@ -540,6 +542,16 @@ export interface QuantSignals {
   obImpliedProb: number | null  // orderbook-implied P(YES) ∈ [0.05, 0.95]
 }
 
+// ── Calibrate Student-t ν from sample excess kurtosis ─────────────────────────
+// Excess kurtosis γ₂ = E[(r-μ)^4] / σ^4 - 3 for Student-t reduces to 6/(ν-4) for ν>4
+// Invert: ν ≈ 4 + 6/γ₂ (cap at 4min, 20max for stability)
+function calibrateStudentNu(skewKurt: { skew: number; excessKurt: number }): number {
+  if (skewKurt.excessKurt <= 0) return 4
+  return Math.max(4, Math.min(20, 4 + 6 / skewKurt.excessKurt))
+}
+
+const quantCache = new Map<string, QuantSignals>()
+
 export function computeQuantSignals(
   candles:     OHLCVCandle[] | undefined,
   liveCandles: OHLCVCandle[] | undefined,
@@ -549,6 +561,9 @@ export function computeQuantSignals(
   distancePct: number,
   minutesLeft: number,
 ): QuantSignals {
+  const input = {candles, liveCandles, orderbook, spot, strike, distancePct, minutesLeft}
+  const key = crypto.createHash('sha256').update(JSON.stringify(input)).digest('hex')
+  if (quantCache.has(key)) return quantCache.get(key)!
   const gkVol15m        = candles ? computeGarmanKlassVol(candles) : null
   // BTC trades 24/7 — annualize over 365d × 24h × 4 candles/h = 35,040 periods/year
   const gkVolAnnualized = gkVol15m !== null ? gkVol15m * Math.sqrt(35_040) : null
@@ -556,9 +571,14 @@ export function computeQuantSignals(
   const lnBinary        = gkVolAnnualized !== null
     ? computeLogNormalBinary(spot, strike, gkVolAnnualized, minutesLeft)
     : null
-  // Fat-tail binary uses Student-t(ν=4) instead of normal — more accurate for BTC tails
+
+  // Compute skew/kurt for dynamic Student-t tail calibration
+  const skewKurt = candles ? computeSkewKurt(candles) : null
+  const dynamicNu = skewKurt ? calibrateStudentNu(skewKurt) : 4
+
+  // Fat-tail binary uses Student-t(ν from data) instead of normal — more accurate for BTC tails
   const fatTailBinary   = gkVolAnnualized !== null
-    ? computeFatTailBinary(spot, strike, gkVolAnnualized, minutesLeft)
+    ? computeFatTailBinary(spot, strike, gkVolAnnualized, minutesLeft, dynamicNu)
     : null
   const expectedRangeUSD = brownianPrior
     ? brownianPrior.sigmaPerMin * Math.sqrt(minutesLeft) * spot
@@ -566,7 +586,6 @@ export function computeQuantSignals(
 
   // Higher-moment analysis
   const bipowerVar = candles ? computeBipowerVariation(candles) : null
-  const skewKurt   = candles ? computeSkewKurt(candles) : null
   const volOfVol   = candles ? computeVolOfVol(candles) : null
 
   // Cornish-Fisher skew/kurtosis-adjusted binary
@@ -589,7 +608,7 @@ export function computeQuantSignals(
   const obImbalance   = computeOrderbookImbalance(orderbook)
   const obImpliedProb = computeOrderbookImpliedProb(obImbalance)
 
-  return {
+  const result: QuantSignals = {
     gkVol15m,
     gkVolAnnualized,
     expectedRangeUSD,
@@ -614,6 +633,8 @@ export function computeQuantSignals(
     volOfVol,
     obImpliedProb,
   }
+  quantCache.set(key, result)
+  return result
 }
 
 // ── Format as quant brief for LLM context ─────────────────────────────────────

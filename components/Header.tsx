@@ -9,6 +9,8 @@ interface HeaderProps {
   nextCycleIn: number
   liveMode: boolean
   onToggleLive: () => void
+  lastCompletedAt?: string   // ISO timestamp of last pipeline completion
+  onRunCycle?: () => void
 }
 
 /** SVG ring showing fraction of next-cycle countdown remaining */
@@ -34,8 +36,9 @@ function CycleRing({ seconds, total = 300, running }: { seconds: number; total?:
   )
 }
 
-export default function Header({ cycleId, isRunning, nextCycleIn, liveMode, onToggleLive }: HeaderProps) {
+export default function Header({ cycleId, isRunning, nextCycleIn, liveMode, onToggleLive, lastCompletedAt, onRunCycle }: HeaderProps) {
   const [time, setTime] = useState('')
+  const [dataAgeSec, setDataAgeSec] = useState<number | null>(null)
 
   useEffect(() => {
     const update = () => setTime(
@@ -47,6 +50,22 @@ export default function Header({ cycleId, isRunning, nextCycleIn, liveMode, onTo
     const id = setInterval(update, 1000)
     return () => clearInterval(id)
   }, [])
+
+  useEffect(() => {
+    if (!lastCompletedAt) { setDataAgeSec(null); return }
+    const completedAt = new Date(lastCompletedAt).getTime()
+    const tick = () => setDataAgeSec(Math.floor((Date.now() - completedAt) / 1000))
+    tick()
+    const id = setInterval(tick, 1000)
+    return () => clearInterval(id)
+  }, [lastCompletedAt])
+
+  const stale = dataAgeSec !== null && dataAgeSec >= 600   // >10 min
+  const aging = dataAgeSec !== null && dataAgeSec >= 300   // >5 min
+  function fmtAge(s: number) {
+    const m = Math.floor(s / 60)
+    return m > 0 ? `${m}m ${s % 60}s` : `${s}s`
+  }
 
   return (
     <header style={{
@@ -152,6 +171,31 @@ export default function Header({ cycleId, isRunning, nextCycleIn, liveMode, onTo
             #{cycleId}
           </div>
         </div>
+
+        {/* Data age badge */}
+        {!isRunning && dataAgeSec !== null && (aging || stale) && (
+          <button
+            onClick={onRunCycle}
+            title="Data is stale — click to re-run pipeline"
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              padding: '4px 10px', borderRadius: 8, cursor: onRunCycle ? 'pointer' : 'default',
+              border: `1px solid ${stale ? 'rgba(212,85,130,0.5)' : 'rgba(212,135,44,0.4)'}`,
+              background: stale ? 'rgba(212,85,130,0.08)' : 'rgba(212,135,44,0.08)',
+              transition: 'all 0.3s',
+            }}
+          >
+            <span style={{ fontSize: 10, color: stale ? 'var(--pink)' : 'var(--amber)' }}>
+              {stale ? '⚠' : '◷'}
+            </span>
+            <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 10, fontWeight: 700, color: stale ? 'var(--pink)' : 'var(--amber)', whiteSpace: 'nowrap' }}>
+              {fmtAge(dataAgeSec)} old
+            </span>
+            {onRunCycle && (
+              <span style={{ fontSize: 9, color: stale ? 'var(--pink)' : 'var(--amber)', opacity: 0.7 }}>· re-run</span>
+            )}
+          </button>
+        )}
 
         {/* Live clock */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>

@@ -202,11 +202,6 @@ export async function GET(req: NextRequest) {
       ? (providersRaw.split(',').filter(p => (validProviders as readonly string[]).includes(p)) as AIProvider[])
       : undefined
 
-    const validModes = ['blitz', 'sharp', 'keen', 'smart']
-    const sentModeRaw = req.nextUrl.searchParams.get('sentMode')
-    const probModeRaw = req.nextUrl.searchParams.get('probMode')
-    const sentModeOverride = sentModeRaw && validModes.includes(sentModeRaw) ? sentModeRaw : undefined
-    const probModeOverride = probModeRaw && validModes.includes(probModeRaw) ? probModeRaw : undefined
     const orModelOverride  = req.nextUrl.searchParams.get('orModel') || undefined
 
     // ── SSE stream phase ──────────────────────────────────────────────────
@@ -220,7 +215,7 @@ export async function GET(req: NextRequest) {
         try {
           const pipeline = await runAgentPipeline(
             markets, quote!, orderbook, provider, romaMode, aiRisk,
-            provider2, providers, sentModeOverride, probModeOverride,
+            provider2, providers,
             candles, liveCandles, derivatives, orModelOverride, req.signal,
             (key, result) => enc('agent', { key, result }),
             portfolioValueCents,

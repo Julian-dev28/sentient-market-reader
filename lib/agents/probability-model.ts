@@ -53,6 +53,7 @@ export async function runProbabilityModel(
   market: KalshiMarket | null,
   provider: AIProvider,       // ROMA solve provider (may be split provider2)
   romaMode?: string,
+  providers?: AIProvider[],
   extractionProvider?: AIProvider,  // provider for JSON extraction step (defaults to provider)
   prevContext?: string,
   candles?: OHLCVCandle[],
@@ -92,10 +93,14 @@ export async function runProbabilityModel(
     `Minutes until expiry: ${minutesUntilExpiry.toFixed(2)}`,
     `Market-implied P(YES): ${(pMarket * 100).toFixed(1)}¢ — crowd probability BTC ends above strike`,
     `Bid-ask spread: ${(spread * 100).toFixed(1)}¢  |  Min edge to trade: ${((spread + 0.02) * 100).toFixed(1)}¢`,
-    `\n${quantBrief}`,
+    `
+${quantBrief}`,
     derivativesBlock,
-    ...(candles?.length ? [`\n${formatCandles(candles)}`] : []),
-    ...(prevContext ? [`\nPrevious cycle analysis:\n${prevContext}`] : []),
+    ...(candles?.length ? [`
+${formatCandles(candles)}`] : []),
+    ...(prevContext ? [`
+Previous cycle analysis:
+${prevContext}`] : []),
   ].filter(Boolean).join('\n')
 
   const goal =
@@ -115,8 +120,8 @@ export async function runProbabilityModel(
     `Final recommendation: YES if P(model) > P(market) + min_edge, NO if P(model) < P(market) − min_edge, else NO_TRADE.`
 
   // Depth controlled by ROMA_MAX_DEPTH env var (default 1). ROMA treats 0 as unlimited — never send 0.
-  const maxDepth = Math.max(1, parseInt(process.env.ROMA_MAX_DEPTH ?? '1'))
-  const pythonResult = await callPythonRoma(goal, context, maxDepth, 2, romaMode, provider, undefined, orModelOverride, signal)
+  const maxDepth = 1
+  const pythonResult = await callPythonRoma(goal, context, maxDepth, 4, romaMode, provider, providers, orModelOverride, signal)
   const romaAnswer = pythonResult.answer
   const agentLabel = `ProbabilityModelAgent (roma-dspy · ${pythonResult.provider})`
   const romaTrace  = formatRomaTrace(pythonResult)
@@ -141,7 +146,11 @@ export async function runProbabilityModel(
       },
       required: ['pModel', 'recommendation', 'confidence'],
     },
-    prompt: `Extract the probability estimate and trade recommendation from this ROMA analysis:\n\n${romaAnswer}\n\nMarket-implied P(YES): ${(pMarket * 100).toFixed(1)}%`,
+    prompt: `Extract the probability estimate and trade recommendation from this ROMA analysis:
+
+${romaAnswer}
+
+Market-implied P(YES): ${(pMarket * 100).toFixed(1)}%`,
   })
 
   const pLLM = Math.max(0, Math.min(1, extracted.pModel))
@@ -162,7 +171,7 @@ export async function runProbabilityModel(
   const pSkewAdj  = quant.skewAdjBinary?.pYesSkewAdj ?? null
   const pOB       = quant.obImpliedProb ?? null
 
-  // Physics priors — priority: Cornish-Fisher (skew+kurt+σ) > fat-tail (ν=4+σ) > LN (σ only) > Brownian
+  // Physics priors — priority: Cornish-Fisher (skew+kurt+σ) > fat-tail (dynamic ν+σ) > LN (σ only) > Brownian
   const pPhysicsCombined =
     pSkewAdj  !== null && pFatTail  !== null ? logOpinionPool(pSkewAdj, pFatTail,   0.50, 0.50) :
     pSkewAdj  !== null && pBrownian !== null ? logOpinionPool(pSkewAdj, pBrownian,  0.55, 0.45) :
@@ -209,7 +218,8 @@ export async function runProbabilityModel(
 
     quantBlendNote =
       ` | P_CF=${pSkewAdj !== null ? (pSkewAdj * 100).toFixed(1) + '%' : 'n/a'}` +
-      ` P_fatTail=${pFatTail !== null ? (pFatTail * 100).toFixed(1) + '%' : 'n/a'}` +
+      ` P_fatTail=${pFatTail !== null ? (pFatTail * 100).toFixed(1) + '%' + (pFatTail
+        ? ` ν=${quant.fatTailBinary?.nu.toFixed(1)}` : '') : 'n/a'}` +
       ` P_brownian=${pBrownian !== null ? (pBrownian * 100).toFixed(1) + '%' : 'n/a'}` +
       (pOB !== null ? ` P_OB=${(pOB * 100).toFixed(1)}%` : '') +
       ` P_quant=${(pQuantCombined * 100).toFixed(1)}%(LOP)` +
@@ -230,7 +240,9 @@ export async function runProbabilityModel(
       provider:       pythonResult.provider,
       gkVol15m:       quant.gkVol15m,
     },
-    reasoning: romaTrace + `\n\nP(LLM)=${(pLLM * 100).toFixed(1)}%${quantBlendNote} → P(final)=${(pModel * 100).toFixed(1)}% vs P(market)=${(pMarket * 100).toFixed(1)}% — edge: ${edgePct >= 0 ? '+' : ''}${edgePct.toFixed(1)}%. Rec: ${extracted.recommendation} (${extracted.confidence})`,
+    reasoning: romaTrace + `
+
+P(LLM)=${(pLLM * 100).toFixed(1)}%${quantBlendNote} → P(final)=${(pModel * 100).toFixed(1)}% vs P(market)=${(pMarket * 100).toFixed(1)}% — edge: ${edgePct >= 0 ? '+' : ''}${edgePct.toFixed(1)}%. Rec: ${extracted.recommendation} (${extracted.confidence})`,
     durationMs: Date.now() - start,
     timestamp: new Date().toISOString(),
   }

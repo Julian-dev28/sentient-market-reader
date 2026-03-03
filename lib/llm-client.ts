@@ -243,7 +243,9 @@ export async function llmToolCall<T>(opts: {
     return JSON.parse(jsonMatch[0]) as T
   }
 
-  const res = await oaiCompatClient(provider as 'openai' | 'grok' | 'openrouter').chat.completions.create(
+  const client = oaiCompatClient(provider as 'openai' | 'grok' | 'openrouter')
+
+  const res = await client.chat.completions.create(
     {
       model,
       max_tokens: maxTokens,
@@ -254,6 +256,24 @@ export async function llmToolCall<T>(opts: {
     { signal: AbortSignal.timeout(timeout) },
   )
   const toolCall = res.choices[0]?.message?.tool_calls?.[0] as { function: { arguments: string } } | undefined
-  if (!toolCall) throw new Error(`No tool_call from ${provider}`)
-  return JSON.parse(toolCall.function.arguments) as T
+  if (toolCall) return JSON.parse(toolCall.function.arguments) as T
+
+  // Fallback 1: model returned JSON in content instead of tool_calls (common with reasoning models)
+  const raw = res.choices[0]?.message?.content ?? ''
+  const jsonMatch = raw.match(/\{[\s\S]*\}/)
+  if (jsonMatch) {
+    try { return JSON.parse(jsonMatch[0]) as T } catch { /* fall through */ }
+  }
+
+  // Fallback 2: plain JSON prompt — no tools at all, just ask for the JSON directly
+  const jsonPrompt = `${prompt}\n\nRespond with ONLY a valid JSON object matching this schema, no markdown:\n${JSON.stringify(fullSchema, null, 2)}`
+  const res2 = await client.chat.completions.create(
+    { model, max_tokens: Math.max(maxTokens, 512), messages: [{ role: 'user', content: jsonPrompt }] },
+    { signal: AbortSignal.timeout(timeout) },
+  )
+  const raw2 = res2.choices[0]?.message?.content ?? ''
+  const jsonMatch2 = raw2.match(/\{[\s\S]*\}/)
+  if (jsonMatch2) return JSON.parse(jsonMatch2[0]) as T
+
+  throw new Error(`No tool_call from ${provider}`)
 }
