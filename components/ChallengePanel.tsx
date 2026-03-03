@@ -6,18 +6,20 @@ import { useState, useEffect } from 'react'
 // $160k/year broken down
 const ANNUAL_GOAL  = 160_000
 const DAILY_GOAL   = ANNUAL_GOAL / 365          // $438.36
+const WARMUP_GOAL  = DAILY_GOAL  * 0.10         // 10% of daily = $43.84 starter
 const WEEKLY_GOAL  = ANNUAL_GOAL / 52           // $3,076.92
 const MONTHLY_GOAL = ANNUAL_GOAL / 12           // $13,333.33
 
+// min = % of ANNUAL_GOAL; dollar = min/100 * ANNUAL_GOAL
 const RANKS = [
-  { min: -Infinity, label: 'Unpaid Intern',   icon: '💼', color: '#a07070' },
-  { min: 0.25,      label: 'Junior Analyst',  icon: '📋', color: 'var(--text-muted)' },
-  { min: 1,         label: 'Analyst',         icon: '📊', color: 'var(--brown)' },
-  { min: 5,         label: 'Senior Analyst',  icon: '🔍', color: 'var(--amber)' },
-  { min: 10,        label: 'Manager',         icon: '💡', color: 'var(--blue)' },
-  { min: 25,        label: 'Director',        icon: '⚡', color: '#7b5ea7' },
-  { min: 50,        label: 'VP',              icon: '🏦', color: 'var(--green)' },
-  { min: 100,       label: 'CEO',             icon: '👑', color: '#d4a800' },
+  { min: -Infinity, label: 'Unpaid Intern',  icon: '💼', color: '#a07070',             dollars: 0       },
+  { min: 0.25,      label: 'Junior Analyst', icon: '📋', color: 'var(--text-muted)',    dollars: 400     },
+  { min: 1,         label: 'Analyst',        icon: '📊', color: 'var(--brown)',          dollars: 1_600   },
+  { min: 5,         label: 'Sr. Analyst',    icon: '🔍', color: 'var(--amber)',          dollars: 8_000   },
+  { min: 10,        label: 'Manager',        icon: '💡', color: 'var(--blue)',           dollars: 16_000  },
+  { min: 25,        label: 'Director',       icon: '⚡', color: '#7b5ea7',              dollars: 40_000  },
+  { min: 50,        label: 'VP',             icon: '🏦', color: 'var(--green)',          dollars: 80_000  },
+  { min: 100,       label: 'CEO',            icon: '👑', color: '#d4a800',              dollars: 160_000 },
 ]
 
 function getRank(pctOfAnnual: number) {
@@ -139,6 +141,33 @@ export default function ChallengePanel({ stats, trades }: { stats: PerformanceSt
         </div>
       )}
 
+      {/* ── Warm-up: 10% of daily ── */}
+      {!dailyDone && (() => {
+        const warmupDone = pnl >= WARMUP_GOAL
+        const warmupPct  = Math.min(100, (pnl / WARMUP_GOAL) * 100)
+        return (
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 5 }}>
+              <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                {warmupDone ? '✓ Warm-Up Done' : 'Warm-Up — 10% of daily'}
+              </span>
+              <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 11, fontWeight: 700, color: warmupDone ? 'var(--green)' : 'var(--text-muted)' }}>
+                ${pnl.toFixed(2)} / ${WARMUP_GOAL.toFixed(2)}
+              </span>
+            </div>
+            <MeterBar value={pnl} max={WARMUP_GOAL} color={warmupDone ? 'var(--green)' : '#9ecfb8'} glow={warmupDone} />
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
+              <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>
+                {warmupDone ? '✓ First $43 earned' : `$${Math.max(0, WARMUP_GOAL - pnl).toFixed(2)} to unlock daily meter`}
+              </span>
+              <span style={{ fontSize: 9, fontFamily: 'var(--font-geist-mono)', fontWeight: 700, color: 'var(--text-muted)' }}>
+                {warmupPct.toFixed(1)}%
+              </span>
+            </div>
+          </div>
+        )
+      })()}
+
       {/* ── Daily goal ── */}
       <div style={{ marginBottom: 14 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 5 }}>
@@ -190,12 +219,44 @@ export default function ChallengePanel({ stats, trades }: { stats: PerformanceSt
         }}>
           <span style={{ fontSize: 10, color: 'var(--text-secondary)' }}>
             Next: <span style={{ fontWeight: 700, color: nextRank.color }}>{nextRank.icon} {nextRank.label}</span>
+            <span style={{ color: 'var(--text-muted)', marginLeft: 5 }}>
+              @ ${nextRank.dollars.toLocaleString()}
+            </span>
           </span>
           <span style={{ fontSize: 10, fontFamily: 'var(--font-geist-mono)', fontWeight: 700, color: 'var(--text-muted)' }}>
             ${toNextRank.toLocaleString('en-US', { maximumFractionDigits: 0 })} away
           </span>
         </div>
       )}
+
+      {/* ── Rank ladder ── */}
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>
+          Rank Ladder
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          {RANKS.filter(r => r.dollars > 0).map(r => {
+            const reached = pnl >= r.dollars
+            return (
+              <div key={r.label} style={{
+                display: 'flex', alignItems: 'center', gap: 7,
+                padding: '4px 8px', borderRadius: 6,
+                background: reached ? (r.label === rank.label ? 'rgba(74,127,165,0.1)' : 'transparent') : 'transparent',
+                opacity: reached ? 1 : 0.45,
+              }}>
+                <span style={{ fontSize: 11, flexShrink: 0 }}>{r.icon}</span>
+                <span style={{ fontSize: 10, fontWeight: reached ? 700 : 400, color: reached ? r.color : 'var(--text-muted)', flex: 1 }}>
+                  {r.label}
+                </span>
+                <span style={{ fontSize: 9, fontFamily: 'var(--font-geist-mono)', color: reached ? r.color : 'var(--text-muted)', fontWeight: reached ? 700 : 400 }}>
+                  ${r.dollars.toLocaleString()}
+                </span>
+                {r.label === rank.label && <span style={{ fontSize: 9, color: r.color }}>◀</span>}
+              </div>
+            )
+          })}
+        </div>
+      </div>
 
       {/* ── Route to goal ── */}
       <div style={{ borderTop: '1px solid var(--border)', paddingTop: 10 }}>
