@@ -277,6 +277,21 @@ export default function MarketCard({ market, orderbook, strikePrice, currentBTCP
   const [side, setSide]                 = useState<'yes' | 'no'>('yes')
   const [hotkeyFlash, setHotkeyFlash]   = useState<string | null>(null)
   const [allingIn, setAllingIn]         = useState(false)
+  const [availCents, setAvailCents]     = useState<number | null>(null)
+
+  // Keep available balance fresh so All In label shows real contract count
+  useEffect(() => {
+    if (!liveMode) return
+    function refresh() {
+      fetch('/api/balance', { cache: 'no-store' })
+        .then(r => r.json())
+        .then(d => { if (typeof d.balance === 'number') setAvailCents(d.balance) })
+        .catch(() => {})
+    }
+    refresh()
+    const id = setInterval(refresh, 15_000)
+    return () => clearInterval(id)
+  }, [liveMode])
 
   async function batchSell(route: string, setter: (v: boolean) => void) {
     setter(true)
@@ -432,6 +447,12 @@ export default function MarketCard({ market, orderbook, strikePrice, currentBTCP
   const mins    = Math.floor(countdown / 60)
   const secs    = Math.floor(countdown % 60)
   const urgency = countdown > 0 && countdown < 120
+
+  // All In: max contracts affordable with current balance, capped at 500
+  const allInAsk   = market ? (side === 'yes' ? market.yes_ask : market.no_ask) : 0
+  const allInCount = (availCents !== null && allInAsk > 0)
+    ? Math.min(500, Math.max(0, Math.floor(availCents / allInAsk)))
+    : null
   const above   = strikePrice > 0 && currentBTCPrice > strikePrice
   const diff    = currentBTCPrice - strikePrice
   const pct     = strikePrice > 0 ? (diff / strikePrice) * 100 : 0
@@ -558,7 +579,13 @@ export default function MarketCard({ market, orderbook, strikePrice, currentBTCP
                 onMouseEnter={e => { if (!allingIn) { e.currentTarget.style.background = side === 'yes' ? 'var(--green)' : 'var(--pink)'; e.currentTarget.style.color = '#fff' } }}
                 onMouseLeave={e => { if (!allingIn) { e.currentTarget.style.background = side === 'yes' ? 'var(--green-pale)' : 'var(--pink-pale)'; e.currentTarget.style.color = side === 'yes' ? 'var(--green)' : 'var(--pink)' } }}
               >
-                {allingIn ? '…' : `ALL IN ${side.toUpperCase()} — 500 contracts`}
+                {allingIn
+                  ? '…'
+                  : allInCount === null
+                    ? `ALL IN ${side.toUpperCase()}`
+                    : allInCount === 0
+                      ? 'ALL IN — insufficient balance'
+                      : `ALL IN ${side.toUpperCase()} — ${allInCount} contracts`}
               </button>
             )}
 
