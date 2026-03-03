@@ -22,17 +22,30 @@ function checkDailyReset(): void {
 }
 
 const RISK_PARAMS = {
-  maxDailyLoss:    -150,   // $ max daily drawdown
+  maxDailyLossPct:   5,    // % of portfolio — daily drawdown limit
+  maxDailyLossFloor: 50,   // $ minimum daily loss cap (protects tiny accounts)
+  maxDailyLossCap:  150,   // $ maximum daily loss cap (hard ceiling)
   maxDrawdownPct:   15,    // % from peak
   maxTradesPerDay:  48,    // caps at one per 15-min window
   minEdgePct:        3,    // % minimum edge to trade
-  baseContractSize: 100,   // floor — vol + confidence scaling can bring size below 500
-  maxContractSize:  500,   // ceiling
+  baseContractSize: 100,   // floor position size (contracts)
+  maxContractSize:  500,   // ceiling position size (contracts)
+  maxTradePct:      10,    // % of portfolio — max capital at risk per trade
 }
 
 // Baseline 15-min Garman-Klass vol for BTC (~0.20%/candle).
 // Position scales inversely with vol: high-vol cycles get smaller size, low-vol get larger.
 const REFERENCE_VOL_15M = 0.002
+
+/** Compute dynamic risk limits from current portfolio value. */
+function dynamicLimits(portfolioValue: number) {
+  const maxDailyLoss = -Math.max(
+    RISK_PARAMS.maxDailyLossFloor,
+    Math.min(RISK_PARAMS.maxDailyLossCap, portfolioValue * RISK_PARAMS.maxDailyLossPct / 100),
+  )
+  const maxTradeCapital = portfolioValue * RISK_PARAMS.maxTradePct / 100  // $ max at risk per trade
+  return { maxDailyLoss, maxTradeCapital }
+}
 
 // ── Deterministic Kelly risk manager ──────────────────────────────────────────
 export function runRiskManager(
@@ -43,9 +56,12 @@ export function runRiskManager(
   sentimentScore?: number,
   gkVol15m?: number | null,
   confidence?: 'high' | 'medium' | 'low',
+  portfolioValue: number = 500,   // actual Kalshi account value in dollars
 ): AgentResult<RiskOutput> {
   const start = Date.now()
   checkDailyReset()
+
+  const { maxDailyLoss, maxTradeCapital } = dynamicLimits(portfolioValue)
 
   const drawdownPct =
     sessionState.peakPnl > 0
@@ -66,9 +82,9 @@ export function runRiskManager(
     approved = false
     const dir = recommendation === 'YES' ? 'bearish' : 'bullish'
     rejectionReason = `Sentiment (${sentimentScore.toFixed(2)}) strongly ${dir} — contradicts ${recommendation} recommendation`
-  } else if (sessionState.dailyPnl <= RISK_PARAMS.maxDailyLoss) {
+  } else if (sessionState.dailyPnl <= maxDailyLoss) {
     approved = false
-    rejectionReason = `Daily loss limit reached ($${Math.abs(RISK_PARAMS.maxDailyLoss)})`
+    rejectionReason = `Daily loss limit reached ($${Math.abs(maxDailyLoss).toFixed(0)} = ${RISK_PARAMS.maxDailyLossPct}% of $${portfolioValue.toFixed(0)} portfolio)`
   } else if (drawdownPct >= RISK_PARAMS.maxDrawdownPct) {
     approved = false
     rejectionReason = `Max drawdown breached (${drawdownPct.toFixed(1)}% > ${RISK_PARAMS.maxDrawdownPct}%)`
@@ -77,27 +93,29 @@ export function runRiskManager(
     rejectionReason = `Daily trade count cap reached (${RISK_PARAMS.maxTradesPerDay})`
   }
 
-  // ── Half-Kelly with volatility + confidence scaling ───────────────────────
+  // ── Portfolio-proportional Half-Kelly sizing ──────────────────────────────
   // Standard Kelly: f* = (b·p − q) / b  where b = net odds, q = 1 − p
   const b = limitPrice > 0 ? (100 - limitPrice) / limitPrice : 1
   const kellyFraction = Math.max(0, (b * pModel - (1 - pModel)) / b)
 
-  // Volatility scalar: high-vol environments carry more risk per contract — size down.
-  // Low-vol environments are safer — allow scaling up to 1.5× baseline.
-  // Clamped [0.30, 1.50] to prevent extreme sizing in both directions.
+  // Volatility scalar: high-vol → smaller size. Clamped [0.30, 1.50].
   const volScalar = gkVol15m && gkVol15m > 0
     ? Math.max(0.30, Math.min(1.50, REFERENCE_VOL_15M / gkVol15m))
     : 1.0
 
-  // Confidence scalar: penalise low-conviction signals with smaller positions.
-  //   high → 100% · medium → 65% · low → 35%
+  // Confidence scalar: high → 100% · medium → 65% · low → 35%
   const confScalar = confidence === 'high' ? 1.00
                    : confidence === 'low'  ? 0.35
-                   : 0.65  // medium or unspecified
+                   : 0.65
 
-  const rawContracts = Math.round(kellyFraction * RISK_PARAMS.maxContractSize * 0.5 * volScalar * confScalar)
-  const positionSize = Math.max(RISK_PARAMS.baseContractSize, Math.min(rawContracts, RISK_PARAMS.maxContractSize))
-  const maxLoss      = approved ? (limitPrice / 100) * positionSize : 0
+  // Capital budget: half-Kelly fraction of portfolio, capped at maxTradeCapital
+  const halfKellyCapital = kellyFraction * 0.5 * portfolioValue * volScalar * confScalar
+  const tradeBudget      = Math.min(halfKellyCapital, maxTradeCapital)
+  const costPerContract  = limitPrice / 100   // $ per contract
+  const budgetContracts  = costPerContract > 0 ? Math.round(tradeBudget / costPerContract) : 0
+  const positionSize     = Math.max(RISK_PARAMS.baseContractSize, Math.min(budgetContracts, RISK_PARAMS.maxContractSize))
+  const maxLoss          = approved ? costPerContract * positionSize : 0
+  const pctOfPortfolio   = portfolioValue > 0 ? (maxLoss / portfolioValue) * 100 : 0
 
   return {
     agentName: 'RiskManagerAgent',
@@ -112,7 +130,7 @@ export function runRiskManager(
       tradeCount: sessionState.tradeCount,
     },
     reasoning: approved
-      ? `Trade approved. Size: ${positionSize} contracts (Kelly=${(kellyFraction * 100).toFixed(1)}% × 0.5 × vol=${volScalar.toFixed(2)} × conf=${confScalar.toFixed(2)}). Max loss: $${maxLoss.toFixed(2)}. P&L: $${sessionState.dailyPnl.toFixed(2)}.`
+      ? `Trade approved. Portfolio: $${portfolioValue.toFixed(0)}. Size: ${positionSize} contracts (Kelly=${(kellyFraction * 100).toFixed(1)}% × 0.5 × vol=${volScalar.toFixed(2)} × conf=${confScalar.toFixed(2)} → $${tradeBudget.toFixed(0)} budget). Max loss: $${maxLoss.toFixed(2)} (${pctOfPortfolio.toFixed(1)}% of portfolio). Daily P&L: $${sessionState.dailyPnl.toFixed(2)} / limit $${Math.abs(maxDailyLoss).toFixed(0)}.`
       : `Trade REJECTED — ${rejectionReason}`,
     durationMs: Date.now() - start,
     timestamp: new Date().toISOString(),
@@ -131,9 +149,12 @@ export async function runRomaRiskManager(
   sentimentSignals: string[],
   provider: AIProvider,
   romaMode?: string,
+  portfolioValue: number = 500,   // actual Kalshi account value in dollars
 ): Promise<AgentResult<RiskOutput>> {
   const start = Date.now()
   checkDailyReset()
+
+  const { maxDailyLoss, maxTradeCapital } = dynamicLimits(portfolioValue)
 
   const drawdownPct =
     sessionState.peakPnl > 0
@@ -141,8 +162,8 @@ export async function runRomaRiskManager(
       : 0
 
   // Hard circuit breakers — always enforced regardless of AI opinion
-  if (sessionState.dailyPnl <= RISK_PARAMS.maxDailyLoss) {
-    return buildRejected('Daily loss limit reached', drawdownPct, start)
+  if (sessionState.dailyPnl <= maxDailyLoss) {
+    return buildRejected(`Daily loss limit reached ($${Math.abs(maxDailyLoss).toFixed(0)} = ${RISK_PARAMS.maxDailyLossPct}% of portfolio)`, drawdownPct, start)
   }
   if (drawdownPct >= RISK_PARAMS.maxDrawdownPct) {
     return buildRejected(`Max drawdown breached (${drawdownPct.toFixed(1)}%)`, drawdownPct, start)
@@ -151,18 +172,24 @@ export async function runRomaRiskManager(
     return buildRejected('Daily trade count cap reached', drawdownPct, start)
   }
 
+  const costPerContract  = limitPrice / 100
+  const maxBudget        = Math.min(maxTradeCapital, portfolioValue * 0.10)
+
   const goal =
     `You are a quantitative risk manager for a Kalshi BTC 15-min prediction market trading system. ` +
-    `Assess whether this trade should be approved and recommend a position size (in contracts, 1–500). ` +
-    `Consider: edge quality, time pressure, session health, and overall risk. ` +
-    `Be conservative — only approve trades with genuine statistical edge.`
+    `Assess whether this trade should be approved and recommend a position size (in contracts, ${RISK_PARAMS.baseContractSize}–${RISK_PARAMS.maxContractSize}). ` +
+    `Consider: edge quality, time pressure, session health, portfolio exposure, and overall risk. ` +
+    `Be conservative — only approve trades with genuine statistical edge. ` +
+    `Never risk more than ${RISK_PARAMS.maxTradePct}% of the portfolio on a single trade.`
 
   const context = [
     `Recommendation: BUY ${recommendation} @ ${limitPrice}¢`,
     `Model edge: ${edgePct >= 0 ? '+' : ''}${edgePct.toFixed(2)}% (minimum required: ${RISK_PARAMS.minEdgePct}%)`,
     `Model P(YES): ${(pModel * 100).toFixed(1)}%`,
     `Minutes until window close: ${minutesUntilExpiry.toFixed(1)}`,
-    `Session P&L: $${sessionState.dailyPnl.toFixed(2)} (daily limit: $${RISK_PARAMS.maxDailyLoss})`,
+    `Portfolio value: $${portfolioValue.toFixed(2)} (live Kalshi balance)`,
+    `Max trade budget: $${maxBudget.toFixed(2)} (${RISK_PARAMS.maxTradePct}% of portfolio = ${Math.floor(maxBudget / costPerContract)} contracts @ ${limitPrice}¢)`,
+    `Session P&L: $${sessionState.dailyPnl.toFixed(2)} (daily limit: $${Math.abs(maxDailyLoss).toFixed(0)})`,
     `Trades today: ${sessionState.tradeCount} / ${RISK_PARAMS.maxTradesPerDay}`,
     `Current drawdown: ${drawdownPct.toFixed(1)}% (max: ${RISK_PARAMS.maxDrawdownPct}%)`,
     `Sentiment signals: ${sentimentSignals.join(' | ')}`,
@@ -217,7 +244,7 @@ export async function runRomaRiskManager(
     }
   } catch {
     // Fallback to deterministic Kelly on any ROMA failure
-    return runRiskManager(edgePct, pModel, recommendation, limitPrice)
+    return runRiskManager(edgePct, pModel, recommendation, limitPrice, undefined, undefined, undefined, portfolioValue)
   }
 }
 

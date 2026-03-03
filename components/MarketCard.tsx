@@ -488,7 +488,7 @@ export default function MarketCard({ market, orderbook, strikePrice, currentBTCP
             {/* Strike price */}
             <div style={{ marginBottom: 14, padding: '14px 16px', background: 'var(--bg-secondary)', borderRadius: 12, border: '1px solid var(--border)' }}>
               <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: 600, marginBottom: 5 }}>
-                Price to Beat
+                Strike Price
               </div>
               <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 28, fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.03em', lineHeight: 1 }}>
                 {strikePrice > 0 ? fmtD(strikePrice) : '—'}

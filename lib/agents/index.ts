@@ -61,10 +61,12 @@ export async function runAgentPipeline(
   signal?: AbortSignal,        // abort signal — cancels in-flight ROMA fetches when client disconnects
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   emit?: (key: string, result: AgentResult<any>) => void,  // SSE streaming callback
+  portfolioValueCents: number = 0,  // live Kalshi balance (cash + positions) in cents
 ): Promise<PipelineState> {
   const cycleId = ++cycleCounter
   const cycleStartedAt = new Date().toISOString()
   const mode = romaMode ?? 'keen'
+  const portfolioValue = portfolioValueCents / 100  // convert cents → dollars
 
   // Per-stage mode: defaults to one tier lighter for sentiment via SENT_MODE_MAP.
   // Explicit overrides (sentModeOverride / probModeOverride) take precedence when set.
@@ -151,6 +153,7 @@ export async function runAgentPipeline(
         sentResult.output.signals,
         provider,
         romaMode,
+        portfolioValue,
       )
     : runRiskManager(
         probResult.output.edgePct,
@@ -160,15 +163,19 @@ export async function runAgentPipeline(
         sentResult.output.score,
         probResult.output.gkVol15m,
         probResult.output.confidence,
+        portfolioValue,
       )
   emit?.('risk', riskResult)
 
   // ── Stage 6: Execution ─────────────────────────────────────────────────
-  const execResult = runExecution(
+  const execResult = await runExecution(
     probResult.output.recommendation,
     riskResult.output.positionSize,
     mdResult.output.activeMarket,
     riskResult.output.approved,
+    portfolioValue > 0 ? portfolioValue : undefined,
+    mdResult.output.minutesUntilExpiry,
+    provider,
   )
   emit?.('execution', execResult)
 

@@ -4,10 +4,14 @@ import type { PerformanceStats, TradeRecord, KalshiMarket } from '@/lib/types'
 import { useState, useEffect } from 'react'
 
 const BOT_TRADE_DOLLARS = 100  // mirrors usePipeline constant
+const MAX_CONTRACTS     = 500  // mirrors RISK_PARAMS.maxContracts
 
-/** Compute expected win/loss for a $100 bot trade at a given ask price (cents). */
+/**
+ * Compute expected win/loss for a $100 bot trade at a given ask price (cents).
+ * Contracts are capped at MAX_CONTRACTS — beyond that the risk manager blocks the trade anyway.
+ */
 function tradeDefaults(askCents: number) {
-  const contracts     = Math.max(1, Math.floor(BOT_TRADE_DOLLARS / (askCents / 100)))
+  const contracts     = Math.max(1, Math.min(Math.floor(BOT_TRADE_DOLLARS / (askCents / 100)), MAX_CONTRACTS))
   const estimatedCost = contracts * askCents / 100
   const win           = contracts - estimatedCost   // each contract settles at $1
   const loss          = estimatedCost
@@ -16,14 +20,13 @@ function tradeDefaults(askCents: number) {
 
 const DAILY_GOAL   = 160_000 / 365   // $438.36
 const WEEKLY_GOAL  = 160_000 / 52
-const ANNUAL_GOAL  = 160_000
 const RISK_PARAMS  = {
   minEdgePct:    3,
   maxDailyLoss:  150,
   maxDrawdownPct: 15,
   maxTrades:      48,
   minContracts:  100,
-  maxContracts:  500,
+  maxContracts:  MAX_CONTRACTS,
 }
 
 function Row({ label, value, color, sub }: { label: string; value: string; color?: string; sub?: string }) {
@@ -55,34 +58,55 @@ export default function StrategyPanel({ stats, trades, market }: {
   const [portfolioValue, setPortfolioValue] = useState<number | null>(null)
 
   useEffect(() => {
-    fetch('/api/balance', { cache: 'no-store' })
-      .then(r => r.json())
-      .then(d => { if (d.portfolio_value) setPortfolioValue(d.portfolio_value / 100) })
-      .catch(() => {})
+    let cancelled = false
+    async function loadBalance() {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          const r = await fetch('/api/balance')
+          const d: { balance?: number; portfolio_value?: number } = await r.json()
+          if (cancelled) return
+          // balance = liquid cash; portfolio_value = open position mark-to-market.
+          const cash = typeof d.balance         === 'number' ? d.balance         : 0
+          const pos  = typeof d.portfolio_value === 'number' ? d.portfolio_value : 0
+          setPortfolioValue((cash + pos) / 100)
+          return  // success
+        } catch {
+          if (attempt < 2) await new Promise(res => setTimeout(res, 2000))
+        }
+      }
+    }
+    loadBalance()
+    return () => { cancelled = true }
   }, [])
 
-  const pnl        = stats.totalPnl
-  const settled    = trades.filter(t => t.outcome !== 'PENDING')
-  const winTrades  = settled.filter(t => t.outcome === 'WIN')
-  const lossTrades = settled.filter(t => t.outcome === 'LOSS')
+  const settled     = trades.filter(t => t.outcome !== 'PENDING')
+  const pending     = trades.filter(t => t.outcome === 'PENDING')
+  const winTrades   = settled.filter(t => t.outcome === 'WIN')
+  const lossTrades  = settled.filter(t => t.outcome === 'LOSS')
+  const realizedPnl = settled.reduce((s, t) => s + (t.pnl ?? 0), 0)
+  const pendingExposure = pending.reduce((s, t) => s + t.estimatedCost, 0)
 
-  // Use live ask price to compute realistic default win/loss for a $100 trade
-  const liveAsk    = market?.yes_ask ?? 50   // fallback to 50¢ if no market
-  const defaults   = tradeDefaults(liveAsk)
+  // Validate ask price: must be in tradeable range 5¢–95¢ to be meaningful.
+  // A 1¢ ask (near-certain YES) or 99¢ ask (near-certain NO) produces absurd
+  // contract counts and EV figures, so we fall back to 50¢ for estimates.
+  const rawAsk      = market?.yes_ask
+  const askIsValid  = rawAsk != null && rawAsk >= 5 && rawAsk <= 95
+  const liveAsk     = askIsValid ? rawAsk : 50
+  const defaults    = tradeDefaults(liveAsk)
 
   const avgWinPnl  = winTrades.length  > 0 ? winTrades.reduce((s, t)  => s + (t.pnl ?? 0), 0) / winTrades.length  : defaults.win
   const avgLossPnl = lossTrades.length > 0 ? Math.abs(lossTrades.reduce((s, t) => s + (t.pnl ?? 0), 0) / lossTrades.length) : defaults.loss
-  const winRate    = stats.totalTrades > 0 ? stats.winRate : 0.52   // default estimate
-  const ev         = winRate * avgWinPnl - (1 - winRate) * avgLossPnl  // expected value per trade
+  const usingEst   = settled.length === 0   // true when no real trade data yet
+  const winRate    = stats.totalTrades > 0 ? stats.winRate : 0.52
+  const ev         = winRate * avgWinPnl - (1 - winRate) * avgLossPnl
 
   // ETA to daily goal
-  const dailyRemaining  = Math.max(0, DAILY_GOAL  - pnl)
-  const weeklyRemaining = Math.max(0, WEEKLY_GOAL - pnl)
-  const annualRemaining = Math.max(0, ANNUAL_GOAL - pnl)
+  const dailyRemaining  = Math.max(0, DAILY_GOAL  - realizedPnl)
+  const weeklyRemaining = Math.max(0, WEEKLY_GOAL - realizedPnl)
 
   // Wins needed (raw, ignoring losses)
-  const winsToDaily  = avgWinPnl > 0 ? Math.ceil(dailyRemaining  / avgWinPnl) : '—'
-  const winsToWeekly = avgWinPnl > 0 ? Math.ceil(weeklyRemaining / avgWinPnl) : '—'
+  const winsToDaily  = avgWinPnl > 0 ? Math.ceil(dailyRemaining  / avgWinPnl) : null
+  const winsToWeekly = avgWinPnl > 0 ? Math.ceil(weeklyRemaining / avgWinPnl) : null
 
   // ETA via expected value — how many 5-min cycles to accumulate remaining P&L
   const cyclesToDaily  = ev > 0 ? Math.ceil(dailyRemaining  / ev) : null
@@ -92,12 +116,13 @@ export default function StrategyPanel({ stats, trades, market }: {
 
   function fmtTime(mins: number | null) {
     if (mins == null) return '—'
+    if (mins > 43_800) return `>${Math.round(mins / 43_800)}mo`  // sanity cap
     if (mins < 60)   return `~${mins}m`
     const h = Math.floor(mins / 60), m = mins % 60
     return m > 0 ? `~${h}h ${m}m` : `~${h}h`
   }
 
-  // From current portfolio: how many all-in trades at avg win to hit daily goal
+  // Wins to reach daily goal from portfolio value
   const portfolioWins = portfolioValue && avgWinPnl > 0 && dailyRemaining > 0
     ? Math.ceil(dailyRemaining / avgWinPnl)
     : null
@@ -118,15 +143,28 @@ export default function StrategyPanel({ stats, trades, market }: {
       {/* ── Portfolio snapshot ── */}
       <Section title="Portfolio">
         <Row
-          label="Kalshi portfolio value"
+          label="Kalshi account value"
           value={portfolioValue != null ? `$${portfolioValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
           color="var(--blue)"
         />
         <Row
-          label="Session P&L"
-          value={`${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}`}
-          color={pnl >= 0 ? 'var(--green)' : 'var(--pink)'}
+          label="Session P&L (realized)"
+          value={settled.length > 0
+            ? `${realizedPnl >= 0 ? '+' : ''}$${realizedPnl.toFixed(2)}`
+            : '—'}
+          color={realizedPnl > 0 ? 'var(--green)' : realizedPnl < 0 ? 'var(--pink)' : 'var(--text-muted)'}
+          sub={settled.length > 0
+            ? `${settled.length} settled · ${stats.wins}W ${stats.losses}L`
+            : 'no settled trades yet'}
         />
+        {pending.length > 0 && (
+          <Row
+            label="Pending trades"
+            value={`${pending.length} open`}
+            color="var(--amber)"
+            sub={`$${pendingExposure.toFixed(2)} at risk`}
+          />
+        )}
         <Row
           label="Daily target remaining"
           value={`$${dailyRemaining.toFixed(2)}`}
@@ -137,14 +175,37 @@ export default function StrategyPanel({ stats, trades, market }: {
 
       {/* ── ETA to goals ── */}
       <Section title="ETA to Daily Goal">
-        <Row label="Wins needed (at avg win)"    value={`×${winsToDaily}`}           color="var(--amber)" />
-        <Row label="ETA via expected value"       value={fmtTime(minsToDaily)}         color="var(--green)"
-          sub={ev > 0 ? `EV = +$${ev.toFixed(2)}/cycle` : 'not enough data yet'} />
-        <Row label="Wins to weekly goal"          value={`×${winsToWeekly}`}          color="var(--text-secondary)" />
-        <Row label="ETA to weekly"                value={fmtTime(minsToWeekly)}        color="var(--text-secondary)" />
+        <Row
+          label="Wins needed (at avg win)"
+          value={winsToDaily != null ? `×${winsToDaily}` : '—'}
+          color="var(--amber)"
+          sub={usingEst ? `est. avg win $${avgWinPnl.toFixed(2)} · ${liveAsk}¢ ask` : undefined}
+        />
+        <Row
+          label="ETA via expected value"
+          value={fmtTime(minsToDaily)}
+          color={usingEst ? 'var(--text-secondary)' : 'var(--green)'}
+          sub={ev > 0
+            ? `EV = +$${ev.toFixed(2)}/cycle${usingEst ? ' (est.)' : ''}`
+            : 'insufficient data'}
+        />
+        <Row
+          label="Wins to weekly goal"
+          value={winsToWeekly != null ? `×${winsToWeekly}` : '—'}
+          color="var(--text-secondary)"
+        />
+        <Row
+          label="ETA to weekly"
+          value={fmtTime(minsToWeekly)}
+          color="var(--text-secondary)"
+        />
         {portfolioWins != null && (
-          <Row label="Wins from portfolio balance" value={`×${portfolioWins}`}         color="var(--blue)"
-            sub={`based on $${portfolioValue?.toFixed(0)} account`} />
+          <Row
+            label="Wins from portfolio balance"
+            value={`×${portfolioWins}`}
+            color="var(--blue)"
+            sub={`based on $${portfolioValue?.toFixed(0)} account`}
+          />
         )}
       </Section>
 
@@ -174,7 +235,7 @@ export default function StrategyPanel({ stats, trades, market }: {
           label="Avg win / loss"
           value={`+$${avgWinPnl.toFixed(2)} / -$${avgLossPnl.toFixed(2)}`}
           color="var(--text-primary)"
-          sub={settled.length === 0
+          sub={usingEst
             ? `est. from ${defaults.contracts} contracts @ ${liveAsk}¢ ask ($${BOT_TRADE_DOLLARS} trade)`
             : undefined}
         />
@@ -186,9 +247,9 @@ export default function StrategyPanel({ stats, trades, market }: {
         />
         <Row
           label="Expected value / trade"
-          value={ev > 0 ? `+$${ev.toFixed(2)}` : `$${ev.toFixed(2)}`}
-          color={ev > 0 ? 'var(--green)' : 'var(--pink)'}
-          sub={stats.totalTrades === 0 ? `est. at ${liveAsk}¢ ask · 52% win rate` : undefined}
+          value={ev > 0 ? `+$${ev.toFixed(2)}` : ev < 0 ? `-$${Math.abs(ev).toFixed(2)}` : '—'}
+          color={ev > 0 ? 'var(--green)' : ev < 0 ? 'var(--pink)' : 'var(--text-muted)'}
+          sub={usingEst ? `est. at ${liveAsk}¢ ask · 52% win rate` : undefined}
         />
         <Row
           label="Half-Kelly fraction"

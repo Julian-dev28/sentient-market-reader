@@ -150,7 +150,21 @@ export default function SignalPanel({ probability, sentiment }: SignalPanelProps
               {rec === 'YES' && probability.pModel < 0.5  && <>ROMA values YES at <strong style={{ color: recColor }}>{Math.round(probability.pModel * 100)}%</strong> — the market is underpricing it at {Math.round(probability.pMarket * 100)}¢.</>}
               {rec === 'NO'  && probability.pModel >= 0.5 && <>ROMA still thinks YES wins at <strong style={{ color: recColor }}>{Math.round(probability.pModel * 100)}%</strong>, but the market prices it at {Math.round(probability.pMarket * 100)}¢ — YES is overpriced. Buying NO captures that gap.</>}
               {rec === 'NO'  && probability.pModel < 0.5  && <>ROMA thinks BTC will end <strong style={{ color: recColor }}>below the strike</strong> ({Math.round(probability.pModel * 100)}% YES) — and the market is overpricing YES at {Math.round(probability.pMarket * 100)}¢.</>}
-              {rec === 'NO_TRADE' && <>ROMA and market agree closely — no exploitable edge found. Sitting this one out.</>}
+              {rec === 'NO_TRADE' && (() => {
+                const lean    = probability.pModel > probability.pMarket ? 'bullish' : probability.pModel < probability.pMarket ? 'bearish' : 'neutral'
+                const leanClr = lean === 'bullish' ? 'var(--green)' : lean === 'bearish' ? 'var(--blue)' : 'var(--text-muted)'
+                const direction = probability.pModel >= 0.5 ? 'YES wins' : 'NO wins'
+                return (
+                  <>
+                    ROMA estimates <strong style={{ color: leanClr }}>{Math.round(probability.pModel * 100)}% YES</strong>{' '}
+                    ({direction}) vs the market&apos;s {Math.round(probability.pMarket * 100)}¢.{' '}
+                    Edge of <strong>{probability.edgePct.toFixed(1)}%</strong> is below the 3% bot threshold —
+                    no automated trade, but the{' '}
+                    <strong style={{ color: leanClr }}>{lean} signal</strong> is live.
+                    {lean !== 'neutral' && <>{' '}You can act on it manually.</>}
+                  </>
+                )
+              })()}
             </div>
 
             {conviction && conviction.label !== 'no edge' && (
@@ -185,8 +199,9 @@ export default function SignalPanel({ probability, sentiment }: SignalPanelProps
             const delta = Math.round((probability.pModel - probability.pMarket) * 100)
             const aiColor  = ai.side  === 'YES' ? 'var(--green)' : 'var(--blue)'
             const mktColor = mkt.side === 'YES' ? 'var(--green)' : 'var(--blue)'
+            const absDir  = probability.pModel >= 0.5 ? 'leans YES' : 'leans NO'
             const gapText = Math.abs(delta) <= 1
-              ? 'ROMA and market agree — no edge'
+              ? `ROMA and market agree (both ${absDir}) — edge below threshold`
               : delta > 0
                 ? `ROMA is ${delta}pp more bullish than the market`
                 : `ROMA is ${Math.abs(delta)}pp more bearish than the market`

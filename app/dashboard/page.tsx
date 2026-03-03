@@ -82,9 +82,33 @@ export default function Home() {
   }, [orModelOpen])
 
   const romaMode: string = 'keen'
-  const { pipeline, history, streamingAgents, trades, isRunning, serverLocked, nextCycleIn, error, stats, runCycle, stopCycle } = usePipeline(
+
+  // ── Market tick — runs BEFORE usePipeline so btcPrice/strikePrice are available
+  // for strike-flip detection. useMarketTick auto-discovers the active market when
+  // ticker is null; switches to the specific ticker once pipeline has run.
+  const [marketTicker, setMarketTicker] = useState<string | null>(null)
+  const { liveMarket, liveOrderbook, liveBTCPrice, livePriceHistory, refresh: refreshMarket } = useMarketTick(marketTicker)
+
+  const liveStrikePrice = (liveMarket?.yes_sub_title
+    ? parseFloat(liveMarket.yes_sub_title.replace(/[^0-9.]/g, ''))
+    : 0) || liveMarket?.floor_strike || 0
+
+  const { pipeline, history, streamingAgents, trades, isRunning, serverLocked, nextCycleIn, error, stats, strikeFlipped, dismissStrikeFlip, runCycle, stopCycle } = usePipeline(
     liveMode, romaMode, botActive, aiRisk, undefined, undefined, sentMode, probMode, orModel || undefined,
+    liveBTCPrice || undefined, liveStrikePrice || undefined,
   )
+
+  // Keep marketTicker in sync with the pipeline's active market
+  const md   = pipeline?.agents.marketDiscovery.output
+  const pf   = pipeline?.agents.priceFeed.output
+  const prob = pipeline?.agents.probability.output ?? null
+  const sent = pipeline?.agents.sentiment.output ?? null
+  const exec = pipeline?.agents.execution.output
+
+  useEffect(() => {
+    const t = md?.activeMarket?.ticker ?? null
+    if (t) setMarketTicker(t)
+  }, [md?.activeMarket?.ticker])
 
   // ── Trade alert pop-up ─────────────────────────────────────────────────────
   type TradeAlert = { action: string; side: 'yes' | 'no'; limitPrice: number; ticker: string; edge: number; pModel: number }
@@ -119,31 +143,25 @@ export default function Home() {
     } catch { setAlertStatus('err') }
   }
 
-  const md   = pipeline?.agents.marketDiscovery.output
-  const pf   = pipeline?.agents.priceFeed.output
-  const prob = pipeline?.agents.probability.output ?? null
-  const sent = pipeline?.agents.sentiment.output ?? null
-  const exec = pipeline?.agents.execution.output
-
-  // Live 5-second tick — keeps bid/ask and BTC price fresh between pipeline cycles
-  const { liveMarket, liveOrderbook, liveBTCPrice, livePriceHistory, refresh: refreshMarket } = useMarketTick(
-    md?.activeMarket?.ticker ?? null,
-  )
-
   // Merge: live tick overrides stale pipeline values.
   // Don't fall back to pipeline market if its close_time is already in the past.
   const mdMarket = md?.activeMarket ?? null
   const mdMarketExpired = mdMarket?.close_time
     ? new Date(mdMarket.close_time).getTime() < Date.now()
     : false
-  const activeMarket = liveMarket ?? (mdMarketExpired ? null : mdMarket)
-  const currentBTCPrice = liveBTCPrice ?? pf?.currentPrice   ?? 0
+  const activeMarket    = liveMarket ?? (mdMarketExpired ? null : mdMarket)
+  const currentBTCPrice = liveBTCPrice ?? pf?.currentPrice ?? 0
   const priceHistory    = livePriceHistory
 
-  // Derive strike + expiry directly from live market so they show before pipeline runs
-  const strikePrice = md?.strikePrice
+  // Derive strike + expiry directly from live market so they show before pipeline runs.
+  // yes_sub_title ("Price to beat: $X") matches Kalshi's displayed value — prefer it over
+  // floor_strike which can diverge from the actual displayed strike.
+  const liveStrikeFromSubtitle = activeMarket?.yes_sub_title
+    ? parseFloat(activeMarket.yes_sub_title.replace(/[^0-9.]/g, ''))
+    : 0
+  const strikePrice = (liveStrikeFromSubtitle > 0 ? liveStrikeFromSubtitle : null)
+    ?? md?.strikePrice
     ?? activeMarket?.floor_strike
-    ?? (activeMarket?.yes_sub_title ? parseFloat(activeMarket.yes_sub_title.replace(/[^0-9.]/g, '')) : 0)
     ?? 0
   // Always compute from live close_time so the countdown stays accurate between pipeline cycles.
   // Fall back to pipeline value only when no market is loaded yet.
@@ -346,6 +364,65 @@ export default function Home() {
         </div>
       )}
 
+      {/* Strike-flip popup */}
+      {strikeFlipped && (
+        <div className="animate-fade-in" style={{
+          position: 'fixed', bottom: 24, right: 24, zIndex: 1050,
+          maxWidth: 320, width: 'calc(100vw - 48px)',
+          background: 'var(--bg-card)', borderRadius: 14,
+          border: '1.5px solid rgba(212,135,44,0.55)',
+          boxShadow: '0 8px 32px rgba(0,0,0,0.28), 0 0 0 1px rgba(212,135,44,0.10)',
+          padding: '16px 18px',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+            <div style={{
+              width: 36, height: 36, borderRadius: '50%', flexShrink: 0,
+              background: 'rgba(212,135,44,0.12)', border: '1.5px solid rgba(212,135,44,0.4)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 16,
+            }}>⚡</div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--text-primary)', marginBottom: 3 }}>
+                BTC crossed ${strikePrice > 0 ? strikePrice.toLocaleString(undefined, { maximumFractionDigits: 0 }) : 'strike'}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                Price flipped sides. Re-run the pipeline to update the analysis?
+              </div>
+            </div>
+            <button
+              onClick={dismissStrikeFlip}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 14, lineHeight: 1, padding: 2, flexShrink: 0 }}
+            >✕</button>
+          </div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+            <button
+              onClick={() => { dismissStrikeFlip(); runCycle() }}
+              disabled={isRunning || serverLocked}
+              style={{
+                flex: 2, padding: '8px 0', borderRadius: 8, cursor: isRunning || serverLocked ? 'not-allowed' : 'pointer',
+                border: '1px solid rgba(212,135,44,0.6)',
+                background: 'linear-gradient(135deg, #b8720f 0%, var(--amber) 100%)',
+                fontSize: 12, fontWeight: 800, color: '#fff',
+                opacity: isRunning || serverLocked ? 0.5 : 1,
+                boxShadow: '0 2px 10px rgba(212,135,44,0.3)',
+              }}
+            >
+              {isRunning ? 'Running…' : 'Re-run now'}
+            </button>
+            <button
+              onClick={dismissStrikeFlip}
+              style={{
+                flex: 1, padding: '8px 0', borderRadius: 8, cursor: 'pointer',
+                border: '1px solid var(--border)', background: 'var(--bg-secondary)',
+                fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)',
+              }}
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ── Trade alert pop-up ─────────────────────────────────────────────── */}
       {tradeAlert && (
         <div style={{
@@ -468,6 +545,7 @@ export default function Home() {
             <span><strong>Live trading active</strong> — real Kalshi orders will be placed when the pipeline approves a trade. Risk controls: 3% min edge · $150 daily cap · 15% max drawdown.</span>
           </div>
         )}
+
 
         <div style={{ display: 'grid', gridTemplateColumns: '310px 1fr 290px', gap: 14, alignItems: 'start' }}>
 
