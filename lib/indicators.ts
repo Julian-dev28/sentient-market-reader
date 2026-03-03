@@ -22,6 +22,133 @@ export function normalCDF(z: number): number {
   return 0.5 + sign * (0.5 - pdf * poly)
 }
 
+// ── Lanczos log-gamma (g=7, accurate to ~15 significant figures) ─────────────
+function lgamma(x: number): number {
+  const c = [0.99999999999980993, 676.5203681218851, -1259.1392167224028,
+             771.32342877765313, -176.61502916214059, 12.507343278686905,
+             -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7]
+  if (x < 0.5) return Math.log(Math.PI / Math.sin(Math.PI * x)) - lgamma(1 - x)
+  x -= 1
+  let a = c[0]
+  for (let i = 1; i < c.length; i++) a += c[i] / (x + i)
+  const t = x + 7.5
+  return 0.5 * Math.log(2 * Math.PI) + (x + 0.5) * Math.log(t) - t + Math.log(a)
+}
+
+// ── Regularized incomplete beta I_x(a,b) — Lentz continued fraction ──────────
+// Used for Student-t CDF. Accurate to ~7 significant figures.
+function incompleteBeta(x: number, a: number, b: number): number {
+  if (x <= 0) return 0
+  if (x >= 1) return 1
+  if (x > (a + 1) / (a + b + 2)) return 1 - incompleteBeta(1 - x, b, a)
+  const lbeta = lgamma(a) + lgamma(b) - lgamma(a + b)
+  const front = Math.exp(a * Math.log(x) + b * Math.log(1 - x) - lbeta) / a
+  const TINY = 1e-30, EPS = 3e-7
+  let C = 1
+  let D = 1 / Math.max(1 - (a + b) * x / (a + 1), TINY)
+  let result = D
+  for (let m = 1; m <= 200; m++) {
+    let aa = m * (b - m) * x / ((a + 2 * m - 1) * (a + 2 * m))
+    D = 1 / Math.max(1 + aa * D, TINY); C = Math.max(1 + aa / C, TINY); result *= C * D
+    aa = -(a + m) * (a + b + m) * x / ((a + 2 * m) * (a + 2 * m + 1))
+    D = 1 / Math.max(1 + aa * D, TINY); C = Math.max(1 + aa / C, TINY)
+    const delta = C * D; result *= delta
+    if (Math.abs(delta - 1) < EPS) break
+  }
+  return front * result
+}
+
+// ── Student-t CDF (fat-tail, ν degrees of freedom) ────────────────────────────
+// BTC log-returns have empirical ν ≈ 4 — much heavier tails than Gaussian.
+// Replacing normalCDF in binary option pricing corrects tail probability by 10–25%.
+export function studentTCDF(t: number, nu: number): number {
+  const ib = incompleteBeta(nu / (nu + t * t), nu / 2, 0.5)
+  return t >= 0 ? 1 - ib / 2 : ib / 2
+}
+
+// ── Fat-tail binary option pricing (Student-t digital) ────────────────────────
+// Identical to log-normal binary but uses Student-t CDF(d₂, ν) instead of Φ(d₂).
+// More accurate for BTC because normal CDF systematically underestimates strike crossings.
+export function computeFatTailBinary(
+  spot: number,
+  strike: number,
+  sigmaAnnualized: number,
+  minutesLeft: number,
+  nu = 4,
+): { pYesFat: number; d2: number } | null {
+  if (spot <= 0 || strike <= 0 || sigmaAnnualized <= 0 || minutesLeft <= 0) return null
+  const T  = minutesLeft / (365 * 24 * 60)
+  const d2 = (Math.log(spot / strike) - 0.5 * sigmaAnnualized ** 2 * T) /
+             (sigmaAnnualized * Math.sqrt(T))
+  return { pYesFat: studentTCDF(d2, nu), d2 }
+}
+
+// ── Logarithmic Opinion Pool ──────────────────────────────────────────────────
+// Combines two calibrated binary forecasts: p_lop ∝ p1^w1 × p2^w2
+// Formally derived from the independent-expert Bayesian combination theorem.
+// Avoids the "regression to the mean" of linear pools — preserves forecast sharpness.
+// Numerically stable via log-sum-exp trick.
+export function logOpinionPool(p1: number, p2: number, w1: number, w2: number): number {
+  p1 = Math.max(1e-9, Math.min(1 - 1e-9, p1))
+  p2 = Math.max(1e-9, Math.min(1 - 1e-9, p2))
+  const lyes = w1 * Math.log(p1)      + w2 * Math.log(p2)
+  const lno  = w1 * Math.log(1 - p1)  + w2 * Math.log(1 - p2)
+  const maxL = Math.max(lyes, lno)   // log-sum-exp for numerical stability
+  return Math.exp(lyes - maxL) / (Math.exp(lyes - maxL) + Math.exp(lno - maxL))
+}
+
+// ── Hurst exponent (variance ratio method) ────────────────────────────────────
+// H > 0.5: persistent trend (momentum extrapolation is valid)
+// H < 0.5: anti-persistent / mean-reverting (expect reversion, fade extremes)
+// H ≈ 0.5: random walk (no exploitable memory structure)
+// Formula: H = 0.5 + log(Var(2-period) / 2Var(1-period)) / (2 log 2)
+export function computeHurst(candles: OHLCVCandle[]): number | null {
+  const closes = [...candles].reverse().map(c => c[4])
+  if (closes.length < 8) return null
+  const lr: number[] = []
+  for (let i = 1; i < closes.length; i++) {
+    if (closes[i - 1] > 0) lr.push(Math.log(closes[i] / closes[i - 1]))
+  }
+  if (lr.length < 6) return null
+  const var1 = lr.reduce((s, r) => s + r * r, 0) / lr.length
+  const p2: number[] = []
+  for (let i = 0; i + 1 < lr.length; i += 2) p2.push(lr[i] + lr[i + 1])
+  const var2 = p2.reduce((s, r) => s + r * r, 0) / Math.max(p2.length, 1)
+  if (var1 <= 0) return null
+  return Math.max(0, Math.min(1, 0.5 + Math.log(Math.max(var2 / (2 * var1), 1e-12)) / (2 * Math.log(2))))
+}
+
+// ── CUSUM jump detector ───────────────────────────────────────────────────────
+// Cumulative Sum control chart — detects sudden structural breaks in return series.
+// k = reference shift magnitude (in σ units) to detect; h = decision threshold.
+// Scores > h indicate a statistically significant directional price jump.
+// When jumpDetected=true, diffusion-based physics models (Brownian/BS) are unreliable.
+export function computeCUSUM(
+  candles: OHLCVCandle[],
+  k = 0.5,
+  h = 4.0,
+): { posScore: number; negScore: number; jumpDetected: boolean; direction: 'up' | 'down' | 'none' } {
+  const closes = [...candles].reverse().map(c => c[4])
+  if (closes.length < 4) return { posScore: 0, negScore: 0, jumpDetected: false, direction: 'none' }
+  const lr: number[] = []
+  for (let i = 1; i < closes.length; i++) {
+    if (closes[i - 1] > 0) lr.push(Math.log(closes[i] / closes[i - 1]))
+  }
+  const sigma = Math.sqrt(lr.reduce((s, r) => s + r * r, 0) / Math.max(lr.length, 1)) || 0.001
+  let sPos = 0, sNeg = 0
+  for (const r of lr) {
+    const z = r / sigma
+    sPos = Math.max(0, sPos + z - k)
+    sNeg = Math.max(0, sNeg - z - k)
+  }
+  return {
+    posScore:     sPos,
+    negScore:     sNeg,
+    jumpDetected: sPos > h || sNeg > h,
+    direction:    sPos > h ? 'up' : sNeg > h ? 'down' : 'none',
+  }
+}
+
 // ── Internal EMA helper (oldest-first closes array) ──────────────────────────
 function emaFromCloses(closes: number[], period: number): number[] {
   if (closes.length < period) return []
@@ -267,6 +394,10 @@ export interface QuantSignals {
   // Pricing models
   brownianPrior: { pQuant: number; sigmaCandle: number; sigmaPerMin: number } | null
   lnBinary:      { pYes: number; d2: number } | null
+  fatTailBinary: { pYesFat: number; d2: number } | null  // Student-t (ν=4) — preferred for BTC fat tails
+  // Long-memory & regime
+  hurstExponent: number | null   // H>0.5 trending, H<0.5 mean-reverting, H≈0.5 random walk
+  cusum:         { posScore: number; negScore: number; jumpDetected: boolean; direction: 'up' | 'down' | 'none' } | null
 }
 
 export function computeQuantSignals(
@@ -284,6 +415,10 @@ export function computeQuantSignals(
   const brownianPrior   = candles ? computeBrownianPrior(candles, distancePct, minutesLeft) : null
   const lnBinary        = gkVolAnnualized !== null
     ? computeLogNormalBinary(spot, strike, gkVolAnnualized, minutesLeft)
+    : null
+  // Fat-tail binary uses Student-t(ν=4) instead of normal — more accurate for BTC tails
+  const fatTailBinary   = gkVolAnnualized !== null
+    ? computeFatTailBinary(spot, strike, gkVolAnnualized, minutesLeft)
     : null
   const expectedRangeUSD = brownianPrior
     ? brownianPrior.sigmaPerMin * Math.sqrt(minutesLeft) * spot
@@ -304,6 +439,9 @@ export function computeQuantSignals(
     obImbalance: computeOrderbookImbalance(orderbook),
     brownianPrior,
     lnBinary,
+    fatTailBinary,
+    hurstExponent: candles ? computeHurst(candles) : null,
+    cusum:         candles ? computeCUSUM(candles) : null,
   }
 }
 
@@ -330,6 +468,13 @@ export function formatQuantBrief(
     lines.push(
       `  Log-normal binary P(YES):  ${(sig.lnBinary.pYes * 100).toFixed(2)}%` +
       `  [d₂=${sig.lnBinary.d2.toFixed(4)} · σ=${sig.gkVolAnnualized !== null ? (sig.gkVolAnnualized * 100).toFixed(1) + '% ann (GK)' : 'n/a'}]`
+    )
+  }
+  if (sig.fatTailBinary) {
+    const diff = sig.lnBinary ? ((sig.fatTailBinary.pYesFat - sig.lnBinary.pYes) * 100) : 0
+    lines.push(
+      `  Fat-tail binary P(YES):    ${(sig.fatTailBinary.pYesFat * 100).toFixed(2)}%` +
+      `  [ν=4 Student-t · ${diff >= 0 ? '+' : ''}${diff.toFixed(2)}pp vs normal — PREFERRED for BTC fat tails]`
     )
   }
   if (sig.gkVol15m !== null) {
@@ -380,11 +525,33 @@ export function formatQuantBrief(
   }
 
   // ── Regime ──────────────────────────────────────────────────────────────────
-  if (sig.autocorr !== null) {
-    const regime = sig.autocorr > 0.15 ? 'TRENDING — extrapolate current direction' :
-                   sig.autocorr < -0.15 ? 'MEAN-REVERTING — fade extremes, expect reversal' :
-                   'RANDOM WALK — no persistent structure'
-    lines.push(`\n[REGIME]  Lag-1 autocorr: ${sig.autocorr.toFixed(4)}  →  ${regime}`)
+  if (sig.autocorr !== null || sig.hurstExponent !== null) {
+    lines.push('\n[REGIME]')
+    if (sig.autocorr !== null) {
+      const regime = sig.autocorr > 0.15 ? 'TRENDING — extrapolate current direction' :
+                     sig.autocorr < -0.15 ? 'MEAN-REVERTING — fade extremes, expect reversal' :
+                     'RANDOM WALK — no persistent structure'
+      lines.push(`  Lag-1 autocorr:   ${sig.autocorr.toFixed(4)}  →  ${regime}`)
+    }
+    if (sig.hurstExponent !== null) {
+      const H    = sig.hurstExponent
+      const hlbl = H > 0.6 ? 'PERSISTENT — momentum has long memory, trend likely continues' :
+                   H < 0.4 ? 'ANTI-PERSISTENT — mean-reversion likely, fade extremes' :
+                   'RANDOM WALK — no exploitable long-memory structure'
+      lines.push(`  Hurst exponent:   H=${H.toFixed(4)}  →  ${hlbl}`)
+    }
+  }
+  if (sig.cusum) {
+    if (sig.cusum.jumpDetected) {
+      lines.push(
+        `\n[⚡ CUSUM JUMP ALERT]  Structural break detected — direction: ${sig.cusum.direction.toUpperCase()}` +
+        `  (S⁺=${sig.cusum.posScore.toFixed(2)}, S⁻=${sig.cusum.negScore.toFixed(2)})` +
+        `\n  Diffusion physics (Brownian/BS) assume continuous returns — reduce their weight.` +
+        `\n  Trust recent momentum + orderbook pressure over quantitative priors this cycle.`
+      )
+    } else {
+      lines.push(`  CUSUM: S⁺=${sig.cusum.posScore.toFixed(2)}, S⁻=${sig.cusum.negScore.toFixed(2)}  → no structural break`)
+    }
   }
 
   // ── Live intra-window velocity ───────────────────────────────────────────────

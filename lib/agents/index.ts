@@ -158,6 +158,8 @@ export async function runAgentPipeline(
         probResult.output.recommendation,
         limitPrice,
         sentResult.output.score,
+        probResult.output.gkVol15m,
+        probResult.output.confidence,
       )
   emit?.('risk', riskResult)
 

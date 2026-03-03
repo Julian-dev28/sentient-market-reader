@@ -1,7 +1,7 @@
 import type { AgentResult, ProbabilityOutput, KalshiMarket, OHLCVCandle, DerivativesSignal } from '../types'
 import { llmToolCall, type AIProvider } from '../llm-client'
 import { callPythonRoma, formatRomaTrace } from '../roma/python-client'
-import { computeQuantSignals, formatQuantBrief, normalCDF } from '../indicators'
+import { computeQuantSignals, formatQuantBrief, normalCDF, logOpinionPool } from '../indicators'
 
 /** Format last N 15-min candles as compact context for the LLM.
  *  Input: newest-first [ts, low, high, open, close, volume]
@@ -146,24 +146,62 @@ export async function runProbabilityModel(
 
   const pLLM = Math.max(0, Math.min(1, extracted.pModel))
 
-  // Blend LLM estimate with quantitative priors.
-  // Weight of quant anchor increases as time runs out (physics dominates near expiry).
-  //   α = 0.15 at 15 min remaining → 0.70 at 0 min remaining
-  // When both Brownian and log-normal priors are available, average them first.
+  // ── Quantitative prior combination via Logarithmic Opinion Pool ──────────────
+  // Three independent quant estimates of P(YES):
+  //   pBrownian — mean absolute return, no-drift Brownian motion
+  //   pLN       — log-normal binary (Black-Scholes digital) with normal CDF
+  //   pFatTail  — log-normal binary with Student-t(ν=4) CDF [preferred: heavier BTC tails]
+  //
+  // LOP is used instead of linear average: p_lop ∝ p1^w1 × p2^w2
+  // This preserves forecast sharpness — linear averages regress probabilities toward 0.5.
   let pModel = pLLM
   let quantBlendNote = ''
   const pBrownian = quant.brownianPrior?.pQuant ?? null
   const pLN       = quant.lnBinary?.pYes ?? null
-  const pQuantAvg = pBrownian !== null && pLN !== null
-    ? (pBrownian + pLN) / 2
-    : (pBrownian ?? pLN)
-  if (pQuantAvg !== null) {
-    const alpha    = Math.max(0.15, Math.min(0.70, 1 - minutesUntilExpiry / 15))
-    const pBlended = alpha * pQuantAvg + (1 - alpha) * pLLM
+  const pFatTail  = quant.fatTailBinary?.pYesFat ?? null
+
+  // Prefer fat-tail over normal LN binary (BTC ν≈4); weight fat-tail 55% vs brownian 45%
+  const pQuantCombined =
+    pBrownian !== null && pFatTail !== null ? logOpinionPool(pBrownian, pFatTail, 0.45, 0.55) :
+    pBrownian !== null && pLN      !== null ? logOpinionPool(pBrownian, pLN,      0.50, 0.50) :
+    (pFatTail ?? pBrownian ?? pLN)
+
+  if (pQuantCombined !== null) {
+    // ── Time-based quant weight (physics dominates near expiry) ──────────────
+    //   α = 0.15 at 15 min remaining → 0.70 at 0 min remaining
+    let alpha = Math.max(0.15, Math.min(0.70, 1 - minutesUntilExpiry / 15))
+
+    // ── Hurst adjustment: long-memory regime modulates quant vs LLM trust ────
+    //   H > 0.6 (persistent trend): LLM sees trend context → reduce quant anchor −0.08
+    //   H < 0.4 (mean-reverting):   physics dominates, patterns repeat → increase +0.08
+    const hurst = quant.hurstExponent
+    let hurstNote = ''
+    if (hurst !== null) {
+      if      (hurst > 0.6) { alpha = Math.max(0.10, alpha - 0.08); hurstNote = ` H=${hurst.toFixed(3)}(persistent↓α)` }
+      else if (hurst < 0.4) { alpha = Math.min(0.80, alpha + 0.08); hurstNote = ` H=${hurst.toFixed(3)}(mrv↑α)`       }
+      else                  {                                         hurstNote = ` H=${hurst.toFixed(3)}(rw)`          }
+    }
+
+    // ── CUSUM jump: diffusion models break during structural breaks ───────────
+    //   Sudden jumps violate the continuous-diffusion assumption → reduce quant anchor −0.12
+    let cusumNote = ''
+    if (quant.cusum?.jumpDetected) {
+      alpha = Math.max(0.08, alpha - 0.12)
+      cusumNote = ` JUMP(${quant.cusum.direction}↓α)`
+    }
+
+    // ── Final blend via Log Opinion Pool (not linear average) ────────────────
+    //   LOP: p_final ∝ pLLM^(1-α) × pQuant^α
+    const pBlended = logOpinionPool(pLLM, pQuantCombined, 1 - alpha, alpha)
     pModel = Math.max(0, Math.min(1, pBlended))
-    quantBlendNote = ` | P_brownian=${pBrownian !== null ? (pBrownian * 100).toFixed(1) + '%' : 'n/a'}` +
-      ` P_lnBinary=${pLN !== null ? (pLN * 100).toFixed(1) + '%' : 'n/a'}` +
-      ` P_avg=${(pQuantAvg * 100).toFixed(1)}% (α=${alpha.toFixed(2)}) → blended=${(pBlended * 100).toFixed(1)}%`
+
+    quantBlendNote =
+      ` | P_brownian=${pBrownian !== null ? (pBrownian * 100).toFixed(1) + '%' : 'n/a'}` +
+      ` P_fatTail=${pFatTail !== null ? (pFatTail * 100).toFixed(1) + '%' : 'n/a'}` +
+      ` P_lnBS=${pLN !== null ? (pLN * 100).toFixed(1) + '%' : 'n/a'}` +
+      ` P_quant=${(pQuantCombined * 100).toFixed(1)}%(LOP)` +
+      ` α=${alpha.toFixed(2)}${hurstNote}${cusumNote}` +
+      ` → P_blend=${(pBlended * 100).toFixed(1)}%`
   }
 
   const edge    = pModel - pMarket
@@ -172,7 +210,13 @@ export async function runProbabilityModel(
   return {
     agentName: agentLabel,
     status: 'done',
-    output: { pModel, pMarket, edge, edgePct, recommendation: extracted.recommendation, confidence: extracted.confidence, provider: pythonResult.provider },
+    output: {
+      pModel, pMarket, edge, edgePct,
+      recommendation: extracted.recommendation,
+      confidence:     extracted.confidence,
+      provider:       pythonResult.provider,
+      gkVol15m:       quant.gkVol15m,
+    },
     reasoning: romaTrace + `\n\nP(LLM)=${(pLLM * 100).toFixed(1)}%${quantBlendNote} → P(final)=${(pModel * 100).toFixed(1)}% vs P(market)=${(pMarket * 100).toFixed(1)}% — edge: ${edgePct >= 0 ? '+' : ''}${edgePct.toFixed(1)}%. Rec: ${extracted.recommendation} (${extracted.confidence})`,
     durationMs: Date.now() - start,
     timestamp: new Date().toISOString(),
