@@ -17,15 +17,17 @@ export async function runMarketDiscovery(
   const mins = active ? minutesUntilExpiry(active) : 0
   const secs = active ? secondsUntilExpiry(active) : 0
 
-  // Use floor_strike (first-class Kalshi field) for the "price to beat"
-  // Fallback: parse from yes_sub_title ("Price to beat: $65,619.62") or title
+  // yes_sub_title ("Price to beat: $67,912.26") matches what Kalshi displays — use it first.
+  // floor_strike can diverge from the displayed strike, so treat it as a fallback only.
   let strikePrice = 0
-  if (active?.floor_strike) {
-    strikePrice = active.floor_strike
-  } else if (active?.yes_sub_title) {
+  if (active?.yes_sub_title) {
     const match = active.yes_sub_title.match(/\$([\d,]+(?:\.\d+)?)/)
     if (match) strikePrice = parseFloat(match[1].replace(/,/g, ''))
-  } else if (active?.title) {
+  }
+  if (!strikePrice && active?.floor_strike) {
+    strikePrice = active.floor_strike
+  }
+  if (!strikePrice && active?.title) {
     const match = active.title.match(/\$([\d,]+(?:\.\d+)?)/)
     if (match) strikePrice = parseFloat(match[1].replace(/,/g, ''))
   }

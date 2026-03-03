@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { runAgentPipeline } from '@/lib/agents'
 import { buildKalshiHeaders } from '@/lib/kalshi-auth'
+import { getBalance } from '@/lib/kalshi-trade'
 import type { KalshiMarket, KalshiOrderbook, BTCQuote, OHLCVCandle, DerivativesSignal } from '@/lib/types'
 import type { AIProvider } from '@/lib/llm-client'
 import { tryLockPipeline, releasePipelineLock } from '@/lib/pipeline-lock'
@@ -138,6 +139,13 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'BTC price unavailable — all sources failed' }, { status: 503 })
     }
 
+    // Fetch Kalshi balance for portfolio-aware risk/execution sizing
+    let portfolioValueCents = 0
+    const balResult = await getBalance().catch(() => null)
+    if (balResult?.ok && balResult.data) {
+      portfolioValueCents = (balResult.data.balance ?? 0) + (balResult.data.portfolio_value ?? 0)
+    }
+
     // Fetch candles, live candles, derivatives, orderbook in parallel
     const [candleRes, liveCandleRes, bybitRes, obRes] = await Promise.all([
       fetch('https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=900&limit=13', { cache: 'no-store' }).catch(() => null),
@@ -215,6 +223,7 @@ export async function GET(req: NextRequest) {
             provider2, providers, sentModeOverride, probModeOverride,
             candles, liveCandles, derivatives, orModelOverride, req.signal,
             (key, result) => enc('agent', { key, result }),
+            portfolioValueCents,
           )
           enc('done', pipeline)
         } catch (err) {

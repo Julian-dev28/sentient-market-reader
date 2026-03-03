@@ -53,34 +53,74 @@ export function usePipeline(
   sentMode?: string,     // explicit Sentiment stage mode (overrides SENT_MODE_MAP auto-downgrade)
   probMode?: string,     // explicit Probability stage mode (overrides romaMode)
   orModel?: string,      // override OpenRouter model ID for sentiment + probability
+  btcPrice?: number,     // live BTC price — used for strike-flip detection
+  strikePrice?: number,  // current market strike price
 ) {
+  // All persisted state inits to empty/null to match SSR — restored in useEffect below.
+  // This prevents hydration mismatches where server renders 0/null and client renders
+  // real localStorage values.
   const [pipeline, setPipeline]           = useState<PipelineState | null>(null)
   const [history, setHistory]             = useState<PipelineState[]>([])
   const [streamingAgents, setStreamingAgents] = useState<PartialPipelineAgents>({})
-  const [trades, setTrades]               = useState<TradeRecord[]>(() => {
-    if (typeof window === 'undefined') return []
-    try {
-      const saved = localStorage.getItem('sentient-trades')
-      return saved ? (JSON.parse(saved) as TradeRecord[]) : []
-    } catch { return [] }
-  })
+  const [trades, setTrades]               = useState<TradeRecord[]>([])
+  const [tradesLoaded, setTradesLoaded]   = useState(false)  // guards persist until restore done
   const [isRunning, setIsRunning]         = useState(false)
   const [serverLocked, setServerLocked]   = useState(false)
+  // Always start at default to match SSR — corrected from localStorage in useEffect below
   const [nextCycleIn, setNextCycleIn] = useState(CYCLE_INTERVAL_MS / 1000)
   const [error, setError]           = useState<string | null>(null)
+  const [strikeFlipped, setStrikeFlipped] = useState(false)  // true briefly when BTC crosses strike
   const lastCycleRef                = useRef<number>(0)
   const countdownRef                = useRef<ReturnType<typeof setInterval> | null>(null)
   const autoIntervalRef             = useRef<ReturnType<typeof setInterval> | null>(null)
   const runCycleRef                 = useRef<(() => Promise<void>) | null>(null)
   const abortRef                    = useRef<AbortController | null>(null)
+  const prevBtcSideRef              = useRef<'above' | 'below' | null>(null)
+  const lastFlipMsRef               = useRef<number>(0)
 
-  // Persist trades across page refreshes
+  // Restore persisted state after mount — must be useEffect (not useState init)
+  // so SSR and client both start with the same values and hydration passes.
   useEffect(() => {
+    try {
+      const savedTrades = localStorage.getItem('sentient-trades')
+      if (savedTrades) setTrades(JSON.parse(savedTrades) as TradeRecord[])
+    } catch {}
+    setTradesLoaded(true)   // signal that persist effect may now write
+    try {
+      const savedPipeline = localStorage.getItem('sentient-pipeline')
+      if (savedPipeline) setPipeline(JSON.parse(savedPipeline) as PipelineState)
+    } catch {}
+    try {
+      const lastCycle = localStorage.getItem('sentient-last-cycle')
+      if (lastCycle) {
+        const elapsed = Math.floor((Date.now() - Number(lastCycle)) / 1000)
+        const remaining = Math.max(0, CYCLE_INTERVAL_MS / 1000 - elapsed)
+        if (remaining < CYCLE_INTERVAL_MS / 1000) setNextCycleIn(remaining)
+      }
+    } catch {}
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Persist trades — guarded by tradesLoaded so we never overwrite localStorage
+  // with [] before the restore effect has had a chance to read it.
+  useEffect(() => {
+    if (!tradesLoaded) return
     try { localStorage.setItem('sentient-trades', JSON.stringify(trades)) } catch {}
-  }, [trades])
+  }, [trades, tradesLoaded])
+
+  useEffect(() => {
+    if (pipeline) {
+      try { localStorage.setItem('sentient-pipeline', JSON.stringify(pipeline)) } catch {}
+    }
+  }, [pipeline])
 
   const stopCycle = useCallback(() => {
-    abortRef.current?.abort()
+    // Defer out of React's synchronous event handler.
+    // abort() synchronously triggers undici stream callbacks that throw
+    // "BodyStreamBuffer was aborted" — deferring prevents it propagating
+    // up through React's dispatch chain as an unhandled error.
+    const controller = abortRef.current
+    if (controller) setTimeout(() => { try { controller.abort() } catch { /* ignore */ } }, 0)
   }, [])
 
   const runCycle = useCallback(async () => {
@@ -140,7 +180,7 @@ export function usePipeline(
           }
         }
       } finally {
-        reader.cancel()
+        reader.cancel().catch(() => {})  // suppress rejection if stream already aborted
       }
 
       if (!data) throw new Error('Pipeline stream ended without result')
@@ -213,7 +253,13 @@ export function usePipeline(
       }))
 
     } catch (err) {
-      if (err instanceof Error && err.name === 'AbortError') {
+      // Next.js 16 Turbopack throws "BodyStreamBuffer was aborted" instead of
+      // a named AbortError, so check the message too.
+      const isAbort = err instanceof Error && (
+        err.name === 'AbortError' ||
+        err.message?.toLowerCase().includes('abort')
+      )
+      if (isAbort) {
         setError('Pipeline stopped')
       } else {
         setError(String(err))
@@ -222,6 +268,7 @@ export function usePipeline(
       setIsRunning(false)
       setServerLocked(false)
       lastCycleRef.current = Date.now()
+      try { localStorage.setItem('sentient-last-cycle', String(Date.now())) } catch {}
       setNextCycleIn(CYCLE_INTERVAL_MS / 1000)
     }
   }, [liveMode, romaMode, autoTrade, aiRisk, provider2, providers, sentMode, probMode, orModel])
@@ -247,6 +294,23 @@ export function usePipeline(
     }
   }, [autoTrade])
 
+  // ── Strike-flip detection ────────────────────────────────────────────────────
+  // When BTC crosses the strike price, notify the user so they can decide whether
+  // to re-run the pipeline. 60s cooldown prevents thrashing near the strike level.
+  useEffect(() => {
+    if (!btcPrice || !strikePrice || strikePrice <= 0) return
+    const side: 'above' | 'below' = btcPrice >= strikePrice ? 'above' : 'below'
+    const prev = prevBtcSideRef.current
+    prevBtcSideRef.current = side
+    if (prev === null || prev === side) return  // first read or no flip
+
+    const now = Date.now()
+    if (now - lastFlipMsRef.current < 60_000) return  // 60s cooldown
+    lastFlipMsRef.current = now
+
+    setStrikeFlipped(true)
+  }, [btcPrice, strikePrice])  // eslint-disable-line react-hooks/exhaustive-deps
+
   // Countdown timer
   useEffect(() => {
     countdownRef.current = setInterval(() => setNextCycleIn(prev => Math.max(0, prev - 1)), 1000)
@@ -255,5 +319,7 @@ export function usePipeline(
 
   const stats = computeStats(trades)
 
-  return { pipeline, history, streamingAgents, trades, isRunning, serverLocked, nextCycleIn, error, stats, runCycle, stopCycle }
+  const dismissStrikeFlip = useCallback(() => setStrikeFlipped(false), [])
+
+  return { pipeline, history, streamingAgents, trades, isRunning, serverLocked, nextCycleIn, error, stats, strikeFlipped, dismissStrikeFlip, runCycle, stopCycle }
 }
