@@ -132,10 +132,24 @@ export function usePipeline(
       if (provider2) params.set('provider2', provider2)
       if (providers && providers.length > 1) params.set('providers', providers.join(','))
       if (orModel) params.set('orModel', orModel)
+
+      // Read user-provided API keys from localStorage and send as a header
+      const reqHeaders: Record<string, string> = { Accept: 'text/event-stream' }
+      try {
+        const storedKeys = localStorage.getItem('sentient-provider-keys')
+        if (storedKeys) {
+          const parsed = JSON.parse(storedKeys) as Record<string, string>
+          const nonEmpty = Object.fromEntries(Object.entries(parsed).filter(([, v]) => v?.trim()))
+          if (Object.keys(nonEmpty).length > 0) {
+            reqHeaders['x-provider-keys'] = btoa(JSON.stringify(nonEmpty))
+          }
+        }
+      } catch { /* ignore localStorage errors */ }
+
       const res = await fetch(`/api/pipeline?${params}`, {
         cache: 'no-store',
         signal: controller.signal,
-        headers: { Accept: 'text/event-stream' },
+        headers: reqHeaders,
       })
       if (!res.ok) {
         if (res.status === 503) throw new Error('No active KXBTC15M market — trading hours are ~11:30 AM–midnight ET weekdays')

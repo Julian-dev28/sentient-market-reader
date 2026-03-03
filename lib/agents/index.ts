@@ -54,6 +54,7 @@ export async function runAgentPipeline(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   emit?: (key: string, result: AgentResult<any>) => void,  // SSE streaming callback
   portfolioValueCents: number = 0,  // live Kalshi balance (cash + positions) in cents
+  apiKeys?: Record<string, string>, // per-provider API keys from user settings
 ): Promise<PipelineState> {
   const cycleId = ++cycleCounter
   const cycleStartedAt = new Date().toISOString()
@@ -106,6 +107,7 @@ const probProviders = providers && providers.length > 1 ? providers : undefined
       provider,  // extractionProvider — always primary (grok) for reliable tool-call JSON
       orModelOverride,
       signal,
+      apiKeys,
     ).then(r => { emit?.('sentiment', r); return r }),
     runProbabilityModel(
       null,   // parallel mode — no sentiment context available yet
@@ -113,16 +115,17 @@ const probProviders = providers && providers.length > 1 ? providers : undefined
       pfResult.output.distanceFromStrikePct,
       mdResult.output.minutesUntilExpiry,
       mdResult.output.activeMarket,
-probProvider,
-       probMode,
-       probProviders,
-       provider,   // extraction always on primary (grok) for reliable tool-call JSON
+      probProvider,
+      probMode,
+      probProviders,
+      provider,   // extraction always on primary (grok) for reliable tool-call JSON
       prevContext,
       candles,
       liveCandles,
       derivatives ?? undefined,
       orModelOverride,
       signal,
+      apiKeys,
     ).then(r => { emit?.('probability', r); return r }),
   ])
 

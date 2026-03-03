@@ -784,26 +784,51 @@ export function formatQuantBrief(
   }
 
   // ── Live intra-window velocity ───────────────────────────────────────────────
-  if (sig.velocity) {
-    const v    = sig.velocity
-    const accelNote = Math.abs(v.acceleration) > 5
-      ? (v.acceleration > 0 ? '  ↑ accelerating up' : '  ↓ decelerating / reversing')
-      : '  → constant pace'
+  if (Math.abs(distancePct) > 0 && minutesLeft > 0) {
+    const distUSD    = Math.abs(distancePct / 100) * spot
+    const reqVel     = distUSD / minutesLeft
+    // Frame the question correctly: what needs to happen for YES to win/lose
+    const yesWins    = distancePct >= 0  // BTC currently above strike → YES wins by default
+    const scenario   = yesWins
+      ? `YES wins unless BTC FALLS $${distUSD.toFixed(0)} — need -$${reqVel.toFixed(2)}/min downward for NO to win`
+      : `YES wins only if BTC RISES $${distUSD.toFixed(0)} — need +$${reqVel.toFixed(2)}/min for YES to win`
     lines.push(
-      `\n[LIVE VELOCITY (1-min)]  ` +
-      `${v.velocityPerMin >= 0 ? '+' : ''}$${v.velocityPerMin.toFixed(2)}/min  [${v.direction}]${accelNote}`
+      `\n[STRIKE REACHABILITY — CRITICAL]` +
+      `\n  ${scenario}` +
+      `\n  Time remaining: ${minutesLeft.toFixed(1)}min`
     )
-    // Minutes to reach strike at current velocity
-    if (Math.abs(v.velocityPerMin) > 0.5 && Math.abs(distancePct) > 0) {
-      const distanceUSD   = Math.abs(distancePct / 100) * spot
-      const minsToStrike  = distanceUSD / Math.abs(v.velocityPerMin)
-      const willCross     = minutesLeft > minsToStrike
-        ? (v.velocityPerMin > 0 && distancePct < 0) || (v.velocityPerMin < 0 && distancePct > 0)
-          ? `⚠ At current velocity reaches strike in ~${minsToStrike.toFixed(1)}min (CROSS LIKELY)`
-          : `  At current velocity reaches strike in ~${minsToStrike.toFixed(1)}min`
-        : `  Strike unreachable at current velocity in ${minutesLeft.toFixed(1)}min remaining`
-      lines.push(`  ${willCross}`)
+    if (sig.velocity) {
+      const v       = sig.velocity
+      const toward  = (distancePct < 0 && v.velocityPerMin > 0) || (distancePct > 0 && v.velocityPerMin < 0)
+      const ratio   = reqVel > 0 ? Math.abs(v.velocityPerMin) / reqVel : 0
+      const accelNote = Math.abs(v.acceleration) > 5
+        ? (v.acceleration > 0 ? ' ↑accelerating' : ' ↓decelerating')
+        : ' →constant'
+      lines.push(
+        `  Current velocity:  ${v.velocityPerMin >= 0 ? '+' : ''}$${v.velocityPerMin.toFixed(2)}/min` +
+        `  [${v.direction}${accelNote}]  ${(ratio * 100).toFixed(0)}% of required pace`
+      )
+      if (!toward) {
+        lines.push(`  ⛔ MOVING AWAY FROM STRIKE — strike physically unreachable unless reversal`)
+      } else if (ratio < 0.4) {
+        lines.push(`  ⛔ VELOCITY TOO SLOW (${(ratio * 100).toFixed(0)}% of needed) — strike unreachable at current pace`)
+      } else if (ratio < 0.75) {
+        lines.push(`  ⚠  Below required pace (${(ratio * 100).toFixed(0)}%) — needs acceleration to reach strike`)
+      } else {
+        const minsToStrike = distUSD / Math.abs(v.velocityPerMin)
+        const msg = minsToStrike <= minutesLeft
+          ? `✓ On pace — reaches strike in ~${minsToStrike.toFixed(1)}min (${minutesLeft.toFixed(1)}min remaining)`
+          : `  Borderline — ${minsToStrike.toFixed(1)}min at current pace vs ${minutesLeft.toFixed(1)}min left`
+        lines.push(`  ${msg}`)
+      }
+    } else {
+      lines.push(`  [No live velocity data — use physics priors for reachability]`)
     }
+  } else if (sig.velocity) {
+    const v = sig.velocity
+    const accelNote = Math.abs(v.acceleration) > 5
+      ? (v.acceleration > 0 ? ' ↑accelerating' : ' ↓decelerating') : ' →constant'
+    lines.push(`\n[LIVE VELOCITY (1-min)]  ${v.velocityPerMin >= 0 ? '+' : ''}$${v.velocityPerMin.toFixed(2)}/min  [${v.direction}${accelNote}]`)
   }
 
   // ── Orderbook microstructure ─────────────────────────────────────────────────

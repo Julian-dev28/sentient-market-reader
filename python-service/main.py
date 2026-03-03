@@ -48,75 +48,45 @@ app.add_middleware(
 
 # ── LLM configuration ────────────────────────────────────────────────────────
 
-def build_llm_config(roma_mode: str = "keen", provider_override: Optional[str] = None, model_override: Optional[str] = None) -> tuple[LLMConfig, str]:
+def build_llm_config(
+    provider_override: Optional[str] = None,
+    model_override: Optional[str] = None,
+    api_keys: Optional[dict] = None,
+) -> tuple[LLMConfig, str]:
     """
-    Build an LLMConfig from environment variables.
-    Mirrors the TypeScript llm-client providers exactly:
-      anthropic    → ANTHROPIC_API_KEY
-      openai       → OPENAI_API_KEY
-      grok         → XAI_API_KEY → api.x.ai/v1
-      openrouter   → OPENROUTER_API_KEY + OPENROUTER_MODEL
-      huggingface  → HF_API_KEY → router.huggingface.co/v1 (or HF_BASE_URL)
-
-    roma_mode is passed from the Next.js request body (not read from env),
-    so only the root .env.local needs to be edited.
-      blitz → GROK_BLITZ_MODEL (default: grok-4-1-fast-non-reasoning)
-      sharp → GROK_FAST_MODEL  (default: grok-3-mini-fast)
-      keen  → GROK_MID_MODEL   (default: grok-3)
-      smart → GROK_SMART_MODEL (default: grok-4-0709)
-    Sentiment and Probability stages are called with different roma_modes
-    (SENT_MODE_MAP in index.ts runs sentiment one tier lighter than probability).
-    provider_override: if set, takes precedence over AI_PROVIDER env var (split-provider support).
-    Returns (llm_config, provider_label).
+    Build an LLMConfig from environment variables (or user-provided keys).
+    Single model per provider — set via env var or model_override.
+    api_keys: optional dict with per-provider keys e.g. {'openrouter': '...', 'anthropic': '...'}
+    provider_override: if set, takes precedence over AI_PROVIDER env var.
     """
     provider = provider_override or os.getenv("AI_PROVIDER", "grok")
+    ak = api_keys or {}
 
     if provider == "anthropic":
-        api_key = os.getenv("ANTHROPIC_API_KEY")
+        api_key = ak.get("anthropic") or os.getenv("ANTHROPIC_API_KEY")
         if not api_key:
             raise ValueError("ANTHROPIC_API_KEY not set")
-        if roma_mode == "blitz":
-            model = os.getenv("ANTHROPIC_BLITZ_MODEL", "claude-haiku-4-5-20251001")
-        elif roma_mode == "sharp":
-            model = os.getenv("ANTHROPIC_FAST_MODEL", "claude-haiku-4-5-20251001")
-        elif roma_mode == "keen":
-            model = os.getenv("ANTHROPIC_MID_MODEL", "claude-haiku-4-5-20251001")
-        else:  # smart
-            model = os.getenv("ANTHROPIC_SMART_MODEL", "claude-sonnet-4-6")
+        model = model_override or os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
         return (
             LLMConfig(model=f"anthropic/{model}", api_key=api_key),
             f"anthropic/{model}",
         )
 
     if provider == "openai":
-        api_key = os.getenv("OPENAI_API_KEY")
+        api_key = ak.get("openai") or os.getenv("OPENAI_API_KEY")
         if not api_key:
             raise ValueError("OPENAI_API_KEY not set")
-        if roma_mode == "blitz":
-            model = os.getenv("OPENAI_BLITZ_MODEL", "gpt-4o-mini")
-        elif roma_mode == "sharp":
-            model = os.getenv("OPENAI_FAST_MODEL", "gpt-4o-mini")
-        elif roma_mode == "keen":
-            model = os.getenv("OPENAI_MID_MODEL", "gpt-4o-mini")
-        else:  # smart
-            model = os.getenv("OPENAI_SMART_MODEL", "gpt-4o")
+        model = model_override or os.getenv("OPENAI_MODEL", "gpt-4o-mini")
         return (
             LLMConfig(model=f"openai/{model}", api_key=api_key),
             f"openai/{model}",
         )
 
     if provider == "grok":
-        api_key = os.getenv("XAI_API_KEY")
+        api_key = ak.get("xai") or ak.get("grok") or os.getenv("XAI_API_KEY")
         if not api_key:
             raise ValueError("XAI_API_KEY not set")
-        if roma_mode == "blitz":
-            model = os.getenv("GROK_BLITZ_MODEL", "grok-4-1-fast-non-reasoning")  # 0.8s/call
-        elif roma_mode == "sharp":
-            model = os.getenv("GROK_FAST_MODEL", "grok-3-mini-fast")               # 9.8s/call
-        elif roma_mode == "keen":
-            model = os.getenv("GROK_MID_MODEL", "grok-3")
-        else:  # smart
-            model = os.getenv("GROK_SMART_MODEL", "grok-4-0709")
+        model = model_override or os.getenv("GROK_MODEL", "grok-3-mini-fast")
         return (
             LLMConfig(
                 model=f"openai/{model}",
@@ -127,19 +97,10 @@ def build_llm_config(roma_mode: str = "keen", provider_override: Optional[str] =
         )
 
     if provider == "openrouter":
-        api_key = os.getenv("OPENROUTER_API_KEY")
+        api_key = ak.get("openrouter") or os.getenv("OPENROUTER_API_KEY")
         if not api_key:
             raise ValueError("OPENROUTER_API_KEY not set")
-        if model_override:
-            model = model_override
-        elif roma_mode == "blitz":
-            model = os.getenv("OPENROUTER_BLITZ_MODEL", os.getenv("OPENROUTER_MODEL", "x-ai/grok-3-mini"))
-        elif roma_mode == "sharp":
-            model = os.getenv("OPENROUTER_FAST_MODEL",  os.getenv("OPENROUTER_MODEL", "x-ai/grok-3-mini"))
-        elif roma_mode == "keen":
-            model = os.getenv("OPENROUTER_MID_MODEL",   os.getenv("OPENROUTER_MODEL", "x-ai/grok-3-mini"))
-        else:  # smart
-            model = os.getenv("OPENROUTER_MODEL", "x-ai/grok-3-mini")
+        model = model_override or os.getenv("OPENROUTER_MODEL", "google/gemini-2.5-flash")
         return (
             LLMConfig(
                 model=f"openrouter/{model}",
@@ -152,18 +113,11 @@ def build_llm_config(roma_mode: str = "keen", provider_override: Optional[str] =
         )
 
     if provider == "huggingface":
-        api_key = os.getenv("HUGGINGFACE_API_KEY") or os.getenv("HF_API_KEY")
+        api_key = ak.get("huggingface") or ak.get("hf") or os.getenv("HUGGINGFACE_API_KEY") or os.getenv("HF_API_KEY")
         if not api_key:
             raise ValueError("HUGGINGFACE_API_KEY not set")
         base_url = os.getenv("HF_BASE_URL", "https://router.huggingface.co/v1")
-        if roma_mode == "blitz":
-            model = os.getenv("HF_BLITZ_MODEL", "Qwen/Qwen2.5-1.5B-Instruct")
-        elif roma_mode == "sharp":
-            model = os.getenv("HF_FAST_MODEL", "meta-llama/Llama-3.2-3B-Instruct")
-        elif roma_mode == "keen":
-            model = os.getenv("HF_MID_MODEL", "meta-llama/Llama-3.1-8B-Instruct")
-        else:  # smart
-            model = os.getenv("HF_SMART_MODEL", "meta-llama/Llama-3.3-70B-Instruct")
+        model = model_override or os.getenv("HUGGINGFACE_MODEL", "Qwen/Qwen2.5-7B-Instruct")
         return (
             LLMConfig(
                 model=f"openai/{model}",
@@ -271,9 +225,9 @@ def build_roma_config_tiered(analysis_llm: LLMConfig, orchestration_llm: LLMConf
     )
 
 
-# Build LLM config on startup using default mode — each /analyze call rebuilds with the request's roma_mode
+# Build LLM config on startup — each /analyze call rebuilds with the request's provider + keys
 try:
-    _llm_config, _provider_label = build_llm_config("keen")
+    _llm_config, _provider_label = build_llm_config()
     # Also configure global DSPy LM for any direct dspy.predict() calls
     dspy.configure(lm=dspy.LM(
         _llm_config.model,
@@ -295,11 +249,11 @@ class AnalyzeRequest(BaseModel):
     context: str
     max_depth: Optional[int] = 1
     beam_width: Optional[int] = None       # parallel executor beams; None = SDK default (typically 1-2)
-    roma_mode: Optional[str] = "keen"      # blitz | sharp | keen | smart — analysis model tier
-    orch_mode: Optional[str] = None        # orchestration model tier (atomizer/planner); defaults to one tier below roma_mode
+    roma_mode: Optional[str] = "keen"      # blitz | sharp | keen | smart — controls token budgets only
     provider: Optional[str] = None         # overrides AI_PROVIDER env (single-provider support)
     providers: Optional[list[str]] = None  # multi-provider parallel solve — runs each provider simultaneously and merges answers
-    model_override: Optional[str] = None   # override specific model ID for openrouter provider (e.g. "google/gemini-2.5-pro")
+    model_override: Optional[str] = None   # override specific model ID (e.g. "google/gemini-2.5-pro")
+    api_keys: Optional[dict] = None        # per-provider API keys {'openrouter': '...', 'anthropic': '...', 'xai': '...', ...}
 
 
 class SubtaskResult(BaseModel):
@@ -350,21 +304,16 @@ def analyze(req: AnalyzeRequest):
     if _llm_config is None:
         raise HTTPException(status_code=503, detail="LLM not configured — check env vars")
 
-    # Rebuild LLM config using the mode sent by the caller (not env)
+    # Rebuild LLM config using provider + keys from the caller
     # provider from request overrides AI_PROVIDER env — enables split-provider pipelines
     roma_mode = req.roma_mode or "keen"
-    analysis_llm, provider_label = build_llm_config(roma_mode, req.provider)
-
-    # Orchestration tier: one step faster than analysis tier by default
-    # sharp→blitz, keen→sharp, smart→keen; blitz stays at blitz (already at floor)
-    _orch_tier_map = {"blitz": "blitz", "sharp": "blitz", "keen": "sharp", "smart": "keen"}
-    orch_mode = req.orch_mode or _orch_tier_map.get(roma_mode, "sharp")
-    orchestration_llm, _ = build_llm_config(orch_mode, req.provider)
+    analysis_llm, provider_label = build_llm_config(req.provider, req.model_override, req.api_keys)
+    orchestration_llm, _ = build_llm_config(req.provider, None, req.api_keys)
 
     # Multi-provider mode: providers list takes precedence over single provider
     active_providers = req.providers if req.providers and len(req.providers) > 0 else [req.provider or os.getenv("AI_PROVIDER", "grok")]
 
-    print(f"[ROMA] /analyze  mode={roma_mode}  orch={orch_mode}  providers={active_providers}  model={analysis_llm.model}")
+    print(f"[ROMA] /analyze  mode={roma_mode}  providers={active_providers}  model={analysis_llm.model}")
 
     start = time.time()
 
@@ -379,8 +328,8 @@ Market context:
 
     def run_single_solve(prov: str) -> tuple[str, object]:
         """Run one ROMA solve for a given provider; returns (provider_label, result)."""
-        a_llm, p_label = build_llm_config(roma_mode, prov, req.model_override)
-        o_llm, _       = build_llm_config(orch_mode, prov)
+        a_llm, p_label = build_llm_config(prov, req.model_override, req.api_keys)
+        o_llm, _       = build_llm_config(prov, None, req.api_keys)
         cfg = build_roma_config_tiered(a_llm, o_llm, roma_mode)
         solve_kwargs: dict = {"max_depth": req.max_depth, "config": cfg}
 

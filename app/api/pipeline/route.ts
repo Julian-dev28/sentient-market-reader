@@ -204,6 +204,15 @@ export async function GET(req: NextRequest) {
 
     const orModelOverride  = req.nextUrl.searchParams.get('orModel') || undefined
 
+    // Read user-provided API keys from request header (base64-encoded JSON)
+    let apiKeys: Record<string, string> | undefined
+    const keysHeader = req.headers.get('x-provider-keys')
+    if (keysHeader) {
+      try {
+        apiKeys = JSON.parse(Buffer.from(keysHeader, 'base64').toString('utf8'))
+      } catch { /* ignore malformed header */ }
+    }
+
     // ── SSE stream phase ──────────────────────────────────────────────────
     // All data is fetched; start the event stream. Lock is released in stream's finally.
     const encoder = new TextEncoder()
@@ -219,6 +228,7 @@ export async function GET(req: NextRequest) {
             candles, liveCandles, derivatives, orModelOverride, req.signal,
             (key, result) => enc('agent', { key, result }),
             portfolioValueCents,
+            apiKeys,
           )
           enc('done', pipeline)
         } catch (err) {
