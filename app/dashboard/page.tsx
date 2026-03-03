@@ -829,6 +829,12 @@ export default function Home() {
             <PriceChart priceHistory={priceHistory} strikePrice={strikePrice} currentPrice={currentBTCPrice} />
             <AgentPipeline pipeline={pipeline} isRunning={isRunning} streamingAgents={streamingAgents} />
             <PipelineHistory history={history} />
+
+            {/* ── Challenge + Strategy — beneath pipeline ── */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <ChallengePanel stats={stats} trades={trades} />
+              <StrategyPanel stats={stats} trades={trades} />
+            </div>
           </div>
 
           {/* ─── RIGHT ─── */}
@@ -837,12 +843,6 @@ export default function Home() {
             <PerformancePanel stats={stats} trades={trades} />
             <TradeLog trades={trades} />
           </div>
-        </div>
-
-        {/* ── Challenge + Strategy — full-width horizontal row ── */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginTop: 14 }}>
-          <ChallengePanel stats={stats} trades={trades} />
-          <StrategyPanel stats={stats} trades={trades} />
         </div>
       </main>
     </div>
