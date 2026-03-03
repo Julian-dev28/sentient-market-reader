@@ -276,6 +276,7 @@ export default function MarketCard({ market, orderbook, strikePrice, currentBTCP
   const [cancelingAll, setCancelingAll] = useState(false)
   const [side, setSide]                 = useState<'yes' | 'no'>('yes')
   const [hotkeyFlash, setHotkeyFlash]   = useState<string | null>(null)
+  const [allingIn, setAllingIn]         = useState(false)
 
   async function batchSell(route: string, setter: (v: boolean) => void) {
     setter(true)
@@ -334,7 +335,27 @@ export default function MarketCard({ market, orderbook, strikePrice, currentBTCP
     } finally { setCancelingAll(false) }
   }
 
-  // ── Hotkeys ⇧1–⇧6 (live mode only) ─────────────────────────────────────────
+  async function allIn() {
+    if (!liveMode || !market) return
+    setAllingIn(true)
+    const ask = side === 'yes' ? market.yes_ask : market.no_ask
+    try {
+      const res  = await fetch('/api/place-order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ticker: market.ticker, side, count: 500,
+          ...(side === 'yes' ? { yesPrice: ask } : { noPrice: ask }),
+          clientOrderId: `allin-${side}-${Date.now()}`,
+        }),
+      })
+      const data = await res.json()
+      setHotkeyFlash(data.ok ? `✓ ALL IN ${side.toUpperCase()} 500 @ ${ask}¢` : `✗ ${data.error ?? 'Order failed'}`)
+    } catch { setHotkeyFlash('✗ Network error') }
+    finally { setAllingIn(false); setTimeout(() => setHotkeyFlash(null), 3000) }
+  }
+
+  // ── Hotkeys ⇧1–⇧6 + ⇧A (live mode only) ─────────────────────────────────────
   useEffect(() => {
     if (!liveMode || !market) return
 
@@ -374,6 +395,7 @@ export default function MarketCard({ market, orderbook, strikePrice, currentBTCP
       else if (e.code === 'Digit6') { e.preventDefault(); batchSell('/api/sell-order', setSellingAll) }
       else if (e.code === 'KeyY')   { e.preventDefault(); setSide('yes') }
       else if (e.code === 'KeyN')   { e.preventDefault(); setSide('no') }
+      else if (e.code === 'KeyA')   { e.preventDefault(); allIn() }
     }
 
     window.addEventListener('keydown', onKey)
@@ -506,6 +528,27 @@ export default function MarketCard({ market, orderbook, strikePrice, currentBTCP
               />
             </div>
 
+            {/* All In button */}
+            {liveMode && (
+              <button
+                disabled={allingIn}
+                onClick={allIn}
+                style={{
+                  width: '100%', marginBottom: 8, padding: '11px 0', borderRadius: 9,
+                  cursor: allingIn ? 'not-allowed' : 'pointer',
+                  border: `2px solid ${side === 'yes' ? 'var(--green)' : 'var(--pink)'}`,
+                  background: side === 'yes' ? 'var(--green-pale)' : 'var(--pink-pale)',
+                  fontSize: 13, fontWeight: 900, letterSpacing: '0.06em',
+                  color: side === 'yes' ? 'var(--green)' : 'var(--pink)',
+                  transition: 'all 0.15s',
+                }}
+                onMouseEnter={e => { if (!allingIn) { e.currentTarget.style.background = side === 'yes' ? 'var(--green)' : 'var(--pink)'; e.currentTarget.style.color = '#fff' } }}
+                onMouseLeave={e => { if (!allingIn) { e.currentTarget.style.background = side === 'yes' ? 'var(--green-pale)' : 'var(--pink-pale)'; e.currentTarget.style.color = side === 'yes' ? 'var(--green)' : 'var(--pink)' } }}
+              >
+                {allingIn ? '…' : `ALL IN ${side.toUpperCase()} — 500 contracts`}
+              </button>
+            )}
+
             {/* Global position actions */}
             {liveMode && (
               <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
@@ -613,7 +656,7 @@ export default function MarketCard({ market, orderbook, strikePrice, currentBTCP
             }}>{side.toUpperCase()}</span>
             <span style={{ fontSize: 9, color: 'var(--border)', fontFamily: 'var(--font-geist-mono)' }}>·</span>
             {[
-              ['⇧Y', 'YES'], ['⇧N', 'NO'],
+              ['⇧Y', 'YES'], ['⇧N', 'NO'], ['⇧A', 'All In'],
               ['⇧1', '$10'], ['⇧2', '$20'], ['⇧3', '$50'],
               ['⇧4', 'Limit'], ['⇧5', 'Cancel'], ['⇧6', 'Sell'],
             ].map(([key, label]) => (
