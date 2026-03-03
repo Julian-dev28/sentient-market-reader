@@ -26,9 +26,13 @@ const RISK_PARAMS = {
   maxDrawdownPct:   15,    // % from peak
   maxTradesPerDay:  48,    // caps at one per 15-min window
   minEdgePct:        3,    // % minimum edge to trade
-  baseContractSize: 500,   // minimum # of contracts per paper trade
+  baseContractSize: 100,   // floor — vol + confidence scaling can bring size below 500
   maxContractSize:  500,   // ceiling
 }
+
+// Baseline 15-min Garman-Klass vol for BTC (~0.20%/candle).
+// Position scales inversely with vol: high-vol cycles get smaller size, low-vol get larger.
+const REFERENCE_VOL_15M = 0.002
 
 // ── Deterministic Kelly risk manager ──────────────────────────────────────────
 export function runRiskManager(
@@ -37,6 +41,8 @@ export function runRiskManager(
   recommendation: 'YES' | 'NO' | 'NO_TRADE',
   limitPrice: number,
   sentimentScore?: number,
+  gkVol15m?: number | null,
+  confidence?: 'high' | 'medium' | 'low',
 ): AgentResult<RiskOutput> {
   const start = Date.now()
   checkDailyReset()
@@ -71,11 +77,27 @@ export function runRiskManager(
     rejectionReason = `Daily trade count cap reached (${RISK_PARAMS.maxTradesPerDay})`
   }
 
+  // ── Half-Kelly with volatility + confidence scaling ───────────────────────
+  // Standard Kelly: f* = (b·p − q) / b  where b = net odds, q = 1 − p
   const b = limitPrice > 0 ? (100 - limitPrice) / limitPrice : 1
   const kellyFraction = Math.max(0, (b * pModel - (1 - pModel)) / b)
-  const rawContracts  = Math.round(kellyFraction * RISK_PARAMS.maxContractSize * 0.5)
-  const positionSize  = Math.max(RISK_PARAMS.baseContractSize, Math.min(rawContracts, RISK_PARAMS.maxContractSize))
-  const maxLoss       = approved ? (limitPrice / 100) * positionSize : 0
+
+  // Volatility scalar: high-vol environments carry more risk per contract — size down.
+  // Low-vol environments are safer — allow scaling up to 1.5× baseline.
+  // Clamped [0.30, 1.50] to prevent extreme sizing in both directions.
+  const volScalar = gkVol15m && gkVol15m > 0
+    ? Math.max(0.30, Math.min(1.50, REFERENCE_VOL_15M / gkVol15m))
+    : 1.0
+
+  // Confidence scalar: penalise low-conviction signals with smaller positions.
+  //   high → 100% · medium → 65% · low → 35%
+  const confScalar = confidence === 'high' ? 1.00
+                   : confidence === 'low'  ? 0.35
+                   : 0.65  // medium or unspecified
+
+  const rawContracts = Math.round(kellyFraction * RISK_PARAMS.maxContractSize * 0.5 * volScalar * confScalar)
+  const positionSize = Math.max(RISK_PARAMS.baseContractSize, Math.min(rawContracts, RISK_PARAMS.maxContractSize))
+  const maxLoss      = approved ? (limitPrice / 100) * positionSize : 0
 
   return {
     agentName: 'RiskManagerAgent',
@@ -90,7 +112,7 @@ export function runRiskManager(
       tradeCount: sessionState.tradeCount,
     },
     reasoning: approved
-      ? `Trade approved. Size: ${positionSize} contracts (half-Kelly). Max loss: $${maxLoss.toFixed(2)}. Session P&L: $${sessionState.dailyPnl.toFixed(2)}.`
+      ? `Trade approved. Size: ${positionSize} contracts (Kelly=${(kellyFraction * 100).toFixed(1)}% × 0.5 × vol=${volScalar.toFixed(2)} × conf=${confScalar.toFixed(2)}). Max loss: $${maxLoss.toFixed(2)}. P&L: $${sessionState.dailyPnl.toFixed(2)}.`
       : `Trade REJECTED — ${rejectionReason}`,
     durationMs: Date.now() - start,
     timestamp: new Date().toISOString(),

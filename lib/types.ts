@@ -109,6 +109,7 @@ export interface ProbabilityOutput {
   recommendation: 'YES' | 'NO' | 'NO_TRADE'
   confidence: 'high' | 'medium' | 'low'
   provider: string       // e.g. "grok/grok-4-0709"
+  gkVol15m?: number | null  // Garman-Klass realized vol (per-candle) — forwarded to risk manager
 }
 
 export interface RiskOutput {
