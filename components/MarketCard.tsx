@@ -366,12 +366,12 @@ export default function MarketCard({ market, orderbook, strikePrice, currentBTCP
 
     function onKey(e: KeyboardEvent) {
       if (!e.shiftKey) return
-      if (e.key === '1') { e.preventDefault(); buy(10) }
-      else if (e.key === '2') { e.preventDefault(); buy(20) }
-      else if (e.key === '3') { e.preventDefault(); buy(50) }
-      else if (e.key === '4') { e.preventDefault(); batchLimitSell() }
-      else if (e.key === '5') { e.preventDefault(); cancelAllOrders() }
-      else if (e.key === '6') { e.preventDefault(); batchSell('/api/sell-order', setSellingAll) }
+      if (e.code === 'Digit1') { e.preventDefault(); buy(10) }
+      else if (e.code === 'Digit2') { e.preventDefault(); buy(20) }
+      else if (e.code === 'Digit3') { e.preventDefault(); buy(50) }
+      else if (e.code === 'Digit4') { e.preventDefault(); batchLimitSell() }
+      else if (e.code === 'Digit5') { e.preventDefault(); cancelAllOrders() }
+      else if (e.code === 'Digit6') { e.preventDefault(); batchSell('/api/sell-order', setSellingAll) }
     }
 
     window.addEventListener('keydown', onKey)
