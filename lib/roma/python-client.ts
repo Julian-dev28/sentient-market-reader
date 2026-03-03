@@ -36,8 +36,9 @@ export async function callPythonRoma(
   modeOverride?: string,
   provider?: string,
   providers?: string[],
-  modelOverride?: string,  // override the model used by the python service (openrouter only)
-  signal?: AbortSignal,    // caller abort signal — combined with 220s hard timeout
+  modelOverride?: string,               // override the model used by the python service
+  signal?: AbortSignal,                 // caller abort signal — combined with 220s hard timeout
+  apiKeys?: Record<string, string>,     // per-provider API keys from user settings
 ): Promise<PythonRomaResponse> {
   const romaMode = modeOverride ?? process.env.ROMA_MODE ?? 'smart'
   const beamWidth = parseInt(process.env.ROMA_BEAM_WIDTH ?? '2')
@@ -53,6 +54,7 @@ export async function callPythonRoma(
       if (providers && providers.length > 0) body.providers = providers
       else if (provider) body.provider = provider
       if (modelOverride) body.model_override = modelOverride
+      if (apiKeys && Object.keys(apiKeys).length > 0) body.api_keys = apiKeys
       const res = await fetch(`${PYTHON_ROMA_URL}/analyze`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

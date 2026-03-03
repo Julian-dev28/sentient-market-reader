@@ -58,6 +58,28 @@ export default function SettingsPage() {
   // config state
   const [config, setConfig] = useState<ConfigData | null>(null)
 
+  // AI provider keys (stored in localStorage as sentient-provider-keys)
+  const [providerKeys, setProviderKeys] = useState({
+    openrouter: '', xai: '', anthropic: '', openai: '', huggingface: '',
+  })
+  const [keysSaved, setKeysSaved] = useState(false)
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem('sentient-provider-keys')
+      if (stored) setProviderKeys(k => ({ ...k, ...JSON.parse(stored) }))
+    } catch { /* ignore */ }
+  }, [])
+
+  const saveProviderKeys = () => {
+    try {
+      const trimmed = Object.fromEntries(Object.entries(providerKeys).map(([k, v]) => [k, v.trim()]))
+      localStorage.setItem('sentient-provider-keys', JSON.stringify(trimmed))
+      setKeysSaved(true)
+      setTimeout(() => setKeysSaved(false), 2000)
+    } catch { /* ignore */ }
+  }
+
   const loadConnectStatus = useCallback(async () => {
     try {
       const r = await fetch('/api/kalshi-connect', { credentials: 'include' })
@@ -488,6 +510,63 @@ export default function SettingsPage() {
               </div>
             </div>
           )}
+        </div>
+
+        {/* ── AI Provider Keys card ── */}
+        <div style={{
+          background: 'var(--bg-card)', border: '1px solid var(--border)',
+          borderRadius: 16, padding: '24px 28px', marginBottom: 20,
+        }}>
+          <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: '-0.01em', marginBottom: 4 }}>
+            AI Provider Keys
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 20 }}>
+            Saved locally in your browser. Used for ROMA reasoning — leave blank to use the server default.
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {([
+              { key: 'openrouter', label: 'OpenRouter', placeholder: 'sk-or-v1-…',  hint: 'Routes any model (Gemini, GPT, Claude, Grok…)' },
+              { key: 'xai',        label: 'xAI / Grok',  placeholder: 'xai-…',        hint: 'Direct xAI API — grok-3, grok-4 models' },
+              { key: 'anthropic',  label: 'Anthropic',   placeholder: 'sk-ant-…',     hint: 'Direct Anthropic API — Claude models' },
+              { key: 'openai',     label: 'OpenAI',      placeholder: 'sk-…',         hint: 'Direct OpenAI API — GPT-4o, o-series models' },
+              { key: 'huggingface',label: 'HuggingFace', placeholder: 'hf_…',         hint: 'HuggingFace Inference API — open-source models' },
+            ] as { key: keyof typeof providerKeys; label: string; placeholder: string; hint: string }[]).map(({ key, label, placeholder, hint }) => (
+              <div key={key}>
+                <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', display: 'block', marginBottom: 4 }}>
+                  {label}
+                </label>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 5 }}>{hint}</div>
+                <input
+                  type="password"
+                  placeholder={placeholder}
+                  value={providerKeys[key]}
+                  onChange={e => setProviderKeys(k => ({ ...k, [key]: e.target.value }))}
+                  style={{
+                    width: '100%', boxSizing: 'border-box',
+                    padding: '9px 14px', borderRadius: 9, fontSize: 12,
+                    border: `1px solid ${providerKeys[key] ? 'var(--green)44' : 'var(--border-bright)'}`,
+                    background: 'var(--bg-secondary)',
+                    color: 'var(--text-primary)', fontFamily: 'var(--font-geist-mono)',
+                    outline: 'none',
+                  }}
+                />
+              </div>
+            ))}
+
+            <button
+              onClick={saveProviderKeys}
+              style={{
+                padding: '9px 22px', borderRadius: 9, cursor: 'pointer',
+                border: 'none',
+                background: keysSaved ? 'var(--green)' : 'var(--blue)',
+                color: '#fff', fontSize: 12, fontWeight: 700,
+                alignSelf: 'flex-start', transition: 'background 0.2s',
+              }}
+            >
+              {keysSaved ? '✓ Saved' : 'Save Keys'}
+            </button>
+          </div>
         </div>
 
         {/* ── Config reference card ── */}

@@ -146,10 +146,31 @@ export default function SignalPanel({ probability, sentiment }: SignalPanelProps
               fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5,
               marginTop: 2,
             }}>
-              {rec === 'YES' && probability.pModel >= 0.5 && <>ROMA thinks YES wins at <strong style={{ color: recColor }}>{Math.round(probability.pModel * 100)}%</strong> — and the market is underpricing that outcome at {Math.round(probability.pMarket * 100)}¢.</>}
-              {rec === 'YES' && probability.pModel < 0.5  && <>ROMA values YES at <strong style={{ color: recColor }}>{Math.round(probability.pModel * 100)}%</strong> — the market is underpricing it at {Math.round(probability.pMarket * 100)}¢.</>}
-              {rec === 'NO'  && probability.pModel >= 0.5 && <>ROMA still thinks YES wins at <strong style={{ color: recColor }}>{Math.round(probability.pModel * 100)}%</strong>, but the market prices it at {Math.round(probability.pMarket * 100)}¢ — YES is overpriced. Buying NO captures that gap.</>}
-              {rec === 'NO'  && probability.pModel < 0.5  && <>ROMA thinks BTC will end <strong style={{ color: recColor }}>below the strike</strong> ({Math.round(probability.pModel * 100)}% YES) — and the market is overpricing YES at {Math.round(probability.pMarket * 100)}¢.</>}
+              {rec === 'YES' && (
+                <>
+                  ROMA thinks YES wins at{' '}
+                  <strong style={{ color: recColor }}>{Math.round(probability.pModel * 100)}%</strong>
+                  {probability.pMarket < probability.pModel - 0.02
+                    ? <> — market underprices YES at {Math.round(probability.pMarket * 100)}¢ (ROMA fair value: {Math.round(probability.pModel * 100)}¢). Positive edge.</>
+                    : probability.pMarket > probability.pModel + 0.02
+                      ? <> — market overprices YES at {Math.round(probability.pMarket * 100)}¢ vs ROMA&apos;s {Math.round(probability.pModel * 100)}¢, but direction favors YES.</>
+                      : <> — market agrees ({Math.round(probability.pMarket * 100)}¢ YES).</>
+                  }
+                </>
+              )}
+              {rec === 'NO' && (
+                <>
+                  ROMA thinks BTC ends{' '}
+                  <strong style={{ color: recColor }}>below the strike</strong>{' '}
+                  ({Math.round(probability.pModel * 100)}% YES → {Math.round((1 - probability.pModel) * 100)}% NO).{' '}
+                  {probability.pMarket > probability.pModel + 0.02
+                    ? <>Market overprices YES at {Math.round(probability.pMarket * 100)}¢ (ROMA: {Math.round(probability.pModel * 100)}¢) — NO is the value trade.</>
+                    : probability.pMarket < probability.pModel - 0.02
+                      ? <>Market is even more bearish ({Math.round(probability.pMarket * 100)}¢ YES) — both sides agree NO wins, limited extra edge.</>
+                      : <>Market agrees ({Math.round(probability.pMarket * 100)}¢ YES) — direction clear, edge thin.</>
+                  }
+                </>
+              )}
               {rec === 'NO_TRADE' && (() => {
                 const lean    = probability.pModel > probability.pMarket ? 'bullish' : probability.pModel < probability.pMarket ? 'bearish' : 'neutral'
                 const leanClr = lean === 'bullish' ? 'var(--green)' : lean === 'bearish' ? 'var(--blue)' : 'var(--text-muted)'
@@ -227,12 +248,9 @@ export default function SignalPanel({ probability, sentiment }: SignalPanelProps
                 {/* Market row */}
                 <div>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-                    <div>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)' }}>Market prices </span>
-                      <span style={{ fontSize: 11, fontWeight: 800, color: mktColor }}>{mkt.side} at</span>
-                    </div>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)' }}>Market P(YES)</span>
                     <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 12, fontWeight: 800, color: mktColor }}>
-                      {mkt.pct}¢ / YES
+                      {mkt.pct}¢
                     </span>
                   </div>
                   <Bar value={probability.pMarket} color={mktColor} />
