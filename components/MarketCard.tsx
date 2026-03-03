@@ -340,17 +340,30 @@ export default function MarketCard({ market, orderbook, strikePrice, currentBTCP
     setAllingIn(true)
     const ask = side === 'yes' ? market.yes_ask : market.no_ask
     try {
+      // Fetch available balance and compute max affordable contracts
+      const balData  = await fetch('/api/balance', { cache: 'no-store' }).then(r => r.json())
+      const availCents = balData.balance ?? 0          // Kalshi balance in cents
+      const costPer    = ask                           // cents per contract
+      const maxAfford  = costPer > 0 ? Math.floor(availCents / costPer) : 0
+      const count      = Math.min(500, Math.max(1, maxAfford))
+
+      if (maxAfford < 1) {
+        setHotkeyFlash('✗ Insufficient balance')
+        setTimeout(() => setHotkeyFlash(null), 3000)
+        return
+      }
+
       const res  = await fetch('/api/place-order', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ticker: market.ticker, side, count: 500,
+          ticker: market.ticker, side, count,
           ...(side === 'yes' ? { yesPrice: ask } : { noPrice: ask }),
           clientOrderId: `allin-${side}-${Date.now()}`,
         }),
       })
       const data = await res.json()
-      setHotkeyFlash(data.ok ? `✓ ALL IN ${side.toUpperCase()} 500 @ ${ask}¢` : `✗ ${data.error ?? 'Order failed'}`)
+      setHotkeyFlash(data.ok ? `✓ ALL IN ${side.toUpperCase()} ${count} @ ${ask}¢` : `✗ ${data.error ?? 'Order failed'}`)
     } catch { setHotkeyFlash('✗ Network error') }
     finally { setAllingIn(false); setTimeout(() => setHotkeyFlash(null), 3000) }
   }
