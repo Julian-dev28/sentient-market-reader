@@ -92,9 +92,10 @@ export default function StrategyPanel({ stats, trades }: { stats: PerformanceSta
   const halfKelly = (kelly * 0.5 * 100).toFixed(1)
 
   return (
-    <div className="card">
-      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 14 }}>Strategy &amp; ETA</div>
+    <div className="card" style={{ display: 'flex', flexDirection: 'column', maxHeight: 440 }}>
+      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 14, flexShrink: 0 }}>Strategy &amp; ETA</div>
 
+      <div style={{ overflowY: 'auto', flex: 1, paddingRight: 2 }}>
       {/* ── Portfolio snapshot ── */}
       <Section title="Portfolio">
         <Row
@@ -185,6 +186,7 @@ export default function StrategyPanel({ stats, trades }: { stats: PerformanceSta
         <Row label="Sentiment filter"       value="> 0.4 contradiction → skip"           color="var(--text-secondary)" />
         <Row label="CUSUM jump guard"       value="Structural break → reduce quant weight" color="var(--text-secondary)" />
       </Section>
+      </div>{/* end scroll container */}
     </div>
   )
 }

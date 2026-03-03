@@ -102,9 +102,9 @@ export default function ChallengePanel({ stats, trades }: { stats: PerformanceSt
   const toNextRank = nextRank ? nextRank.dollars - pnl : null
 
   return (
-    <div className="card">
+    <div className="card" style={{ display: 'flex', flexDirection: 'column', maxHeight: 440 }}>
       {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexShrink: 0 }}>
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
             <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 14, fontWeight: 800, color: 'var(--amber)' }}>$</span>
@@ -125,6 +125,7 @@ export default function ChallengePanel({ stats, trades }: { stats: PerformanceSt
         </div>
       </div>
 
+      <div style={{ overflowY: 'auto', flex: 1, paddingRight: 2 }}>
       {/* Win streak banner */}
       {streak >= 2 && (
         <div style={{
@@ -284,6 +285,7 @@ export default function ChallengePanel({ stats, trades }: { stats: PerformanceSt
           )}
         </div>
       </div>
+      </div>{/* end scroll container */}
     </div>
   )
 }
