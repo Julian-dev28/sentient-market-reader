@@ -28,7 +28,8 @@ export default function Home() {
   const [orModelsLoading, setOrModelsLoading] = useState(false)
   const [orModelSearch, setOrModelSearch]   = useState('')
   const [orModelOpen, setOrModelOpen]       = useState(false)
-  const [orModelCat, setOrModelCat]         = useState<'all'|'fast'|'balanced'|'reasoning'|'large'>('all')
+  const [orModelCat, setOrModelCat]         = useState<'all'|'fast'|'balanced'|'reasoning'|'large'|'favorites'>('all')
+  const [orFavorites, setOrFavorites]       = useState<string[]>([])
   const orModelRef                          = useRef<HTMLDivElement>(null)
 
   // Sync from localStorage after hydration
@@ -36,7 +37,17 @@ export default function Home() {
     if (localStorage.getItem('sentient-live-mode') === 'true') setLiveMode(true)
     const om = localStorage.getItem('sentient-or-model')
     if (om) setOrModel(om)
+    const fav = localStorage.getItem('sentient-or-favorites')
+    if (fav) try { setOrFavorites(JSON.parse(fav)) } catch {}
   }, [])
+
+  function toggleFavorite(id: string) {
+    setOrFavorites(prev => {
+      const next = prev.includes(id) ? prev.filter(f => f !== id) : [...prev, id]
+      localStorage.setItem('sentient-or-favorites', JSON.stringify(next))
+      return next
+    })
+  }
 
   function handleOrModelChange(m: string) {
     setOrModel(m)
@@ -137,6 +148,22 @@ export default function Home() {
   const secondsUntilExpiry = activeMarket?.close_time
     ? Math.max(0, Math.floor((new Date(activeMarket.close_time).getTime() - Date.now()) / 1000))
     : (md?.secondsUntilExpiry ?? 0)
+
+  // ── Pipeline hotkey: Shift+R to run / stop ─────────────────────────────────
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (!e.shiftKey || e.code !== 'KeyR') return
+      if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'TEXTAREA') return
+      e.preventDefault()
+      if (isRunning) { stopCycle(); return }
+      if (serverLocked) return
+      if (secondsUntilExpiry > 0 && secondsUntilExpiry < 120) { setShowLateWarning(true); return }
+      runCycle()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isRunning, serverLocked, secondsUntilExpiry])
 
   function handleToggleLive() {
     if (!liveMode) {
@@ -568,6 +595,7 @@ export default function Home() {
                         <div style={{ display: 'flex', gap: 5, marginTop: 7, flexWrap: 'wrap' }}>
                           {([
                             { id: 'all',       label: 'All' },
+                            { id: 'favorites', label: '★ Favs' },
                             { id: 'fast',      label: 'Fast' },
                             { id: 'balanced',  label: 'Balanced' },
                             { id: 'reasoning', label: 'Reasoning' },
@@ -577,7 +605,7 @@ export default function Home() {
                               style={{
                                 padding: '3px 9px', borderRadius: 20, fontSize: 10, fontWeight: 700,
                                 cursor: 'pointer', border: 'none',
-                                background: orModelCat === cat.id ? 'var(--blue)' : 'var(--bg-secondary)',
+                                background: orModelCat === cat.id ? (cat.id === 'favorites' ? 'var(--amber)' : 'var(--blue)') : 'var(--bg-secondary)',
                                 color: orModelCat === cat.id ? '#fff' : 'var(--text-muted)',
                                 transition: 'all 0.12s',
                               }}>
@@ -606,6 +634,7 @@ export default function Home() {
                           const q = orModelSearch.toLowerCase()
 
                           function catMatch(id: string, name: string): boolean {
+                            if (orModelCat === 'favorites') return orFavorites.includes(id)
                             if (orModelCat === 'all') return true
                             const s = (id + ' ' + name).toLowerCase()
                             if (orModelCat === 'fast')
@@ -624,7 +653,9 @@ export default function Home() {
                             (q === '' || m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q))
                           )
                           if (!filtered.length && !orModelsLoading) {
-                            return <div style={{ padding: '10px 12px', fontSize: 11, color: 'var(--text-muted)' }}>No models found</div>
+                            return <div style={{ padding: '10px 12px', fontSize: 11, color: 'var(--text-muted)' }}>
+                              {orModelCat === 'favorites' ? 'No favorites yet — click ★ on any model' : 'No models found'}
+                            </div>
                           }
                           const groups: Record<string, typeof filtered> = {}
                           for (const m of filtered) {
@@ -646,11 +677,24 @@ export default function Home() {
                                     color: orModel === m.id ? 'var(--blue-dark)' : 'var(--text-secondary)',
                                     background: orModel === m.id ? 'rgba(74,127,165,0.1)' : 'transparent',
                                     fontWeight: orModel === m.id ? 700 : 400,
+                                    display: 'flex', alignItems: 'center', gap: 6,
                                   }}
                                   onMouseEnter={e => { if (orModel !== m.id) (e.currentTarget as HTMLElement).style.background = 'var(--bg-secondary)' }}
-                                  onMouseLeave={e => { if (orModel !== m.id) (e.currentTarget as HTMLElement).style.background = 'transparent' }}
+                                  onMouseLeave={e => { if (orModel !== m.id) (e.currentTarget as HTMLElement).style.background = orModel === m.id ? 'rgba(74,127,165,0.1)' : 'transparent' }}
                                 >
-                                  {m.name}
+                                  <span style={{ flex: 1 }}>{m.name}</span>
+                                  <span
+                                    onClick={e => { e.stopPropagation(); toggleFavorite(m.id) }}
+                                    title={orFavorites.includes(m.id) ? 'Remove from favorites' : 'Add to favorites'}
+                                    style={{
+                                      fontSize: 13, lineHeight: 1, flexShrink: 0,
+                                      color: orFavorites.includes(m.id) ? 'var(--amber)' : 'var(--border)',
+                                      cursor: 'pointer', transition: 'color 0.12s',
+                                      padding: '0 2px',
+                                    }}
+                                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = 'var(--amber)' }}
+                                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = orFavorites.includes(m.id) ? 'var(--amber)' : 'var(--border)' }}
+                                  >★</span>
                                 </div>
                               ))}
                             </div>
@@ -698,10 +742,10 @@ export default function Home() {
                     }}
                   >
                     {isRunning
-                      ? <><span>■</span> Stop</>
+                      ? <><span>■</span> Stop <span style={{ fontSize: 9, opacity: 0.5, fontWeight: 400 }}>⇧R</span></>
                       : serverLocked
                       ? <><span style={{ animation: 'spin-slow 1s linear infinite', display: 'inline-block' }}>◌</span> Running...</>
-                      : '▶ Run Cycle'}
+                      : <>▶ Run Cycle <span style={{ fontSize: 9, opacity: 0.5, fontWeight: 400 }}>⇧R</span></>}
                   </button>
 
                   {secondsUntilExpiry > 0 && (() => {
