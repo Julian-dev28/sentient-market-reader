@@ -600,6 +600,16 @@ export default function MarketCard({ market, orderbook, strikePrice, currentBTCP
             marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--border)',
             display: 'flex', flexWrap: 'wrap', gap: '4px 10px', alignItems: 'center',
           }}>
+            {/* Side indicator for ⇧1–3 */}
+            <span style={{
+              fontSize: 9, fontWeight: 800, fontFamily: 'var(--font-geist-mono)',
+              padding: '2px 6px', borderRadius: 4,
+              background: side === 'yes' ? 'var(--green-pale)' : 'var(--pink-pale)',
+              color: side === 'yes' ? 'var(--green)' : 'var(--pink)',
+              border: `1px solid ${side === 'yes' ? '#9ecfb8' : '#e0b0bf'}`,
+              transition: 'all 0.15s',
+            }}>{side.toUpperCase()}</span>
+            <span style={{ fontSize: 9, color: 'var(--border)', fontFamily: 'var(--font-geist-mono)' }}>·</span>
             {[
               ['⇧1', '$10'], ['⇧2', '$20'], ['⇧3', '$50'],
               ['⇧4', 'Limit'], ['⇧5', 'Cancel'], ['⇧6', 'Sell'],
