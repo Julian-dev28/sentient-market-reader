@@ -67,13 +67,14 @@ type OrderState = { status: 'idle' } | { status: 'placing' } | { status: 'ok'; o
 const QUICK_AMTS = [10, 20, 50]
 
 /** Unified YES / NO trade box — dollar-amount based */
-function TradeBox({ yesBid, yesAsk, noBid, noAsk, ticker, liveMode }: {
+function TradeBox({ yesBid, yesAsk, noBid, noAsk, ticker, liveMode, side, onSideChange }: {
   yesBid: number; yesAsk: number
   noBid: number;  noAsk: number
   ticker: string
   liveMode: boolean
+  side: 'yes' | 'no'
+  onSideChange: (s: 'yes' | 'no') => void
 }) {
-  const [side, setSide]     = useState<'yes' | 'no'>('yes')
   const [amtStr, setAmtStr] = useState('10')   // dollar amount as string
   const [order, setOrder]   = useState<OrderState>({ status: 'idle' })
 
@@ -138,7 +139,7 @@ function TradeBox({ yesBid, yesAsk, noBid, noAsk, ticker, liveMode }: {
           const activeBg  = s === 'yes' ? 'var(--green-pale)' : 'var(--pink-pale)'
           const activeBdr = s === 'yes' ? '#9ecfb8' : '#e0b0bf'
           return (
-            <button key={s} onClick={() => { setSide(s); setOrder({ status: 'idle' }) }}
+            <button key={s} onClick={() => { onSideChange(s); setOrder({ status: 'idle' }) }}
               style={{
                 padding: '11px 8px', border: 'none',
                 borderBottom: active ? `2px solid ${activeCol}` : '2px solid var(--border)',
@@ -273,6 +274,8 @@ export default function MarketCard({ market, orderbook, strikePrice, currentBTCP
   const [sellingAll, setSellingAll]     = useState(false)
   const [limitingAll, setLimitingAll]   = useState(false)
   const [cancelingAll, setCancelingAll] = useState(false)
+  const [side, setSide]                 = useState<'yes' | 'no'>('yes')
+  const [hotkeyFlash, setHotkeyFlash]   = useState<string | null>(null)
 
   async function batchSell(route: string, setter: (v: boolean) => void) {
     setter(true)
@@ -331,6 +334,51 @@ export default function MarketCard({ market, orderbook, strikePrice, currentBTCP
     } finally { setCancelingAll(false) }
   }
 
+  // ── Hotkeys ⇧1–⇧6 (live mode only) ─────────────────────────────────────────
+  useEffect(() => {
+    if (!liveMode || !market) return
+
+    let flashTimer: ReturnType<typeof setTimeout>
+    function flash(msg: string) {
+      setHotkeyFlash(msg)
+      clearTimeout(flashTimer)
+      flashTimer = setTimeout(() => setHotkeyFlash(null), 2500)
+    }
+
+    async function buy(dollars: number) {
+      const ask = side === 'yes' ? market!.yes_ask : market!.no_ask
+      const cnt = Math.max(1, Math.floor(dollars / (ask / 100)))
+      flash(`⬆ ${side.toUpperCase()} $${dollars}…`)
+      try {
+        const res  = await fetch('/api/place-order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ticker: market!.ticker, side, count: cnt,
+            ...(side === 'yes' ? { yesPrice: ask } : { noPrice: ask }),
+            clientOrderId: `hotkey-${side}-${Date.now()}`,
+          }),
+        })
+        const data = await res.json()
+        flash(data.ok ? `✓ ${side.toUpperCase()} $${dollars} placed` : `✗ ${data.error ?? 'Order failed'}`)
+      } catch { flash('✗ Network error') }
+    }
+
+    function onKey(e: KeyboardEvent) {
+      if (!e.shiftKey) return
+      if (e.key === '1') { e.preventDefault(); buy(10) }
+      else if (e.key === '2') { e.preventDefault(); buy(20) }
+      else if (e.key === '3') { e.preventDefault(); buy(50) }
+      else if (e.key === '4') { e.preventDefault(); batchLimitSell() }
+      else if (e.key === '5') { e.preventDefault(); cancelAllOrders() }
+      else if (e.key === '6') { e.preventDefault(); batchSell('/api/sell-order', setSellingAll) }
+    }
+
+    window.addEventListener('keydown', onKey)
+    return () => { window.removeEventListener('keydown', onKey); clearTimeout(flashTimer) }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveMode, market, side])
+
   function handleRefresh() {
     if (spinning) return
     setSpinning(true)
@@ -353,7 +401,7 @@ export default function MarketCard({ market, orderbook, strikePrice, currentBTCP
   const trendCol = above ? 'var(--green)' : 'var(--pink)'
 
   return (
-    <div className="card bracket-card" style={{ overflow: 'hidden', padding: 0 }}>
+    <div className="card bracket-card" style={{ overflow: 'hidden', padding: 0, position: 'relative' }}>
       {/* Top gradient bar — animates with above/below */}
       <div style={{
         height: 4,
@@ -452,6 +500,7 @@ export default function MarketCard({ market, orderbook, strikePrice, currentBTCP
                 yesBid={market.yes_bid} yesAsk={market.yes_ask}
                 noBid={market.no_bid}   noAsk={market.no_ask}
                 ticker={market.ticker}  liveMode={liveMode}
+                side={side} onSideChange={setSide}
               />
             </div>
 
@@ -542,6 +591,42 @@ export default function MarketCard({ market, orderbook, strikePrice, currentBTCP
             <div style={{ fontSize: 11, letterSpacing: '0.06em', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 6 }}>// WAITING</div>
             <div style={{ fontSize: 13, color: 'var(--text-secondary)', fontWeight: 500 }}>No open KXBTC15M markets</div>
             <div style={{ fontSize: 11, color: 'var(--text-light)', marginTop: 4 }}>Next 15-min window...</div>
+          </div>
+        )}
+
+        {/* Hotkey HUD — shown in live mode only */}
+        {liveMode && (
+          <div style={{
+            marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--border)',
+            display: 'flex', flexWrap: 'wrap', gap: '4px 10px', alignItems: 'center',
+          }}>
+            {[
+              ['⇧1', '$10'], ['⇧2', '$20'], ['⇧3', '$50'],
+              ['⇧4', 'Limit'], ['⇧5', 'Cancel'], ['⇧6', 'Sell'],
+            ].map(([key, label]) => (
+              <span key={key} style={{ fontSize: 9, color: 'var(--text-muted)', fontFamily: 'var(--font-geist-mono)', letterSpacing: '0.02em' }}>
+                <span style={{
+                  display: 'inline-block', padding: '1px 4px', borderRadius: 3,
+                  border: '1px solid var(--border)', background: 'var(--cream-dark)',
+                  fontWeight: 700, marginRight: 3, fontSize: 9,
+                }}>{key}</span>{label}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {/* Hotkey flash toast */}
+        {hotkeyFlash && (
+          <div style={{
+            position: 'absolute', bottom: 16, left: '50%', transform: 'translateX(-50%)',
+            padding: '7px 16px', borderRadius: 20,
+            background: hotkeyFlash.startsWith('✓') ? 'var(--green)' : hotkeyFlash.startsWith('✗') ? 'var(--pink)' : 'var(--blue)',
+            color: '#fff', fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap',
+            boxShadow: '0 4px 16px rgba(0,0,0,0.15)',
+            animation: 'scaleIn 0.15s ease',
+            zIndex: 10,
+          }}>
+            {hotkeyFlash}
           </div>
         )}
       </div>
