@@ -12,6 +12,7 @@ import TradeLog from '@/components/TradeLog'
 import PerformancePanel from '@/components/PerformancePanel'
 import PositionsPanel from '@/components/PositionsPanel'
 import PipelineHistory from '@/components/PipelineHistory'
+import ChallengePanel from '@/components/ChallengePanel'
 
 export default function Home() {
   const [liveMode, setLiveMode]           = useState(false)
@@ -832,6 +833,7 @@ export default function Home() {
           {/* ─── RIGHT ─── */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <PositionsPanel liveMode={liveMode} />
+            <ChallengePanel stats={stats} trades={trades} />
             <PerformancePanel stats={stats} trades={trades} />
             <TradeLog trades={trades} />
           </div>
