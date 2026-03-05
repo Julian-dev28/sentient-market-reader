@@ -140,9 +140,9 @@ export default function PositionsPanel({ liveMode }: { liveMode: boolean }) {
       {/* Breakdown */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 5, marginBottom: 14 }}>
         {[
-          ['Available',   availableCash  !== null ? `$${availableCash.toFixed(2)}`  : '—', 'var(--brown)'],
-          ['In Orders',   inOrders > 0            ? `$${inOrders.toFixed(2)}`        : '$0.00', 'var(--amber)'],
-          ['Positions',   positionsValue !== null ? `$${positionsValue.toFixed(2)}` : '—', 'var(--green-dark)'],
+          ['Available', availableCash  !== null ? `$${availableCash.toFixed(2)}`  : '—', 'var(--brown)'],
+          ['In Orders', inOrders > 0            ? `$${inOrders.toFixed(2)}`        : '$0.00', 'var(--amber)'],
+          ['Positions', positionsValue !== null ? `$${positionsValue.toFixed(2)}` : '—', 'var(--green-dark)'],
         ].map(([label, val, col]) => (
           <div key={label} style={{ padding: '8px 10px', borderRadius: 9, background: 'var(--bg-card-hover)', border: '1px solid var(--border)' }}>
             <div style={{ fontSize: 8, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>{label}</div>

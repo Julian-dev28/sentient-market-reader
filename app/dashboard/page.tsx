@@ -14,6 +14,7 @@ import PositionsPanel from '@/components/PositionsPanel'
 import PipelineHistory from '@/components/PipelineHistory'
 import ChallengePanel from '@/components/ChallengePanel'
 import StrategyPanel from '@/components/StrategyPanel'
+import CalibrationPanel from '@/components/CalibrationPanel'
 
 export default function Home() {
   const [liveMode, setLiveMode]           = useState(false)
@@ -888,6 +889,7 @@ export default function Home() {
             <PositionsPanel liveMode={liveMode} />
             <PerformancePanel stats={stats} trades={trades} />
             <TradeLog trades={trades} />
+            <CalibrationPanel trades={trades} />
           </div>
         </div>
       </main>
