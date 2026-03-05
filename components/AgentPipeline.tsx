@@ -30,6 +30,52 @@ const LOG_MESSAGES: [number, string][] = [
   [97, '› Mapping ROMA output → pModel, edge, rec'],
 ]
 
+// ── Shared mini-components ───────────────────────────────────────────────────
+
+/** Animated fill bar */
+function MiniBar({
+  value, color, bg, height = 5, delay = 120,
+}: {
+  value: number   // 0–1
+  color: string
+  bg?: string
+  height?: number
+  delay?: number
+}) {
+  const pct = Math.min(100, Math.max(0, value * 100))
+  const [w, setW] = useState(0)
+  useEffect(() => {
+    const id = setTimeout(() => setW(pct), delay)
+    return () => clearTimeout(id)
+  }, [pct, delay])
+  return (
+    <div style={{ height, borderRadius: height / 2, background: bg ?? 'rgba(0,0,0,0.07)', overflow: 'hidden' }}>
+      <div style={{
+        height: '100%', width: `${w}%`, borderRadius: height / 2,
+        background: color, transition: 'width 1s cubic-bezier(0.34,1.56,0.64,1)',
+      }} />
+    </div>
+  )
+}
+
+/** Key-value row for simple bullet facts */
+function Fact({ label, value, color, mono = true }: { label: string; value: string; color?: string; mono?: boolean }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 3 }}>
+      <span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+        {label}
+      </span>
+      <span style={{
+        fontFamily: mono ? 'var(--font-geist-mono)' : 'inherit',
+        fontSize: 11, fontWeight: 700,
+        color: color ?? 'var(--text-primary)',
+      }}>
+        {value}
+      </span>
+    </div>
+  )
+}
+
 // ── Running loader ──────────────────────────────────────────────────────────
 function RomaLoader({ elapsed }: { elapsed: number }) {
   const sec    = elapsed / 1000
@@ -50,10 +96,8 @@ function RomaLoader({ elapsed }: { elapsed: number }) {
 
           return (
             <div key={stage.id} style={{ display: 'flex', alignItems: 'center', flex: 1, minWidth: 0 }}>
-              {/* Node column */}
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, flex: 'none', position: 'relative' }}>
 
-                {/* Ripple rings */}
                 {active && ([64, 52] as const).map((size, ri) => (
                   <div key={ri} style={{
                     position: 'absolute', top: '50%', left: '50%',
@@ -65,14 +109,12 @@ function RomaLoader({ elapsed }: { elapsed: number }) {
                   }} />
                 ))}
 
-                {/* Main node */}
                 <div style={{
                   width: 58, height: 58, borderRadius: '50%',
                   border: `2px solid ${(active || done) ? stage.color : 'var(--border)'}`,
                   background: done
                     ? `rgba(${stage.rgb},0.12)`
-                    : active
-                    ? `rgba(${stage.rgb},0.07)`
+                    : active ? `rgba(${stage.rgb},0.07)`
                     : 'rgba(255,255,255,0.5)',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   fontSize: done ? 16 : 20,
@@ -104,7 +146,6 @@ function RomaLoader({ elapsed }: { elapsed: number }) {
                 }}>{stage.label}</span>
               </div>
 
-              {/* Connector */}
               {i < ROMA_STAGES.length - 1 && (
                 <div style={{
                   flex: 1, height: 3, margin: '0 6px', marginBottom: 24,
@@ -180,15 +221,14 @@ function RomaLoader({ elapsed }: { elapsed: number }) {
 
 // ── Agent cards (post-run results) ──────────────────────────────────────────
 const AGENTS = [
-  { key: 'marketDiscovery' as const, label: 'Market Discovery', short: 'MARKET',   icon: '◎', desc: 'KXBTC15M scan',     color: 'var(--brown)',  rgb: '125,112,96',  bg: 'var(--brown-pale)', border: '#cbc6be' },
-  { key: 'priceFeed'       as const, label: 'Price Feed',       short: 'PRICE',    icon: '◈', desc: 'Coinbase BTC feed', color: 'var(--green)',  rgb: '74,148,112',  bg: 'var(--green-pale)', border: '#9ecfb8' },
-  { key: 'sentiment'       as const, label: 'Sentiment',        short: 'SENTIMENT',icon: '◉', desc: 'roma-dspy',         color: 'var(--blue)',   rgb: '74,127,165',  bg: 'var(--blue-pale)',  border: '#a8cce0' },
-  { key: 'probability'     as const, label: 'Probability',      short: 'PROB',     icon: '⬟', desc: 'roma-dspy',         color: 'var(--amber)',  rgb: '160,120,64',  bg: 'var(--amber-pale)', border: '#d0b888' },
-  { key: 'risk'            as const, label: 'Risk Manager',     short: 'RISK',     icon: '⬡', desc: 'Kelly + limits',    color: 'var(--brown)',  rgb: '125,112,96',  bg: 'var(--brown-pale)', border: '#cbc6be' },
-  { key: 'execution'       as const, label: 'Execution',        short: 'EXEC',     icon: '▶', desc: 'Paper order',       color: 'var(--green)',  rgb: '74,148,112',  bg: 'var(--green-pale)', border: '#9ecfb8' },
+  { key: 'marketDiscovery' as const, label: 'Market Discovery', short: 'MARKET',    icon: '◎', desc: 'KXBTC15M scan',     color: 'var(--brown)',  rgb: '125,112,96',  bg: 'var(--brown-pale)', border: '#cbc6be' },
+  { key: 'priceFeed'       as const, label: 'Price Feed',       short: 'PRICE',     icon: '◈', desc: 'Coinbase BTC feed', color: 'var(--green)',  rgb: '74,148,112',  bg: 'var(--green-pale)', border: '#9ecfb8' },
+  { key: 'sentiment'       as const, label: 'Sentiment',        short: 'SENTIMENT', icon: '◉', desc: 'roma-dspy',         color: 'var(--blue)',   rgb: '74,127,165',  bg: 'var(--blue-pale)',  border: '#a8cce0' },
+  { key: 'probability'     as const, label: 'Probability',      short: 'PROB',      icon: '⬟', desc: 'roma-dspy',         color: 'var(--amber)',  rgb: '160,120,64',  bg: 'var(--amber-pale)', border: '#d0b888' },
+  { key: 'risk'            as const, label: 'Risk Manager',     short: 'RISK',      icon: '⬡', desc: 'Kelly + limits',    color: 'var(--brown)',  rgb: '125,112,96',  bg: 'var(--brown-pale)', border: '#cbc6be' },
+  { key: 'execution'       as const, label: 'Execution',        short: 'EXEC',      icon: '▶', desc: 'Paper order',       color: 'var(--green)',  rgb: '74,148,112',  bg: 'var(--green-pale)', border: '#9ecfb8' },
 ]
 
-/** Abbreviate provider/model strings for compact display */
 function shortenProvider(raw: string): string {
   const cleaned = raw.replace(/^roma-dspy\s*[·•]\s*/i, '')
   return cleaned.split('+').map(p => {
@@ -205,85 +245,413 @@ function shortenProvider(raw: string): string {
   }).join(' + ')
 }
 
-function Bullet({ label, value, color }: { label: string; value: string; color?: string }) {
+// ── Premium card body renderers ──────────────────────────────────────────────
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function MarketDiscoveryBody({ output, color }: { output: any; color: string }) {
+  const mins  = output.minutesUntilExpiry ?? 0
+  const urgency = mins < 3 ? 'var(--pink)' : mins < 7 ? 'var(--amber)' : color
+  const fillPct = Math.min(1, mins / 15)  // 15-min window
+
   return (
-    <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 4 }}>
-      <span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', flexShrink: 0 }}>
-        · {label}
-      </span>
-      <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 11, fontWeight: 700, color: color ?? 'var(--text-primary)', letterSpacing: '-0.01em' }}>
-        {value}
-      </span>
+    <div>
+      {/* Ticker */}
+      <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 10, fontWeight: 700, color, letterSpacing: '0.04em', marginBottom: 10 }}>
+        {output.activeMarket?.ticker ?? '—'}
+      </div>
+
+      {/* Strike hero */}
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>Strike price</div>
+        <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 22, fontWeight: 900, color: 'var(--text-primary)', letterSpacing: '-0.02em', lineHeight: 1 }}>
+          {output.strikePrice ? `$${output.strikePrice.toLocaleString('en-US', { maximumFractionDigits: 2 })}` : '—'}
+        </div>
+      </div>
+
+      {/* Expiry countdown bar */}
+      <div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+          <span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Time remaining</span>
+          <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 11, fontWeight: 800, color: urgency }}>
+            {mins > 0 ? `${mins.toFixed(1)} min` : '—'}
+          </span>
+        </div>
+        <MiniBar value={fillPct} color={urgency} bg="rgba(0,0,0,0.07)" height={6} />
+      </div>
     </div>
   )
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function AgentBullets({ agentKey, output, color }: { agentKey: string; output: any; color: string }) {
-  if (!output) return null
+function PriceFeedBody({ output, color }: { output: any; color: string }) {
+  const dist  = output.distanceFromStrikePct ?? 0
+  const above = dist >= 0
+  const dir1h = (output.priceChangePct1h ?? 0) >= 0
 
-  if (agentKey === 'marketDiscovery') return (
-    <>
-      <Bullet label="Market"  value={output.activeMarket?.ticker ?? '—'} color={color} />
-      <Bullet label="Strike"  value={output.strikePrice ? `$${output.strikePrice.toLocaleString('en-US', { maximumFractionDigits: 2 })}` : '—'} />
-      <Bullet label="Expiry"  value={output.minutesUntilExpiry != null ? `${output.minutesUntilExpiry.toFixed(1)} min` : '—'} />
-    </>
-  )
-
-  if (agentKey === 'priceFeed') return (
-    <>
-      <Bullet label="BTC"      value={output.currentPrice ? `$${output.currentPrice.toLocaleString('en-US', { maximumFractionDigits: 2 })}` : '—'} color={color} />
-      <Bullet label="vs Strike" value={output.distanceFromStrikePct != null ? `${output.distanceFromStrikePct >= 0 ? '+' : ''}${output.distanceFromStrikePct.toFixed(3)}%` : '—'} />
-      <Bullet label="1h"       value={output.priceChangePct1h != null ? `${output.priceChangePct1h >= 0 ? '+' : ''}${output.priceChangePct1h.toFixed(3)}%` : '—'} />
-    </>
-  )
-
-  if (agentKey === 'sentiment') return (
-    <>
-      <Bullet label="Score"   value={output.score != null ? output.score.toFixed(3) : '—'} color={color} />
-      <Bullet label="Label"   value={output.label?.replace(/_/g, ' ') ?? '—'} />
-      <Bullet label="Model"   value={output.provider ? shortenProvider(output.provider) : '—'} />
-      {(output.signals ?? []).slice(0, 3).map((s: string, i: number) => (
-        <div key={i} style={{ fontSize: 10, color: 'var(--text-secondary)', lineHeight: 1.5, paddingLeft: 10, marginBottom: 2 }}>
-          · {s.length > 55 ? s.slice(0, 55) + '…' : s}
+  return (
+    <div>
+      {/* BTC price hero */}
+      <div style={{ marginBottom: 10 }}>
+        <div style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>BTC / USD</div>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+          <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 22, fontWeight: 900, color: 'var(--text-primary)', letterSpacing: '-0.02em', lineHeight: 1 }}>
+            {output.currentPrice ? `$${output.currentPrice.toLocaleString('en-US', { maximumFractionDigits: 2 })}` : '—'}
+          </span>
+          <span style={{ fontSize: 14, color: dir1h ? 'var(--green)' : 'var(--pink)' }}>{dir1h ? '▲' : '▼'}</span>
         </div>
-      ))}
-    </>
-  )
+      </div>
 
-  if (agentKey === 'probability') return (
-    <>
-      <Bullet label="P(Model)"  value={output.pModel != null ? `${(output.pModel * 100).toFixed(1)}%` : '—'} color={color} />
-      <Bullet label="P(Market)" value={output.pMarket != null ? `${(output.pMarket * 100).toFixed(1)}%` : '—'} />
-      <Bullet label="Edge"      value={output.edgePct != null ? `${output.edgePct >= 0 ? '+' : ''}${output.edgePct.toFixed(1)}%` : '—'} color={output.edgePct >= 0 ? 'var(--green)' : 'var(--pink)'} />
-      <Bullet label="Rec"       value={output.recommendation ?? '—'} color={output.recommendation === 'YES' ? 'var(--green)' : output.recommendation === 'NO' ? 'var(--pink)' : 'var(--text-muted)'} />
-      <Bullet label="Conf"      value={output.confidence ?? '—'} />
-      {output.provider && <Bullet label="Model" value={shortenProvider(output.provider)} />}
-    </>
-  )
+      {/* vs Strike */}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '6px 10px', borderRadius: 8, marginBottom: 8,
+        background: above ? 'rgba(74,148,112,0.08)' : 'rgba(181,96,112,0.08)',
+        border: `1px solid ${above ? 'rgba(74,148,112,0.2)' : 'rgba(181,96,112,0.2)'}`,
+      }}>
+        <span style={{ fontSize: 10, color: 'var(--text-secondary)', fontWeight: 600 }}>vs strike</span>
+        <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 12, fontWeight: 800, color: above ? 'var(--green)' : 'var(--pink)' }}>
+          {dist >= 0 ? '+' : ''}{dist.toFixed(3)}%
+        </span>
+      </div>
 
-  if (agentKey === 'risk') return (
-    <>
-      <Bullet label="Approved"  value={output.approved ? 'YES' : 'NO'} color={output.approved ? 'var(--green)' : 'var(--pink)'} />
-      <Bullet label="Size"      value={output.positionSize != null ? `${output.positionSize} contracts` : '—'} color={color} />
-      <Bullet label="Max Loss"  value={output.maxLoss != null ? `$${output.maxLoss.toFixed(2)}` : '—'} />
-      {output.rejectionReason && <div style={{ fontSize: 10, color: 'var(--pink)', marginTop: 2 }}>· {output.rejectionReason}</div>}
-    </>
+      <Fact
+        label="1h change"
+        value={`${(output.priceChangePct1h ?? 0) >= 0 ? '+' : ''}${(output.priceChangePct1h ?? 0).toFixed(3)}%`}
+        color={(output.priceChangePct1h ?? 0) >= 0 ? 'var(--green-dark)' : 'var(--pink)'}
+      />
+    </div>
   )
-
-  if (agentKey === 'execution') return (
-    <>
-      <Bullet label="Action"   value={output.action ?? '—'} color={color} />
-      <Bullet label="Price"    value={output.limitPrice != null ? `${output.limitPrice}¢` : '—'} />
-      <Bullet label="Size"     value={output.contracts != null ? `${output.contracts} contracts` : '—'} />
-      <Bullet label="Cost"     value={output.estimatedCost != null ? `$${output.estimatedCost.toFixed(2)}` : '—'} />
-      <Bullet label="Payout"   value={output.estimatedPayout != null ? `$${output.estimatedPayout.toFixed(2)}` : '—'} />
-    </>
-  )
-
-  return null
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function SentimentBody({ output, color }: { output: any; color: string }) {
+  const score   = output.score ?? 0
+  const bullish = score > 0.1
+  const bearish = score < -0.1
+  const scoreColor = bullish ? 'var(--green)' : bearish ? 'var(--pink)' : 'var(--text-muted)'
+  const label = (output.label ?? '').replace(/_/g, ' ')
+  // Map score -1→+1 to 0→1 fill
+  const barFill = (score + 1) / 2
+
+  const labelBg    = bullish ? 'rgba(74,148,112,0.12)'  : bearish ? 'rgba(181,96,112,0.12)'  : 'rgba(0,0,0,0.06)'
+  const labelBdr   = bullish ? 'rgba(74,148,112,0.25)'  : bearish ? 'rgba(181,96,112,0.25)'  : 'transparent'
+  const labelColor = bullish ? 'var(--green-dark)'       : bearish ? 'var(--pink)'             : 'var(--text-muted)'
+
+  return (
+    <div>
+      {/* Score hero */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+        <div>
+          <div style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>Conviction score</div>
+          <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 28, fontWeight: 900, color: scoreColor, letterSpacing: '-0.03em', lineHeight: 1 }}>
+            {score >= 0 ? '+' : ''}{score.toFixed(3)}
+          </div>
+        </div>
+        <div style={{
+          padding: '4px 10px', borderRadius: 8,
+          background: labelBg, border: `1px solid ${labelBdr}`,
+        }}>
+          <span style={{ fontSize: 9, fontWeight: 800, color: labelColor, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+            {label || '—'}
+          </span>
+        </div>
+      </div>
+
+      {/* Gradient bar: bear → bull */}
+      <div style={{ marginBottom: 10 }}>
+        <div style={{
+          position: 'relative', height: 8, borderRadius: 4,
+          background: 'linear-gradient(90deg, var(--pink) 0%, rgba(200,190,180,0.3) 50%, var(--green) 100%)',
+          marginBottom: 4,
+        }}>
+          {/* Needle */}
+          <div style={{
+            position: 'absolute', top: '50%', transform: 'translate(-50%,-50%)',
+            left: `${barFill * 100}%`,
+            width: 14, height: 14, borderRadius: '50%',
+            background: scoreColor, border: '2.5px solid white',
+            boxShadow: `0 0 8px ${scoreColor}80`,
+            transition: 'left 0.9s cubic-bezier(0.34,1.56,0.64,1)',
+          }} />
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+          <span style={{ fontSize: 8, color: 'var(--text-muted)' }}>Bearish</span>
+          <span style={{ fontSize: 8, color: 'var(--text-muted)' }}>Bullish</span>
+        </div>
+      </div>
+
+      {/* Sub-signals */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 8, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>Momentum</div>
+          <MiniBar value={(output.momentum + 1) / 2} color={output.momentum > 0 ? 'var(--green)' : 'var(--pink)'} height={4} delay={200} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 8, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>Order flow</div>
+          <MiniBar value={(output.orderbookSkew + 1) / 2} color={output.orderbookSkew > 0 ? 'var(--green)' : 'var(--pink)'} height={4} delay={260} />
+        </div>
+      </div>
+
+      {/* Top signals */}
+      {(output.signals ?? []).slice(0, 2).map((s: string, i: number) => (
+        <div key={i} style={{
+          fontSize: 10, color: 'var(--text-secondary)', lineHeight: 1.45,
+          borderLeft: `2px solid ${color}55`, paddingLeft: 7, marginBottom: 3,
+        }}>
+          {s.length > 52 ? s.slice(0, 52) + '…' : s}
+        </div>
+      ))}
+
+      {/* Model */}
+      {output.provider && (
+        <div style={{ marginTop: 6, fontFamily: 'var(--font-geist-mono)', fontSize: 9, color: 'var(--text-muted)', opacity: 0.7 }}>
+          {shortenProvider(output.provider)}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function ProbabilityBody({ output, color }: { output: any; color: string }) {
+  const pModel  = output.pModel  ?? 0
+  const pMarket = output.pMarket ?? 0
+  const edgePct = output.edgePct ?? 0
+  const rec     = output.recommendation ?? 'NO_TRADE'
+  const conf    = output.confidence ?? 'low'
+
+  const recColor  = rec === 'YES' ? 'var(--green)' : rec === 'NO' ? 'var(--blue)' : 'var(--text-muted)'
+  const edgeColor = edgePct >= 0 ? 'var(--green-dark)' : 'var(--pink)'
+  const edgeBg    = edgePct >= 0 ? 'rgba(74,148,112,0.1)' : 'rgba(181,96,112,0.1)'
+  const edgeBdr   = edgePct >= 0 ? 'rgba(74,148,112,0.22)' : 'rgba(181,96,112,0.22)'
+
+  const confColor = conf === 'high' ? 'var(--green-dark)' : conf === 'medium' ? 'var(--amber)' : 'var(--text-muted)'
+  const confBg    = conf === 'high' ? 'rgba(74,148,112,0.1)' : conf === 'medium' ? 'rgba(160,120,64,0.1)' : 'rgba(0,0,0,0.05)'
+
+  return (
+    <div>
+      {/* Recommendation + pModel hero */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+        <div>
+          <div style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>P(YES) — model</div>
+          <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 28, fontWeight: 900, color: recColor, letterSpacing: '-0.03em', lineHeight: 1 }}>
+            {(pModel * 100).toFixed(1)}%
+          </div>
+        </div>
+
+        {/* Edge badge */}
+        <div style={{
+          padding: '6px 12px', borderRadius: 10,
+          background: edgeBg, border: `1px solid ${edgeBdr}`,
+          textAlign: 'center',
+        }}>
+          <div style={{ fontSize: 8, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>Edge</div>
+          <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 16, fontWeight: 900, color: edgeColor, lineHeight: 1 }}>
+            {edgePct >= 0 ? '+' : ''}{edgePct.toFixed(1)}%
+          </div>
+        </div>
+      </div>
+
+      {/* ROMA vs Market bars */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10 }}>
+        {/* ROMA */}
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+            <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>ROMA</span>
+            <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 10, fontWeight: 800, color: recColor }}>{(pModel * 100).toFixed(1)}%</span>
+          </div>
+          <MiniBar value={pModel} color={recColor} bg="rgba(0,0,0,0.07)" height={7} delay={120} />
+        </div>
+
+        {/* Market */}
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+            <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Market</span>
+            <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 10, fontWeight: 800, color: 'var(--text-secondary)' }}>{(pMarket * 100).toFixed(1)}%</span>
+          </div>
+          <MiniBar value={pMarket} color="var(--text-muted)" bg="rgba(0,0,0,0.07)" height={7} delay={200} />
+        </div>
+      </div>
+
+      {/* Rec + Conf badges */}
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+        <div style={{
+          padding: '3px 10px', borderRadius: 6,
+          background: rec === 'YES' ? 'rgba(74,148,112,0.15)' : rec === 'NO' ? 'rgba(74,127,165,0.15)' : 'rgba(0,0,0,0.06)',
+          border: `1px solid ${rec === 'YES' ? 'rgba(74,148,112,0.3)' : rec === 'NO' ? 'rgba(74,127,165,0.3)' : 'transparent'}`,
+        }}>
+          <span style={{ fontSize: 9, fontWeight: 900, color: recColor, letterSpacing: '0.05em' }}>
+            {rec === 'YES' ? 'BUY YES' : rec === 'NO' ? 'BUY NO' : 'PASS'}
+          </span>
+        </div>
+        <div style={{
+          padding: '3px 8px', borderRadius: 6,
+          background: confBg,
+        }}>
+          <span style={{ fontSize: 9, fontWeight: 700, color: confColor, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{conf}</span>
+        </div>
+        {output.gkVol15m != null && (
+          <span style={{ fontSize: 9, color: 'var(--text-muted)', fontFamily: 'var(--font-geist-mono)', marginLeft: 'auto' }}>
+            σ={((output.gkVol15m ?? 0) * 100).toFixed(2)}%
+          </span>
+        )}
+      </div>
+
+      {/* Model */}
+      {output.provider && (
+        <div style={{ marginTop: 6, fontFamily: 'var(--font-geist-mono)', fontSize: 9, color: 'var(--text-muted)', opacity: 0.7 }}>
+          {shortenProvider(output.provider)}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function RiskBody({ output, color }: { output: any; color: string }) {
+  const approved = output.approved
+  const approvedColor = approved ? 'var(--green)' : 'var(--pink)'
+  const approvedBg    = approved ? 'rgba(74,148,112,0.1)' : 'rgba(181,96,112,0.1)'
+  const approvedBdr   = approved ? 'rgba(74,148,112,0.25)' : 'rgba(181,96,112,0.25)'
+
+  return (
+    <div>
+      {/* Approved / Rejected hero */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 10,
+        padding: '8px 12px', borderRadius: 10, marginBottom: 12,
+        background: approvedBg, border: `1px solid ${approvedBdr}`,
+      }}>
+        <span style={{ fontSize: 18 }}>{approved ? '✓' : '✕'}</span>
+        <div>
+          <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 16, fontWeight: 900, color: approvedColor, letterSpacing: '0.03em' }}>
+            {approved ? 'APPROVED' : 'BLOCKED'}
+          </div>
+          <div style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 600 }}>
+            {approved ? 'Kelly sizing applied' : output.rejectionReason ?? 'Risk limit exceeded'}
+          </div>
+        </div>
+      </div>
+
+      {approved && (
+        <>
+          {/* Size */}
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>Position size</div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 5 }}>
+              <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 22, fontWeight: 900, color, lineHeight: 1 }}>
+                {output.positionSize ?? '—'}
+              </span>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>contracts</span>
+            </div>
+          </div>
+
+          <Fact label="Max loss" value={output.maxLoss != null ? `$${output.maxLoss.toFixed(2)}` : '—'} color="var(--pink)" />
+        </>
+      )}
+
+      {!approved && output.rejectionReason && (
+        <div style={{
+          fontSize: 10, color: 'var(--pink)', lineHeight: 1.45,
+          borderLeft: '2px solid var(--pink)', paddingLeft: 8,
+        }}>
+          {output.rejectionReason}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function ExecutionBody({ output, color }: { output: any; color: string }) {
+  const action  = output.action ?? 'PASS'
+  const cost    = output.estimatedCost ?? 0
+  const payout  = output.estimatedPayout ?? 0
+  const roi     = cost > 0 ? ((payout - cost) / cost) * 100 : 0
+  const isPass  = action === 'PASS'
+
+  const actionColor = action === 'BUY_YES' ? 'var(--green)' : action === 'BUY_NO' ? 'var(--blue)' : 'var(--text-muted)'
+  const actionBg    = action === 'BUY_YES' ? 'rgba(74,148,112,0.12)' : action === 'BUY_NO' ? 'rgba(74,127,165,0.12)' : 'rgba(0,0,0,0.05)'
+  const actionBdr   = action === 'BUY_YES' ? 'rgba(74,148,112,0.28)' : action === 'BUY_NO' ? 'rgba(74,127,165,0.28)' : 'transparent'
+
+  // Cost bar: cost as fraction of payout
+  const costFill  = payout > 0 ? Math.min(1, cost / payout) : 0
+
+  return (
+    <div>
+      {/* Action hero */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+        <div>
+          <div style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 5 }}>Order</div>
+          <div style={{
+            display: 'inline-flex', alignItems: 'center', gap: 8,
+            padding: '5px 14px', borderRadius: 9,
+            background: actionBg, border: `1px solid ${actionBdr}`,
+          }}>
+            <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 14, fontWeight: 900, color: actionColor, letterSpacing: '0.04em' }}>
+              {action.replace('_', ' ')}
+            </span>
+            {output.limitPrice != null && (
+              <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)' }}>
+                {output.limitPrice}¢
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* ROI badge */}
+        {!isPass && cost > 0 && (
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontSize: 8, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>ROI if win</div>
+            <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 18, fontWeight: 900, color, lineHeight: 1 }}>
+              +{roi.toFixed(1)}%
+            </div>
+          </div>
+        )}
+      </div>
+
+      {!isPass && (
+        <>
+          {/* Cost vs Payout */}
+          <div style={{ display: 'flex', gap: 12, marginBottom: 10 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>Cost</div>
+              <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 16, fontWeight: 800, color: 'var(--text-primary)' }}>${cost.toFixed(2)}</div>
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>Payout</div>
+              <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 16, fontWeight: 800, color }}>
+                ${payout.toFixed(2)}
+              </div>
+            </div>
+          </div>
+
+          {/* Cost vs Payout bar */}
+          <div style={{ marginBottom: 8 }}>
+            <div style={{ position: 'relative', height: 8, borderRadius: 4, background: `rgba(${color === 'var(--green)' ? '74,148,112' : '74,127,165'},0.15)`, overflow: 'hidden' }}>
+              {/* Cost fill */}
+              <MiniBar value={costFill} color="rgba(0,0,0,0.2)" height={8} delay={160} />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 3 }}>
+              <span style={{ fontSize: 8, color: 'var(--text-muted)' }}>cost</span>
+              <span style={{ fontSize: 8, color: 'var(--text-muted)' }}>payout</span>
+            </div>
+          </div>
+
+          <Fact label="Contracts" value={`${output.contracts ?? '—'}`} color={color} />
+        </>
+      )}
+
+      {isPass && (
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic', lineHeight: 1.5 }}>
+          No trade this cycle — insufficient edge or risk limit reached.
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── AgentCard ─────────────────────────────────────────────────────────────────
 function AgentCard({
   agent,
   result,
@@ -298,18 +666,17 @@ function AgentCard({
   const status: AgentStatus = result?.status ?? 'idle'
   const done    = status === 'done'
   const skipped = status === 'skipped'
-  const pending = pipelineRunning && !done && !skipped  // running but no result yet
-  const active  = !done && !skipped && !pending
+  const pending = pipelineRunning && !done && !skipped
 
   return (
     <div style={{
-      padding: '18px 18px 16px',
-      borderRadius: 12,
+      padding: '16px 16px 14px',
+      borderRadius: 14,
       background: (done || skipped) ? agent.bg : pending ? 'var(--bg-secondary)' : 'rgba(255,255,255,0.5)',
       border: `1px solid ${(done || skipped) ? agent.border : pending ? 'var(--border-bright)' : 'var(--border)'}`,
       position: 'relative', overflow: 'hidden',
       transition: 'background 0.35s, border-color 0.35s, box-shadow 0.35s',
-      boxShadow: done ? `0 2px 16px rgba(${agent.rgb},0.1)` : 'none',
+      boxShadow: done ? `0 3px 20px rgba(${agent.rgb},0.13)` : 'none',
       animation: (done || skipped) ? `cardIn 0.35s ${index * 70}ms cubic-bezier(0.34,1.56,0.64,1) both` : 'none',
     }}>
       {/* Top accent bar */}
@@ -317,68 +684,79 @@ function AgentCard({
         <div style={{
           position: 'absolute', top: 0, left: 0, right: 0, height: 3,
           background: done
-            ? `linear-gradient(90deg, ${agent.color}, rgba(${agent.rgb},0.15))`
+            ? `linear-gradient(90deg, ${agent.color}, rgba(${agent.rgb},0.12))`
             : 'var(--amber)',
-          borderRadius: '12px 12px 0 0',
+          borderRadius: '14px 14px 0 0',
         }} />
       )}
 
       {/* Step number */}
       <div style={{
-        position: 'absolute', top: 14, right: 14,
+        position: 'absolute', top: 13, right: 13,
         fontFamily: 'var(--font-geist-mono)', fontSize: 9, fontWeight: 700,
         color: (done || skipped) ? agent.color : 'var(--text-light)',
-        opacity: 0.6, letterSpacing: '0.04em',
+        opacity: 0.55, letterSpacing: '0.04em',
       }}>
         {String(index + 1).padStart(2, '0')}
       </div>
 
-      {/* Icon + label */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+      {/* Icon + label row */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
         <div style={{
-          width: 40, height: 40, borderRadius: 10, flexShrink: 0,
+          width: 36, height: 36, borderRadius: 9, flexShrink: 0,
           background: (done || skipped) ? `rgba(${agent.rgb},0.15)` : 'var(--bg-secondary)',
           border: `1.5px solid ${(done || skipped) ? agent.border : 'var(--border)'}`,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 18, color: active ? 'var(--text-light)' : agent.color,
+          fontSize: 16, color: done ? agent.color : 'var(--text-light)',
           animation: done ? 'iconLand 0.4s cubic-bezier(0.34,1.56,0.64,1) forwards' : 'none',
           transition: 'all 0.3s',
         }}>{agent.icon}</div>
+
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{
-            fontSize: 15, fontWeight: 800, letterSpacing: '-0.02em',
-            color: active ? 'var(--text-muted)' : 'var(--text-primary)',
-            lineHeight: 1.2, marginBottom: 3,
+            fontSize: 13, fontWeight: 800, letterSpacing: '-0.02em',
+            color: (done || skipped) ? 'var(--text-primary)' : 'var(--text-muted)',
+            lineHeight: 1.2,
           }}>{agent.label}</div>
-          <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-muted)', wordBreak: 'break-word' }}>
-            {result?.agentName?.includes('roma-dspy')
-              ? shortenProvider(result.agentName.replace(/^.*?\(/, '').replace(/\)$/, ''))
-              : agent.desc}
-          </div>
+          {done && result?.agentName && (
+            <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2, fontFamily: 'var(--font-geist-mono)', opacity: 0.7 }}>
+              {result.agentName.includes('roma-dspy')
+                ? shortenProvider(result.agentName.replace(/^.*?\(/, '').replace(/\)$/, ''))
+                : agent.desc}
+            </div>
+          )}
         </div>
-        {done    && <span style={{ fontSize: 14, color: agent.color, flexShrink: 0, marginRight: 20, animation: 'tickPop 0.3s cubic-bezier(0.34,1.56,0.64,1) forwards' }}>✓</span>}
-        {skipped && <span style={{ fontSize: 12, color: 'var(--amber)', flexShrink: 0, marginRight: 20 }}>—</span>}
+
+        {done    && <span style={{ fontSize: 14, color: agent.color, flexShrink: 0, marginRight: 18, animation: 'tickPop 0.3s cubic-bezier(0.34,1.56,0.64,1) forwards' }}>✓</span>}
+        {skipped && <span style={{ fontSize: 12, color: 'var(--amber)', flexShrink: 0, marginRight: 18 }}>—</span>}
       </div>
 
-      {/* Output bullets */}
-      <div style={{ borderTop: `1px solid rgba(${agent.rgb},0.15)`, paddingTop: 10 }}>
-        {result ? (
-          <AgentBullets agentKey={agent.key} output={result.output} color={agent.color} />
-        ) : pending ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text-muted)' }}>
+      {/* Card body */}
+      <div style={{ borderTop: `1px solid rgba(${agent.rgb},0.14)`, paddingTop: 12 }}>
+        {result ? (() => {
+          const o = result.output
+          if (agent.key === 'marketDiscovery') return <MarketDiscoveryBody output={o} color={agent.color} />
+          if (agent.key === 'priceFeed')       return <PriceFeedBody       output={o} color={agent.color} />
+          if (agent.key === 'sentiment')       return <SentimentBody       output={o} color={agent.color} />
+          if (agent.key === 'probability')     return <ProbabilityBody     output={o} color={agent.color} />
+          if (agent.key === 'risk')            return <RiskBody            output={o} color={agent.color} />
+          if (agent.key === 'execution')       return <ExecutionBody       output={o} color={agent.color} />
+          return null
+        })() : pending ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 11, color: 'var(--text-muted)', padding: '6px 0' }}>
             <span style={{ animation: 'spin-slow 1s linear infinite', display: 'inline-block', fontSize: 13 }}>◌</span>
-            running…
+            Computing…
           </div>
         ) : (
-          <div style={{ fontSize: 11, color: 'var(--text-light)', fontStyle: 'italic' }}>
-            Waiting for pipeline run…
+          <div style={{ fontSize: 11, color: 'var(--text-light)', fontStyle: 'italic', padding: '4px 0' }}>
+            Awaiting pipeline run…
           </div>
         )}
       </div>
 
       {/* Duration */}
       {result?.durationMs != null && (
-        <div style={{ marginTop: 8, fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--font-geist-mono)', fontWeight: 600, opacity: 0.7 }}>
+        <div style={{ marginTop: 10, fontSize: 9, color: 'var(--text-muted)', fontFamily: 'var(--font-geist-mono)', opacity: 0.55 }}>
           {result.durationMs >= 1000 ? (result.durationMs / 1000).toFixed(1) + 's' : result.durationMs + 'ms'}
         </div>
       )}
@@ -386,7 +764,7 @@ function AgentCard({
   )
 }
 
-// ── Main export ─────────────────────────────────────────────────────────────
+// ── Main export ──────────────────────────────────────────────────────────────
 export default function AgentPipeline({
   pipeline,
   isRunning,
@@ -396,7 +774,7 @@ export default function AgentPipeline({
   isRunning: boolean
   streamingAgents?: PartialPipelineAgents
 }) {
-  const [elapsedMs, setElapsedMs] = useState(0)
+  const [elapsedMs, setElapsedMs]   = useState(0)
   const [dataAgeSec, setDataAgeSec] = useState(0)
   const startRef = useRef<number | null>(null)
 
@@ -409,7 +787,6 @@ export default function AgentPipeline({
     }
   }, [isRunning])
 
-  // Tick data age since pipeline last completed
   useEffect(() => {
     if (!pipeline?.cycleCompletedAt) return
     const completedAt = new Date(pipeline.cycleCompletedAt).getTime()
@@ -441,18 +818,10 @@ export default function AgentPipeline({
 
       {/* Body */}
       {isRunning && !Object.keys(streamingAgents ?? {}).length ? (
-        // Nothing streamed yet — show animated loader for brief initial period
         <RomaLoader elapsed={elapsedMs} />
       ) : (isRunning || pipeline) ? (
-        // Streaming in progress OR cycle complete: show agent cards
-        // During streaming: use streamingAgents for live results, pending state for the rest
-        // After completion: use pipeline.agents for the final authoritative results
         <>
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: '1fr 1fr',
-            gap: 12,
-          }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             {AGENTS.map((agent, i) => {
               const result = isRunning
                 ? streamingAgents?.[agent.key]
@@ -468,22 +837,19 @@ export default function AgentPipeline({
             const ds   = Math.floor((ms % 1000) / 100)
             const runStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}.${ds}s`
 
-            const ageMins = Math.floor(dataAgeSec / 60)
-            const ageSecs = dataAgeSec % 60
-            const ageStr  = ageMins > 0 ? `${ageMins}m ${ageSecs}s ago` : `${ageSecs}s ago`
-            const stale   = dataAgeSec >= 300   // >5 min
-            const aging   = dataAgeSec >= 150   // >2.5 min
+            const ageMins  = Math.floor(dataAgeSec / 60)
+            const ageSecs  = dataAgeSec % 60
+            const ageStr   = ageMins > 0 ? `${ageMins}m ${ageSecs}s ago` : `${ageSecs}s ago`
+            const stale    = dataAgeSec >= 300
+            const aging    = dataAgeSec >= 150
             const ageColor = stale ? 'var(--pink)' : aging ? 'var(--amber)' : 'var(--text-muted)'
             const ageBg    = stale ? 'rgba(212,85,130,0.07)' : aging ? 'rgba(212,135,44,0.07)' : 'transparent'
             const ageBdr   = stale ? 'rgba(212,85,130,0.3)'  : aging ? 'rgba(212,135,44,0.3)'  : 'transparent'
 
             return (
               <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                {/* Data age — hidden while pipeline is running */}
                 {isRunning ? (
-                  <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 10, color: 'var(--text-muted)', opacity: 0.5 }}>
-                    updating…
-                  </span>
+                  <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 10, color: 'var(--text-muted)', opacity: 0.5 }}>updating…</span>
                 ) : (
                   <div style={{
                     display: 'inline-flex', alignItems: 'center', gap: 6,
@@ -491,16 +857,13 @@ export default function AgentPipeline({
                     background: ageBg, border: `1px solid ${ageBdr}`,
                     transition: 'all 0.4s ease',
                   }}>
-                    <span style={{ fontSize: 9, color: ageColor, opacity: stale || aging ? 1 : 0.55, transition: 'color 0.4s' }}>
+                    <span style={{ fontSize: 9, color: ageColor, opacity: stale || aging ? 1 : 0.55 }}>
                       {stale ? '⚠' : '◷'}
                     </span>
-                    <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 10, color: ageColor, transition: 'color 0.4s' }}>
-                      {ageStr}
-                    </span>
+                    <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 10, color: ageColor }}>{ageStr}</span>
                   </div>
                 )}
 
-                {/* Pipeline run time + completion clock */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <div style={{
                     display: 'inline-flex', alignItems: 'center', gap: 6,
@@ -521,7 +884,6 @@ export default function AgentPipeline({
           })()}
         </>
       ) : (
-        // No pipeline yet and not running
         <div style={{ padding: '32px 0', textAlign: 'center' }}>
           <div style={{ fontSize: 10, letterSpacing: '0.07em', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 6 }}>// AWAITING</div>
           <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Awaiting first ROMA cycle…</div>

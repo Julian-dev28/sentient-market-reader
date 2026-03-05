@@ -203,6 +203,27 @@ export interface KalshiFill {
 
 export type TradeOutcome = 'WIN' | 'LOSS' | 'PENDING'
 
+/** Full signal snapshot captured at trade entry — used for calibration and attribution */
+export interface TradeSignals {
+  // Sentiment agent
+  sentimentScore: number       // -1 to +1
+  sentimentMomentum: number    // -1 to +1
+  orderbookSkew: number        // -1 to +1
+  sentimentLabel: string       // e.g. 'strongly_bullish'
+  // Probability agent
+  pLLM: number                 // raw LLM P(YES) before quant blend
+  confidence: string           // 'high' | 'medium' | 'low'
+  gkVol: number | null         // Garman-Klass realized vol
+  // Market context
+  distancePct: number          // BTC distance from strike (signed %)
+  minutesLeft: number          // minutes until expiry
+  aboveStrike: boolean         // BTC above strike at entry
+  // Market structure
+  priceMomentum1h: number      // 1h price change %
+  // TimesFM (if available)
+  timesfmPYes?: number         // TimesFM-derived P(YES)
+}
+
 export interface TradeRecord {
   id: string
   cycleId: number
@@ -221,9 +242,60 @@ export interface TradeRecord {
   pModel: number
   pMarket: number
   edge: number
+  signals?: TradeSignals    // full signal vector for calibration/attribution
   // Live trading fields
   liveOrderId?: string
   liveMode?: boolean
+  // Backtest flag — true for synthetic records from historical backtest
+  isBacktest?: boolean
+}
+
+// ─── Calibration ────────────────────────────────────────────────────────────
+
+/** Calibration bucket: "when model says X%, how often does YES actually win?" */
+export interface CalibrationBucket {
+  bucket: string            // e.g. "50–60%"
+  pMid: number              // midpoint, e.g. 0.55
+  predicted: number         // avg pModel in bucket
+  actual: number            // actual win rate
+  count: number             // trade count
+}
+
+export interface SignalImportance {
+  feature: string           // signal name
+  coefficient: number       // logistic regression coefficient
+  direction: 'bullish' | 'bearish' | 'mixed'
+  accuracy: number          // % of times this signal correctly predicted direction
+  count: number             // sample size
+}
+
+export interface CalibrationResult {
+  brierScore: number        // 0–0.25; lower is better; random=0.25
+  logLoss: number           // lower is better
+  rocAuc: number            // 0.5–1.0; 0.5=random
+  totalTrades: number
+  settledTrades: number
+  overallWinRate: number
+  avgPModel: number         // average predicted P(YES) on YES trades
+  buckets: CalibrationBucket[]
+  signals: SignalImportance[]
+  plattA: number | null     // Platt scaling coefficient a (null if not fitted)
+  plattB: number | null     // Platt scaling coefficient b
+  computedAt: string        // ISO timestamp
+}
+
+/** Daily optimization parameters output by Gemini meta-optimizer */
+export interface DailyOptParams {
+  alphaCap: number          // max quant weight (0.70–0.92)
+  gateVelocityThreshold: number  // reachability gate (0.40–0.75)
+  edgeMinPct: number        // minimum edge to trade (1.5–6.0)
+  sentimentWeight: number   // LLM sentiment blend weight (0.05–0.30)
+  fatTailNu: number | null  // Student-t degrees of freedom (null = auto)
+  rationale: string         // Gemini's explanation
+  riskLevel: 'conservative' | 'normal' | 'aggressive'
+  computedAt: string
+  tradesSampled: number
+  brierScore: number
 }
 
 // ─── Performance ───────────────────────────────────────────────────────────

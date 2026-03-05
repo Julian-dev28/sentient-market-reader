@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import type { PipelineState, PartialPipelineAgents, TradeRecord, PerformanceStats } from '@/lib/types'
+import type { PipelineState, PartialPipelineAgents, TradeRecord, TradeSignals, PerformanceStats } from '@/lib/types'
 
 const CYCLE_INTERVAL_MS = 5 * 60 * 1000  // 5-minute cycles
 const BOT_TRADE_DOLLARS = 100             // fixed $ size per bot trade
@@ -200,6 +200,7 @@ export function usePipeline(
       const md   = data.agents.marketDiscovery.output
       const pf   = data.agents.priceFeed.output
       const prob = data.agents.probability.output
+      const sent = data.agents.sentiment.output
 
       if (exec.action !== 'PASS' && exec.side && exec.limitPrice && md.activeMarket) {
         // Agent: fixed $100 trade. Manual analysis: use agent's contract count.
@@ -231,6 +232,21 @@ export function usePipeline(
           } catch { /* live order failed — still record as paper */ }
         }
 
+        // ── Full signal snapshot for calibration/attribution ──────────────────
+        const signals: TradeSignals = {
+          sentimentScore:    sent.score ?? 0,
+          sentimentMomentum: sent.momentum ?? 0,
+          orderbookSkew:     sent.orderbookSkew ?? 0,
+          sentimentLabel:    sent.label ?? 'neutral',
+          pLLM:              prob.pModel,  // pModel IS the blended LLM+quant value
+          confidence:        prob.confidence ?? 'low',
+          gkVol:             prob.gkVol15m ?? null,
+          distancePct:       pf.distanceFromStrikePct,
+          minutesLeft:       md.minutesUntilExpiry,
+          aboveStrike:       pf.aboveStrike,
+          priceMomentum1h:   pf.priceChangePct1h,
+        }
+
         const trade: TradeRecord = {
           id: `${data.cycleId}-${Date.now()}`,
           cycleId: data.cycleId,
@@ -247,6 +263,7 @@ export function usePipeline(
           pModel: prob.pModel,
           pMarket: prob.pMarket,
           edge: prob.edge,
+          signals,
           liveOrderId,
           liveMode: autoTrade && liveMode,
         }

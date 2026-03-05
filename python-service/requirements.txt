@@ -3,3 +3,5 @@ fastapi
 uvicorn[standard]
 python-dotenv
 pydantic
+numpy
+scipy
