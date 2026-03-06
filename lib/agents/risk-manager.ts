@@ -88,14 +88,6 @@ export function runRiskManager(
   } else if (distanceFromStrikePct !== undefined && Math.abs(distanceFromStrikePct) < RISK_PARAMS.minDistancePct) {
     approved = false
     rejectionReason = `Price too close to strike (${distanceFromStrikePct.toFixed(4)}% — near-strike trades are ~50/50 noise)`
-  } else if (
-    sentimentScore !== undefined &&
-    ((recommendation === 'YES' && sentimentScore < -0.4) ||
-     (recommendation === 'NO'  && sentimentScore >  0.4))
-  ) {
-    approved = false
-    const dir = recommendation === 'YES' ? 'bearish' : 'bullish'
-    rejectionReason = `Sentiment (${sentimentScore.toFixed(2)}) strongly ${dir} — contradicts ${recommendation} recommendation`
   } else if (sessionState.dailyPnl <= maxDailyLoss) {
     approved = false
     rejectionReason = `Daily loss limit reached ($${Math.abs(maxDailyLoss).toFixed(0)} = ${RISK_PARAMS.maxDailyLossPct}% of $${portfolioValue.toFixed(0)} portfolio)`
