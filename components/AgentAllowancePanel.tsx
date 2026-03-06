@@ -79,7 +79,11 @@ export default function AgentAllowancePanel({
           <span style={{ fontSize: 9, fontFamily: 'var(--font-geist-mono)', color: 'var(--text-muted)' }}>
             {isRunning
               ? <span style={{ animation: 'spin-slow 1s linear infinite', display: 'inline-block' }}>◌</span>
-              : `↻ ${mins}:${String(secs).padStart(2, '0')}`}
+              : windowBetPlaced
+                ? <span style={{ color: 'var(--green-dark)', fontWeight: 700 }}>bet live ✓</span>
+                : nextCycleIn > 0
+                  ? `↻ ${mins}:${String(secs).padStart(2, '0')}`
+                  : <span style={{ color: 'var(--amber)' }}>watching…</span>}
           </span>
         )}
       </div>
