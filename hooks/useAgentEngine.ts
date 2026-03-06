@@ -106,12 +106,16 @@ export function useAgentEngine(liveMode: boolean, orModel?: string) {
   const tradesRef         = useRef<AgentTrade[]>([])
   const autoTimeoutRef    = useRef<ReturnType<typeof setTimeout> | null>(null)
   const countdownRef      = useRef<ReturnType<typeof setInterval> | null>(null)
+  const flipPollRef       = useRef<ReturnType<typeof setInterval> | null>(null)
   const nextRunAtRef      = useRef<number>(0)
   const runCycleRef       = useRef<(() => Promise<void>) | null>(null)
   const abortRef          = useRef<AbortController | null>(null)
   const activeRef         = useRef(false)
   const isRunningRef      = useRef(false)
   const processResultRef  = useRef<((data: PipelineState) => Promise<void>) | null>(null)
+  // Flip detection: track last known BTC direction vs strike
+  const strikeRef         = useRef<number>(0)
+  const lastAboveStrike   = useRef<boolean | null>(null)
 
   useEffect(() => { allowanceRef.current = allowance }, [allowance])
   useEffect(() => { activeRef.current = active }, [active])
@@ -221,10 +225,14 @@ export function useAgentEngine(liveMode: boolean, orModel?: string) {
       ?? md.activeMarket?.ticker.split('-').slice(0, 2).join('-')
       ?? null
 
-    // New window → allow a fresh bet
+    // Track strike for flip detection
+    if (md.strikePrice > 0) strikeRef.current = md.strikePrice
+
+    // New window → allow a fresh bet and reset direction tracking
     if (evTicker && evTicker !== windowKeyRef.current) {
       windowKeyRef.current = evTicker
       windowBetRef.current = false
+      lastAboveStrike.current = null
       setWindowKey(evTicker)
       setWindowBetPlaced(false)
     }
@@ -471,6 +479,41 @@ export function useAgentEngine(liveMode: boolean, orModel?: string) {
       if (autoTimeoutRef.current) { clearTimeout(autoTimeoutRef.current); autoTimeoutRef.current = null }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active])
+
+  // ── Flip detection: poll BTC price every 15s, trigger cycle on strike cross ─
+  useEffect(() => {
+    if (!active) {
+      if (flipPollRef.current) { clearInterval(flipPollRef.current); flipPollRef.current = null }
+      lastAboveStrike.current = null
+      return
+    }
+
+    const check = async () => {
+      if (!activeRef.current || isRunningRef.current || windowBetRef.current) return
+      const strike = strikeRef.current
+      if (strike <= 0) return
+      try {
+        const res = await fetch('/api/btc-price')
+        if (!res.ok) return
+        const { price } = await res.json()
+        if (!price || price <= 0) return
+        const above = price > strike
+        const prev  = lastAboveStrike.current
+        lastAboveStrike.current = above
+        if (prev !== null && prev !== above) {
+          // BTC just crossed the strike — fire analysis immediately if in a valid window
+          const { minutesLeft } = getDelayMs()
+          if (minutesLeft >= MIN_MINUTES_LEFT) {
+            if (autoTimeoutRef.current) { clearTimeout(autoTimeoutRef.current); autoTimeoutRef.current = null }
+            runCycleRef.current?.()
+          }
+        }
+      } catch {}
+    }
+
+    flipPollRef.current = setInterval(check, 15_000)
+    return () => { if (flipPollRef.current) { clearInterval(flipPollRef.current); flipPollRef.current = null } }
   }, [active])
 
   // ── Countdown timer (1s tick) ─────────────────────────────────────────────
