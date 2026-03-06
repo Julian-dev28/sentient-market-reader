@@ -173,16 +173,15 @@ ${prevContext}`] : []),
   const pSkewAdj  = quant.skewAdjBinary?.pYesSkewAdj ?? null
   const pOB       = quant.obImpliedProb ?? null
 
-  const pPhysicsCombined =
-    pSkewAdj  !== null && pFatTail  !== null ? logOpinionPool(pSkewAdj, pFatTail,   0.50, 0.50) :
-    pSkewAdj  !== null && pBrownian !== null ? logOpinionPool(pSkewAdj, pBrownian,  0.55, 0.45) :
-    pBrownian !== null && pFatTail  !== null ? logOpinionPool(pBrownian, pFatTail,  0.45, 0.55) :
-    pBrownian !== null && pLN       !== null ? logOpinionPool(pBrownian, pLN,       0.50, 0.50) :
-    (pSkewAdj ?? pFatTail ?? pBrownian ?? pLN)
-
-  const pQuantCombined = pPhysicsCombined !== null && pOB !== null
-    ? logOpinionPool(pPhysicsCombined, pOB, 0.85, 0.15)
-    : pPhysicsCombined
+  // ── Pure Brownian reachability model ─────────────────────────────────────
+  // The answer to "will BTC be above strike at expiry?" is one formula:
+  //   d = (BTC - strike) / (σ × √T)   →   P(YES) = Φ(d)
+  // σ and T are already baked into pBrownian via computeBrownianPrior.
+  // If BTC is far from strike relative to remaining vol × time, P → 0 or 1.
+  // Five price oscillations don't change d enough to matter — commit to the analysis.
+  // We keep pSkewAdj (Cornish-Fisher) as the sole fallback since it shares the same
+  // reachability logic with skew/kurtosis corrections.
+  const pQuantCombined = pBrownian ?? pSkewAdj ?? pFatTail ?? pLN
 
   let pModel = pQuantCombined ?? 0.5
 
@@ -234,11 +233,12 @@ ${prevContext}`] : []),
   const cusumNote = quant.cusum?.jumpDetected ? ` JUMP(${quant.cusum.direction})` : ''
 
   const quantBlendNote = pQuantCombined !== null
-    ? ' | P_CF=' + (pSkewAdj !== null ? (pSkewAdj * 100).toFixed(1) + '%' : 'n/a') +
-      ' P_fat=' + (pFatTail !== null ? (pFatTail * 100).toFixed(1) + '% nu=' + quant.fatTailBinary?.nu.toFixed(1) : 'n/a') +
-      ' P_brow=' + (pBrownian !== null ? (pBrownian * 100).toFixed(1) + '%' : 'n/a') +
-      (pOB !== null ? ' P_OB=' + (pOB * 100).toFixed(1) + '%' : '') +
-      ' -> P_quant=' + (pQuantCombined * 100).toFixed(1) + '%(LOP)' + hurstNote + vovNote + cusumNote + gateNote +
+    ? ` | P_brow=${pBrownian !== null ? (pBrownian * 100).toFixed(1) + '%' : 'n/a'}` +
+      ` P_CF=${pSkewAdj !== null ? (pSkewAdj * 100).toFixed(1) + '%' : 'n/a'}` +
+      ` d=${distanceFromStrikePct >= 0 ? '+' : ''}${distanceFromStrikePct.toFixed(3)}%` +
+      ` σ=${quant.gkVol15m !== null ? (quant.gkVol15m * 100).toFixed(3) + '%/15m' : 'n/a'}` +
+      ` T=${minutesUntilExpiry.toFixed(1)}min` +
+      hurstNote + vovNote + cusumNote + gateNote +
       ` DIR_LOCK(${aboveStrike ? 'YES' : 'NO'})`
     : ''
 
