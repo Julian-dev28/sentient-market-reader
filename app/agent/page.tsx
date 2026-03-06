@@ -82,6 +82,9 @@ export default function AgentPage() {
               nextCycleIn={engine.nextCycleIn}
               windowKey={engine.windowKey}
               windowBetPlaced={engine.windowBetPlaced}
+              orderError={engine.orderError}
+              currentD={engine.currentD}
+              confidenceThreshold={engine.confidenceThreshold}
               onStart={handleStart}
               onStop={engine.stopAgent}
               onSetAllowance={engine.setAllowanceAmount}
