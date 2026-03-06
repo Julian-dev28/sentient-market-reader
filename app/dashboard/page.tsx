@@ -12,8 +12,6 @@ import PositionsPanel from '@/components/PositionsPanel'
 import PipelineHistory from '@/components/PipelineHistory'
 
 export default function Home() {
-  const [liveMode, setLiveMode]           = useState(false)
-  const [showLiveWarning, setShowLiveWarning] = useState(false)
   const [botActive, setBotActive]           = useState(false)
   const [showBotWarning, setShowBotWarning] = useState(false)
   const [showLateWarning, setShowLateWarning] = useState(false)
@@ -30,7 +28,6 @@ export default function Home() {
 
   // Sync from localStorage after hydration
   useEffect(() => {
-    if (localStorage.getItem('sentient-live-mode') === 'true') setLiveMode(true)
     const om = localStorage.getItem('sentient-or-model')
     if (om) setOrModel(om)
     const fav = localStorage.getItem('sentient-or-favorites')
@@ -86,7 +83,7 @@ export default function Home() {
     : 0) || liveMarket?.floor_strike || 0
 
   const { pipeline, history, streamingAgents, isRunning, serverLocked, nextCycleIn, error, strikeFlipped, dismissStrikeFlip, runCycle, stopCycle } = usePipeline(
-    liveMode, botActive, aiRisk, undefined, undefined, orModel || undefined,
+    true, botActive, aiRisk, undefined, undefined, orModel || undefined,
     liveBTCPrice || undefined, liveStrikePrice || undefined,
   )
 
@@ -130,7 +127,7 @@ export default function Home() {
   }, [pipeline])
 
   async function executeAlertTrade() {
-    if (!tradeAlert || !liveMode) return
+    if (!tradeAlert) return
     setAlertStatus('placing')
     const contracts = Math.max(1, Math.floor(40 / (tradeAlert.limitPrice / 100)))
     try {
@@ -186,21 +183,6 @@ export default function Home() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isRunning, serverLocked, secondsUntilExpiry])
 
-  function handleToggleLive() {
-    if (!liveMode) {
-      setShowLiveWarning(true)
-    } else {
-      setLiveMode(false)
-      localStorage.setItem('sentient-live-mode', 'false')
-    }
-  }
-
-  function confirmLive() {
-    setShowLiveWarning(false)
-    setLiveMode(true)
-    localStorage.setItem('sentient-live-mode', 'true')
-  }
-
   function handleStartBot() {
     setShowBotWarning(true)
   }
@@ -221,56 +203,9 @@ export default function Home() {
         cycleId={pipeline?.cycleId ?? 0}
         isRunning={isRunning}
         nextCycleIn={nextCycleIn}
-        liveMode={liveMode}
-        onToggleLive={handleToggleLive}
         lastCompletedAt={pipeline?.cycleCompletedAt}
         onRunCycle={isRunning || serverLocked ? undefined : runCycle}
       />
-
-      {/* Live mode warning modal */}
-      {showLiveWarning && (
-        <div style={{
-          position: 'fixed', inset: 0, zIndex: 1000,
-          background: 'rgba(5,5,7,0.80)', backdropFilter: 'blur(12px)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>
-          <div className="card animate-fade-in" style={{ maxWidth: 420, width: '90%', padding: '28px 28px' }}>
-            <div style={{ fontSize: 22, marginBottom: 10 }}>⚠️</div>
-            <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-primary)', marginBottom: 8 }}>
-              Enable Live Trading?
-            </div>
-            <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 20 }}>
-              In live mode the pipeline will place <strong>real orders on Kalshi</strong> using your API key. Real money will be at risk on each trade the execution agent approves.
-              <br /><br />
-              Risk parameters (3% min edge, $150 daily loss cap, 15% drawdown limit) are enforced by the agent, but no system is foolproof.
-            </div>
-            <div style={{ display: 'flex', gap: 10 }}>
-              <button
-                onClick={() => setShowLiveWarning(false)}
-                style={{
-                  flex: 1, padding: '10px 0', borderRadius: 9, cursor: 'pointer',
-                  border: '1px solid var(--border)', background: 'var(--bg-secondary)',
-                  fontSize: 13, fontWeight: 700, color: 'var(--text-secondary)',
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={confirmLive}
-                style={{
-                  flex: 1, padding: '10px 0', borderRadius: 9, cursor: 'pointer',
-                  border: '1px solid var(--green-dark)',
-                  background: 'linear-gradient(135deg, var(--green-dark) 0%, var(--green) 100%)',
-                  fontSize: 13, fontWeight: 700, color: '#fff',
-                  boxShadow: '0 2px 10px rgba(78,138,94,0.35)',
-                }}
-              >
-                Enable Live Trading
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Bot start confirmation modal */}
       {showBotWarning && (
@@ -285,10 +220,8 @@ export default function Home() {
               Start Trading Agent?
             </div>
             <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 20 }}>
-              The bot will run a pipeline cycle every <strong>5 minutes</strong> and automatically place a <strong>$100 {liveMode ? 'live' : 'paper'} order</strong> when the agent approves a trade.
-              {liveMode && (
-                <><br /><br /><span style={{ color: 'var(--pink)', fontWeight: 700 }}>⚠ Live mode is on — real money will be used.</span></>
-              )}
+              The bot will run a pipeline cycle every <strong>5 minutes</strong> and automatically place a <strong>$100 live order</strong> when the agent approves a trade.
+              <><br /><br /><span style={{ color: 'var(--pink)', fontWeight: 700 }}>⚠ Live mode — real money will be used.</span></>
               <br /><br />
               Risk guards: 3% min edge · $150 daily loss cap · 15% drawdown limit · 48 trades/day max.
             </div>
@@ -307,12 +240,10 @@ export default function Home() {
                 onClick={confirmStartBot}
                 style={{
                   flex: 1, padding: '10px 0', borderRadius: 9, cursor: 'pointer',
-                  border: liveMode ? '1px solid var(--green-dark)' : '1px solid var(--brown)',
-                  background: liveMode
-                    ? 'linear-gradient(135deg, var(--green-dark) 0%, var(--green) 100%)'
-                    : 'linear-gradient(135deg, #7a5c32 0%, var(--brown) 100%)',
+                  border: '1px solid var(--green-dark)',
+                  background: 'linear-gradient(135deg, var(--green-dark) 0%, var(--green) 100%)',
                   fontSize: 13, fontWeight: 700, color: '#fff',
-                  boxShadow: liveMode ? '0 2px 10px rgba(78,138,94,0.35)' : '0 2px 8px rgba(139,111,71,0.3)',
+                  boxShadow: '0 2px 10px rgba(78,138,94,0.35)',
                 }}
               >
                 ▶ Start Agent
@@ -483,7 +414,7 @@ export default function Home() {
                 }}>
                   Dismiss
                 </button>
-                <button onClick={liveMode ? executeAlertTrade : () => setTradeAlert(null)} style={{
+                <button onClick={executeAlertTrade} style={{
                   flex: 2, padding: '10px 0', borderRadius: 9, cursor: 'pointer',
                   border: tradeAlert.side === 'yes' ? '1px solid var(--green-dark)' : '1px solid var(--pink)',
                   background: tradeAlert.side === 'yes'
@@ -493,7 +424,7 @@ export default function Home() {
                   boxShadow: tradeAlert.side === 'yes' ? '0 2px 12px rgba(74,148,112,0.35)' : '0 2px 12px rgba(212,85,130,0.35)',
                   letterSpacing: '0.01em',
                 }}>
-                  {liveMode ? 'Buy $40' : 'Got it (paper)'}
+                  Buy $40
                 </button>
               </div>
             )}
@@ -537,17 +468,15 @@ export default function Home() {
         )}
 
         {/* Live mode banner */}
-        {liveMode && (
-          <div className="animate-fade-in" style={{
-            marginBottom: 14, padding: '10px 16px', borderRadius: 12,
-            background: 'var(--green-pale)', border: '1px solid #a8d8b5',
-            fontSize: 12, color: 'var(--green-dark)',
-            display: 'flex', alignItems: 'center', gap: 8,
-          }}>
-            <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--green)', display: 'inline-block', boxShadow: '0 0 6px var(--green)', animation: 'pulse-live 1.5s ease-in-out infinite', flexShrink: 0 }} />
-            <span><strong>Live trading active</strong> — real Kalshi orders will be placed when the pipeline approves a trade. Risk controls: 3% min edge · $150 daily cap · 15% max drawdown.</span>
-          </div>
-        )}
+        <div style={{
+          marginBottom: 14, padding: '10px 16px', borderRadius: 12,
+          background: 'var(--green-pale)', border: '1px solid #164030',
+          fontSize: 12, color: 'var(--green-dark)',
+          display: 'flex', alignItems: 'center', gap: 8,
+        }}>
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--green)', display: 'inline-block', boxShadow: '0 0 6px var(--green)', animation: 'pulse-live 1.5s ease-in-out infinite', flexShrink: 0 }} />
+          <span><strong>Live trading active</strong> — real Kalshi orders will be placed when the pipeline approves a trade. Risk controls: 3% min edge · $150 daily cap · 15% max drawdown.</span>
+        </div>
 
 
         <div style={{ display: 'grid', gridTemplateColumns: '310px 1fr 290px', gap: 14, alignItems: 'start' }}>
@@ -560,7 +489,7 @@ export default function Home() {
               strikePrice={strikePrice}
               currentBTCPrice={currentBTCPrice}
               secondsUntilExpiry={secondsUntilExpiry}
-              liveMode={liveMode}
+              liveMode={true}
               onRefresh={refreshMarket}
             />
             <SignalPanel probability={prob} sentiment={sent} />
@@ -574,7 +503,7 @@ export default function Home() {
                   color: exec.action === 'BUY_YES' ? 'var(--green-dark)' : 'var(--blue-dark)' }}>
                   <span style={{ fontSize: 16 }}>{exec.action === 'BUY_YES' ? '↑' : '↓'}</span>
                   {exec.action === 'BUY_YES' ? 'BUY YES' : 'BUY NO'} — Latest Signal
-                  {liveMode && <span style={{ marginLeft: 'auto', fontSize: 9, fontWeight: 700, color: 'var(--green-dark)', background: 'var(--green-pale)', border: '1px solid #a8d8b5', borderRadius: 4, padding: '1px 5px' }}>LIVE</span>}
+                  <span style={{ marginLeft: 'auto', fontSize: 9, fontWeight: 700, color: 'var(--green-dark)', background: 'var(--green-pale)', border: '1px solid #164030', borderRadius: 4, padding: '1px 5px' }}>LIVE</span>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 7 }}>
                   {[
@@ -590,9 +519,7 @@ export default function Home() {
                   ))}
                 </div>
                 <div style={{ marginTop: 8, fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.5 }}>
-                  {liveMode
-                    ? exec.rationale.replace('Paper trade only — no real order placed.', 'Live mode — real order placed via Kalshi API.')
-                    : exec.rationale}
+                  {exec.rationale.replace('Paper trade only — no real order placed.', 'Live mode — real order placed via Kalshi API.')}
                 </div>
 
                 {/* Prices at pipeline run */}
@@ -885,7 +812,7 @@ export default function Home() {
 
           {/* ─── RIGHT ─── */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <PositionsPanel liveMode={liveMode} />
+            <PositionsPanel liveMode={true} />
           </div>
         </div>
       </main>

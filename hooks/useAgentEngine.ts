@@ -84,7 +84,7 @@ async function fetchMarketResult(ticker: string): Promise<{ result: 'yes' | 'no'
   return null
 }
 
-export function useAgentEngine(liveMode: boolean, orModel?: string) {
+export function useAgentEngine(orModel?: string) {
   const [active, setActive]                     = useState(false)
   const [allowance, setAllowance]               = useState(100)
   const [initialAllowance, setInitialAllowance] = useState(100)
@@ -240,10 +240,9 @@ export function useAgentEngine(liveMode: boolean, orModel?: string) {
       setWindowBetPlaced(false)
     }
 
-    // Place bet: LIVE MODE ONLY — trust risk manager, no redundant edge check
+    // Place bet — trust risk manager, no redundant edge check
     const risk = data.agents.risk.output
     if (
-      liveMode &&
       exec.action !== 'PASS' &&
       exec.side != null &&
       exec.limitPrice != null &&
@@ -262,9 +261,8 @@ export function useAgentEngine(liveMode: boolean, orModel?: string) {
 
       let liveOrderId: string | undefined
       let orderError: string | undefined
-      if (liveMode) {
-        try {
-          const orderRes = await fetch('/api/place-order', {
+      try {
+        const orderRes = await fetch('/api/place-order', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -287,7 +285,6 @@ export function useAgentEngine(liveMode: boolean, orModel?: string) {
         } catch (e) {
           orderError = String(e)
         }
-      }
 
       const trade: AgentTrade = {
         id: `${data.cycleId}-${Date.now()}`,
@@ -307,7 +304,6 @@ export function useAgentEngine(liveMode: boolean, orModel?: string) {
         pMarket: prob.pMarket,
         edge: prob.edge,
         liveOrderId,
-        liveMode,
         orderError,
       }
 
@@ -339,7 +335,8 @@ export function useAgentEngine(liveMode: boolean, orModel?: string) {
       }))
       setTrades(prev => prev.map(t => settled.find(s => s.id === t.id) ?? t))
     }
-  }, [liveMode])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => { processResultRef.current = processResult }, [processResult])
 
@@ -549,7 +546,7 @@ export function useAgentEngine(liveMode: boolean, orModel?: string) {
         }
       }
     }
-  }, [liveMode, orModel, processResult, scheduleNextRun])
+  }, [orModel, processResult, scheduleNextRun])
 
   useEffect(() => { runCycleRef.current = runCycle }, [runCycle])
 

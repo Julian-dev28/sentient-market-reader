@@ -272,7 +272,7 @@ export interface AgentTrade {
   pMarket: number
   edge: number
   liveOrderId?: string
-  liveMode: boolean       // true = real Kalshi order attempted
+  liveMode?: boolean
   orderError?: string     // set if live order placement failed
 }
 
