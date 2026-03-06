@@ -362,14 +362,7 @@ export function useAgentEngine(liveMode: boolean, orModel?: string) {
     }
   }, [])
 
-  // Request notification permission when agent starts
-  useEffect(() => {
-    if (active && typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission()
-    }
-  }, [active])
-
-  // ── D-poller: poll BTC price every 30s, fire when |d| > threshold ───────────
+// ── D-poller: poll BTC price every 30s, fire when |d| > threshold ───────────
   const CONFIDENCE_THRESHOLD = 1.0  // |d|>1 → ~84% theoretical WR; achievable at 3-5 min left
 
   const stopDPoller = useCallback(() => {
