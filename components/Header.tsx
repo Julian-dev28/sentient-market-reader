@@ -8,8 +8,6 @@ interface HeaderProps {
   cycleId: number
   isRunning: boolean
   nextCycleIn: number
-  liveMode: boolean
-  onToggleLive: () => void
   lastCompletedAt?: string   // ISO timestamp of last pipeline completion
   onRunCycle?: () => void
 }
@@ -37,7 +35,7 @@ function CycleRing({ seconds, total = 300, running }: { seconds: number; total?:
   )
 }
 
-export default function Header({ cycleId, isRunning, nextCycleIn, liveMode, onToggleLive, lastCompletedAt, onRunCycle }: HeaderProps) {
+export default function Header({ cycleId, isRunning, nextCycleIn, lastCompletedAt, onRunCycle }: HeaderProps) {
   const pathname = usePathname()
   const [time, setTime] = useState('')
   const [dataAgeSec, setDataAgeSec] = useState<number | null>(null)
@@ -116,8 +114,8 @@ export default function Header({ cycleId, isRunning, nextCycleIn, liveMode, onTo
 
         <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
           <span className="pill pill-brown">KXBTC15M</span>
-          <span className={`pill ${liveMode ? 'pill-pink' : 'pill-cream'}`} style={{ transition: 'all 0.3s ease' }}>
-            {liveMode ? '● LIVE' : 'PAPER'}
+          <span className="pill pill-green">
+            ● LIVE
           </span>
           <span className="pill pill-green">15-MIN BTC</span>
         </div>
@@ -125,37 +123,6 @@ export default function Header({ cycleId, isRunning, nextCycleIn, liveMode, onTo
 
       {/* Right controls */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-
-        {/* Live / Paper toggle */}
-        <button
-          onClick={onToggleLive}
-          title={liveMode ? 'Switch to paper trading' : 'Switch to live trading — real Kalshi orders'}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 7,
-            padding: '5px 12px', borderRadius: 9, cursor: 'pointer',
-            border: liveMode ? '1px solid var(--green-dark)' : '1px solid var(--border-bright)',
-            background: liveMode ? 'var(--green-pale)' : 'var(--cream)',
-            transition: 'all 0.25s ease',
-          }}
-        >
-          <div style={{
-            width: 28, height: 15, borderRadius: 8,
-            background: liveMode ? 'var(--green)' : 'var(--border-bright)',
-            position: 'relative', transition: 'background 0.25s', flexShrink: 0,
-          }}>
-            <div style={{
-              position: 'absolute', top: 2,
-              left: liveMode ? 15 : 2,
-              width: 11, height: 11, borderRadius: '50%',
-              background: '#fff',
-              transition: 'left 0.25s cubic-bezier(0.34,1.56,0.64,1)',
-              boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
-            }} />
-          </div>
-          <span style={{ fontSize: 10, fontWeight: 700, color: liveMode ? 'var(--green-dark)' : 'var(--text-muted)', whiteSpace: 'nowrap' }}>
-            {liveMode ? 'LIVE' : 'PAPER'}
-          </span>
-        </button>
 
         {/* Cycle ring + label */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

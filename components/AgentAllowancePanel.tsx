@@ -4,7 +4,6 @@ import { useState, useEffect } from 'react'
 
 interface AgentAllowancePanelProps {
   active: boolean
-  liveMode: boolean
   isRunning: boolean
   allowance: number
   nextCycleIn: number
@@ -21,7 +20,7 @@ interface AgentAllowancePanelProps {
 }
 
 export default function AgentAllowancePanel({
-  active, liveMode, isRunning, allowance, nextCycleIn,
+  active, isRunning, allowance, nextCycleIn,
   windowKey, windowBetPlaced, orderError, currentD, confidenceThreshold = 1.0,
   lastPollAt, onStart, onStop, onSetAllowance, onRunCycle,
 }: AgentAllowancePanelProps) {
@@ -40,10 +39,10 @@ export default function AgentAllowancePanel({
   const mins = Math.floor(nextCycleIn / 60)
   const secs = Math.floor(nextCycleIn % 60)
 
-  const accentCol  = active && liveMode ? 'var(--green)'     : 'var(--blue)'
-  const accentDark = active && liveMode ? 'var(--green-dark)' : '#2e5f82'
-  const accentPale = active && liveMode ? 'var(--green-pale)' : 'rgba(74,127,165,0.08)'
-  const accentBdr  = active && liveMode ? '#9ecfb8'           : '#8ab4cf'
+  const accentCol  = active ? 'var(--green)'      : 'var(--blue)'
+  const accentDark = active ? 'var(--green-dark)' : 'var(--blue-dark)'
+  const accentPale = active ? 'var(--green-pale)' : 'var(--blue-pale)'
+  const accentBdr  = active ? '#164030'           : '#243850'
 
 
   return (
@@ -68,11 +67,11 @@ export default function AgentAllowancePanel({
           </span>
           <span style={{
             fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 4,
-            background: active && liveMode ? 'var(--green-pale)' : 'rgba(74,127,165,0.12)',
+            background: accentPale,
             border: `1px solid ${accentBdr}`,
-            color: active ? accentDark : 'var(--blue)',
+            color: active ? accentDark : 'var(--blue-dark)',
           }}>
-            {active ? (liveMode ? 'LIVE' : 'PAPER') : 'IDLE'}
+            {active ? 'LIVE' : 'IDLE'}
           </span>
         </div>
         {active && (
@@ -130,7 +129,7 @@ export default function AgentAllowancePanel({
 
       {/* Current window status */}
       {windowKey && (
-        <div style={{ marginBottom: 12, padding: '8px 10px', borderRadius: 9, background: 'rgba(255,255,255,0.5)', border: '1px solid var(--border)' }}>
+        <div style={{ marginBottom: 12, padding: '8px 10px', borderRadius: 9, background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
           <div style={{ fontSize: 8, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600, marginBottom: 4 }}>
             Current Window
           </div>
@@ -160,10 +159,10 @@ export default function AgentAllowancePanel({
       {!active ? (
         <button onClick={onStart} style={{
           width: '100%', padding: '12px 0', borderRadius: 9, cursor: 'pointer',
-          border: '1px solid #2e5f82',
-          background: 'linear-gradient(135deg, #2e5f82 0%, var(--blue) 100%)',
+          border: '1px solid var(--green)',
+          background: 'linear-gradient(135deg, #164030 0%, var(--green) 100%)',
           fontSize: 13, fontWeight: 800, color: '#fff', letterSpacing: '0.03em',
-          boxShadow: '0 2px 12px rgba(74,127,165,0.35)',
+          boxShadow: '0 2px 12px rgba(80,168,120,0.25)',
           transition: 'all 0.15s',
         }}
           onMouseEnter={e => { e.currentTarget.style.opacity = '0.88' }}
@@ -174,22 +173,17 @@ export default function AgentAllowancePanel({
       ) : (
         <button onClick={onStop} style={{
           width: '100%', padding: '12px 0', borderRadius: 9, cursor: 'pointer',
-          border: '1px solid #b5687a', background: 'rgba(181,104,122,0.08)',
-          fontSize: 13, fontWeight: 800, color: '#b5687a', letterSpacing: '0.03em',
+          border: '1px solid var(--pink)', background: 'var(--pink-pale)',
+          fontSize: 13, fontWeight: 800, color: 'var(--pink)', letterSpacing: '0.03em',
           transition: 'all 0.15s',
         }}
-          onMouseEnter={e => { e.currentTarget.style.background = '#b5687a'; e.currentTarget.style.color = '#fff' }}
-          onMouseLeave={e => { e.currentTarget.style.background = 'rgba(181,104,122,0.08)'; e.currentTarget.style.color = '#b5687a' }}
+          onMouseEnter={e => { e.currentTarget.style.background = 'var(--pink)'; e.currentTarget.style.color = '#fff' }}
+          onMouseLeave={e => { e.currentTarget.style.background = 'var(--pink-pale)'; e.currentTarget.style.color = 'var(--pink)' }}
         >
           ■ Stop Agent
         </button>
       )}
 
-      {!liveMode && (
-        <div style={{ marginTop: 8, fontSize: 10, color: 'var(--red)', textAlign: 'center', lineHeight: 1.5, fontWeight: 700, background: 'var(--red-pale)', padding: '6px 10px', borderRadius: 7, border: '1px solid var(--red)' }}>
-          ⚠ Enable Live Trading — agent will not place orders in paper mode
-        </div>
-      )}
     </div>
   )
 }
