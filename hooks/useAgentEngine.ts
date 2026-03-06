@@ -95,6 +95,8 @@ export function useAgentEngine(liveMode: boolean, orModel?: string) {
   const [isRunning, setIsRunning]               = useState(false)
   const [nextCycleIn, setNextCycleIn]           = useState(0)
   const [error, setError]                       = useState<string | null>(null)
+  const [orderError, setOrderError]             = useState<string | null>(null)
+  const [currentD, setCurrentD]                 = useState(0)
 
   // Current window tracking — one bet per 15-min window
   const [windowKey, setWindowKey]               = useState<string | null>(null)
@@ -106,13 +108,15 @@ export function useAgentEngine(liveMode: boolean, orModel?: string) {
   const tradesRef         = useRef<AgentTrade[]>([])
   const autoTimeoutRef    = useRef<ReturnType<typeof setTimeout> | null>(null)
   const countdownRef      = useRef<ReturnType<typeof setInterval> | null>(null)
+  const dPollerRef        = useRef<ReturnType<typeof setInterval> | null>(null)
   const nextRunAtRef      = useRef<number>(0)
   const runCycleRef       = useRef<(() => Promise<void>) | null>(null)
   const abortRef          = useRef<AbortController | null>(null)
   const activeRef         = useRef(false)
   const isRunningRef      = useRef(false)
   const processResultRef  = useRef<((data: PipelineState) => Promise<void>) | null>(null)
-  // Track strike for logging/display
+  const orderFailedRef    = useRef(false)
+  const gkVolRef          = useRef(0.002)   // default 0.2%/candle; updated from pipeline
   const strikeRef         = useRef<number>(0)
 
   useEffect(() => { allowanceRef.current = allowance }, [allowance])
@@ -223,8 +227,9 @@ export function useAgentEngine(liveMode: boolean, orModel?: string) {
       ?? md.activeMarket?.ticker.split('-').slice(0, 2).join('-')
       ?? null
 
-    // Track strike for flip detection
+    // Update vol and strike for d-poller
     if (md.strikePrice > 0) strikeRef.current = md.strikePrice
+    if (prob.gkVol15m && prob.gkVol15m > 0) gkVolRef.current = prob.gkVol15m
 
     // New window → allow a fresh bet and reset direction tracking
     if (evTicker && evTicker !== windowKeyRef.current) {
@@ -306,10 +311,13 @@ export function useAgentEngine(liveMode: boolean, orModel?: string) {
       }
 
       setTrades(prev => [...prev, trade])
-      // Only lock the window if the order actually went through
       if (liveOrderId) {
         windowBetRef.current = true
         setWindowBetPlaced(true)
+        setOrderError(null)
+      } else if (orderError) {
+        orderFailedRef.current = true
+        setOrderError(orderError)
       }
     }
 
@@ -340,20 +348,73 @@ export function useAgentEngine(liveMode: boolean, orModel?: string) {
     return () => window.removeEventListener('storage', handler)
   }, [])
 
-  // ── Schedule next run (window-aware) ──────────────────────────────────────
+  // ── D-poller: poll BTC price every 30s, fire when |d| > threshold ───────────
+  const CONFIDENCE_THRESHOLD = 1.3
+
+  const stopDPoller = useCallback(() => {
+    if (dPollerRef.current) { clearInterval(dPollerRef.current); dPollerRef.current = null }
+  }, [])
+
+  const startDPoller = useCallback((closeMs: number) => {
+    stopDPoller()
+
+    const check = async () => {
+      if (!activeRef.current || isRunningRef.current || windowBetRef.current) return
+      const minutesLeft = (closeMs - Date.now()) / 60_000
+
+      if (minutesLeft < MIN_MINUTES_LEFT) {
+        stopDPoller()
+        return  // window closed — runCycle's finally handles next scheduling
+      }
+
+      try {
+        const res = await fetch('/api/btc-price')
+        if (!res.ok) return
+        const { price } = await res.json()
+        if (!price || price <= 0) return
+        const strike = strikeRef.current
+        if (strike <= 0) return
+
+        const vol          = gkVolRef.current
+        const candlesLeft  = minutesLeft / 15
+        const d            = Math.log(price / strike) / (vol * Math.sqrt(candlesLeft))
+        setCurrentD(d)
+
+        if (Math.abs(d) >= CONFIDENCE_THRESHOLD) {
+          stopDPoller()
+          runCycleRef.current?.()
+        }
+      } catch {}
+    }
+
+    check()  // immediate on start
+    dPollerRef.current = setInterval(check, 30_000)
+  }, [stopDPoller])
+
+  // ── Schedule: wait for valid window, then start d-poller ─────────────────
   const scheduleNextRun = useCallback(() => {
     if (!activeRef.current) return
     if (autoTimeoutRef.current) { clearTimeout(autoTimeoutRef.current); autoTimeoutRef.current = null }
+    stopDPoller()
 
-    const { delayMs } = getDelayMs()
-    nextRunAtRef.current = Date.now() + delayMs
-    setNextCycleIn(Math.round(delayMs / 1000))
+    const { delayMs, closeMs, minutesLeft } = getDelayMs()
 
-    autoTimeoutRef.current = setTimeout(() => {
-      if (!activeRef.current) return
-      runCycleRef.current?.()
-    }, delayMs)
-  }, [])
+    if (delayMs === 0) {
+      // Already in valid window — start poller immediately
+      startDPoller(closeMs)
+      nextRunAtRef.current = closeMs - MIN_MINUTES_LEFT * 60_000
+      setNextCycleIn(Math.round((minutesLeft - MIN_MINUTES_LEFT) * 60))
+    } else {
+      // Wait until valid window opens, then start poller
+      nextRunAtRef.current = Date.now() + delayMs
+      setNextCycleIn(Math.round(delayMs / 1000))
+      autoTimeoutRef.current = setTimeout(() => {
+        if (!activeRef.current) return
+        const { closeMs: cm } = getDelayMs()
+        startDPoller(cm)
+      }, delayMs)
+    }
+  }, [startDPoller, stopDPoller])
 
   // ── Core cycle ────────────────────────────────────────────────────────────
   const runCycle = useCallback(async () => {
@@ -437,15 +498,34 @@ export function useAgentEngine(liveMode: boolean, orModel?: string) {
     } finally {
       isRunningRef.current = false
       setIsRunning(false)
+      stopDPoller()
 
-      // Wait until the current window closes + buffer, then schedule next run
       if (activeRef.current) {
-        const waitMs = Math.max(POST_WINDOW_BUFFER_MS, closeMs - Date.now() + POST_WINDOW_BUFFER_MS)
-        nextRunAtRef.current = Date.now() + waitMs
-        setNextCycleIn(Math.round(waitMs / 1000))
-        autoTimeoutRef.current = setTimeout(() => {
-          if (activeRef.current) scheduleNextRun()
-        }, waitMs)
+        const { minutesLeft } = getDelayMs()
+        const failed = orderFailedRef.current
+        orderFailedRef.current = false
+
+        if (failed && minutesLeft >= MIN_MINUTES_LEFT) {
+          // Order failed but window still open — retry d-poller in 60s
+          // so user can fix balance/issue and get another attempt this window
+          const retryMs = 60_000
+          nextRunAtRef.current = Date.now() + retryMs
+          setNextCycleIn(Math.round(retryMs / 1000))
+          autoTimeoutRef.current = setTimeout(() => {
+            if (activeRef.current) {
+              const { closeMs: cm } = getDelayMs()
+              startDPoller(cm)
+            }
+          }, retryMs)
+        } else {
+          // Normal: wait until window closes + buffer, then schedule next window
+          const waitMs = Math.max(POST_WINDOW_BUFFER_MS, closeMs - Date.now() + POST_WINDOW_BUFFER_MS)
+          nextRunAtRef.current = Date.now() + waitMs
+          setNextCycleIn(Math.round(waitMs / 1000))
+          autoTimeoutRef.current = setTimeout(() => {
+            if (activeRef.current) scheduleNextRun()
+          }, waitMs)
+        }
       }
     }
   }, [liveMode, orModel, processResult, scheduleNextRun])
@@ -457,6 +537,7 @@ export function useAgentEngine(liveMode: boolean, orModel?: string) {
     setActive(false)
     activeRef.current = false
     if (autoTimeoutRef.current) { clearTimeout(autoTimeoutRef.current); autoTimeoutRef.current = null }
+    if (dPollerRef.current) { clearInterval(dPollerRef.current); dPollerRef.current = null }
     const c = abortRef.current
     if (c) setTimeout(() => { try { c.abort() } catch {} }, 0)
   }, [])
@@ -490,9 +571,10 @@ export function useAgentEngine(liveMode: boolean, orModel?: string) {
   return {
     active, allowance, initialAllowance,
     trades, pipeline, streamingAgents,
-    isRunning, nextCycleIn, error,
+    isRunning, nextCycleIn, error, orderError,
     stats: computeAgentStats(trades),
     windowKey, windowBetPlaced,
+    currentD, confidenceThreshold: CONFIDENCE_THRESHOLD,
     giveAllowance, setAllowanceAmount, startAgent, stopAgent, runCycle, clearHistory,
   }
 }

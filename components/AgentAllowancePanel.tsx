@@ -10,6 +10,9 @@ interface AgentAllowancePanelProps {
   nextCycleIn: number
   windowKey: string | null
   windowBetPlaced: boolean
+  orderError?: string | null
+  currentD?: number
+  confidenceThreshold?: number
   onStart: () => void
   onStop: () => void
   onSetAllowance: (amount: number) => void
@@ -18,7 +21,8 @@ interface AgentAllowancePanelProps {
 
 export default function AgentAllowancePanel({
   active, liveMode, isRunning, allowance, nextCycleIn,
-  windowKey, windowBetPlaced, onStart, onStop, onSetAllowance, onRunCycle,
+  windowKey, windowBetPlaced, orderError, currentD, confidenceThreshold = 1.3,
+  onStart, onStop, onSetAllowance, onRunCycle,
 }: AgentAllowancePanelProps) {
   const [editing, setEditing] = useState(false)
   const [editVal, setEditVal] = useState('')
@@ -119,12 +123,17 @@ export default function AgentAllowancePanel({
           <div style={{ fontSize: 9, fontFamily: 'var(--font-geist-mono)', color: 'var(--text-secondary)', marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {windowKey}
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-            <div style={{ width: 6, height: 6, borderRadius: '50%', background: windowBetPlaced ? 'var(--green)' : 'var(--amber)', flexShrink: 0 }} />
-            <span style={{ fontSize: 9, fontWeight: 700, color: windowBetPlaced ? 'var(--green-dark)' : 'var(--amber)' }}>
-              {windowBetPlaced ? 'Bet placed' : 'Waiting for signal'}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+            <div style={{ width: 6, height: 6, borderRadius: '50%', background: windowBetPlaced ? 'var(--green)' : orderError ? 'var(--red)' : 'var(--amber)', flexShrink: 0 }} />
+            <span style={{ fontSize: 9, fontWeight: 700, color: windowBetPlaced ? 'var(--green-dark)' : orderError ? 'var(--red)' : 'var(--amber)' }}>
+              {windowBetPlaced ? 'Bet placed' : orderError ? 'Order failed' : currentD !== undefined && Math.abs(currentD) > 0 ? `Watching… d=${Math.abs(currentD).toFixed(2)}/${confidenceThreshold}` : 'Waiting for signal'}
             </span>
           </div>
+          {orderError && (
+            <div style={{ marginTop: 4, fontSize: 8, color: 'var(--red)', fontFamily: 'var(--font-geist-mono)', lineHeight: 1.4, wordBreak: 'break-word' }}>
+              {orderError}
+            </div>
+          )}
         </div>
       )}
 

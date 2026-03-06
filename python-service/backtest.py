@@ -522,12 +522,13 @@ def _process_market(mkt: dict, candles_oldest_first: list[dict], p_llm: Optional
     edge_abs   = abs(p_model - 0.5)
     confidence = 'high' if edge_abs >= 0.20 else 'medium' if edge_abs >= 0.10 else 'low'
 
-    # ── Strategy simulation (mirrors live agent logic) ─────────────────────────
-    # Edge filter: skip near-50/50 and near-strike noise
-    MIN_EDGE      = 0.03   # 3% minimum edge (matches risk manager)
-    MIN_DIST_PCT  = 0.02   # skip within 0.02% of strike
-    if edge_abs < MIN_EDGE or abs(distance_pct) < MIN_DIST_PCT:
-        return None        # NO_TRADE — filtered out
+    # ── Strategy simulation: only bet when |d| > CONFIDENCE_THRESHOLD ─────────
+    # d = log(S/K) / (σ√T) — the Brownian reachability score
+    # |d| > 1.3 → ~90% theoretical win rate; bet is "locked in"
+    CONFIDENCE_THRESHOLD = 1.3
+    d_score = math.log(current_price / floor_strike) / (gk_vol * math.sqrt(candles_left)) if gk_vol > 0 and candles_left > 0 else 0.0
+    if abs(d_score) < CONFIDENCE_THRESHOLD:
+        return None        # Not confident enough — skip this window
 
     # Direction is locked to current position (same as live)
     side      = 'yes' if above_strike else 'no'
