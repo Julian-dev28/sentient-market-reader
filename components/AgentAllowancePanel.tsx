@@ -21,7 +21,7 @@ interface AgentAllowancePanelProps {
 
 export default function AgentAllowancePanel({
   active, liveMode, isRunning, allowance, nextCycleIn,
-  windowKey, windowBetPlaced, orderError, currentD, confidenceThreshold = 1.3,
+  windowKey, windowBetPlaced, orderError, currentD, confidenceThreshold = 1.0,
   onStart, onStop, onSetAllowance, onRunCycle,
 }: AgentAllowancePanelProps) {
   const [editing, setEditing] = useState(false)
