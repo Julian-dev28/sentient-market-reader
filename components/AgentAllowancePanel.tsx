@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 
 interface AgentAllowancePanelProps {
   active: boolean
@@ -13,6 +13,7 @@ interface AgentAllowancePanelProps {
   orderError?: string | null
   currentD?: number
   confidenceThreshold?: number
+  lastPollAt?: number | null
   onStart: () => void
   onStop: () => void
   onSetAllowance: (amount: number) => void
@@ -22,10 +23,19 @@ interface AgentAllowancePanelProps {
 export default function AgentAllowancePanel({
   active, liveMode, isRunning, allowance, nextCycleIn,
   windowKey, windowBetPlaced, orderError, currentD, confidenceThreshold = 1.0,
-  onStart, onStop, onSetAllowance, onRunCycle,
+  lastPollAt, onStart, onStop, onSetAllowance, onRunCycle,
 }: AgentAllowancePanelProps) {
   const [editing, setEditing] = useState(false)
   const [editVal, setEditVal] = useState('')
+  const [secsAgo, setSecsAgo] = useState<number | null>(null)
+
+  useEffect(() => {
+    if (!lastPollAt) { setSecsAgo(null); return }
+    const tick = () => setSecsAgo(Math.round((Date.now() - lastPollAt) / 1000))
+    tick()
+    const id = setInterval(tick, 1000)
+    return () => clearInterval(id)
+  }, [lastPollAt])
 
   const mins = Math.floor(nextCycleIn / 60)
   const secs = Math.floor(nextCycleIn % 60)
@@ -132,6 +142,11 @@ export default function AgentAllowancePanel({
           {orderError && (
             <div style={{ marginTop: 4, fontSize: 8, color: 'var(--red)', fontFamily: 'var(--font-geist-mono)', lineHeight: 1.4, wordBreak: 'break-word' }}>
               {orderError}
+            </div>
+          )}
+          {secsAgo !== null && (
+            <div style={{ marginTop: 4, fontSize: 8, color: 'var(--text-muted)', fontFamily: 'var(--font-geist-mono)' }}>
+              last checked {secsAgo}s ago
             </div>
           )}
         </div>

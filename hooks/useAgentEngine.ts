@@ -97,6 +97,7 @@ export function useAgentEngine(liveMode: boolean, orModel?: string) {
   const [error, setError]                       = useState<string | null>(null)
   const [orderError, setOrderError]             = useState<string | null>(null)
   const [currentD, setCurrentD]                 = useState(0)
+  const [lastPollAt, setLastPollAt]             = useState<number | null>(null)
 
   // Current window tracking — one bet per 15-min window
   const [windowKey, setWindowKey]               = useState<string | null>(null)
@@ -315,9 +316,14 @@ export function useAgentEngine(liveMode: boolean, orModel?: string) {
         windowBetRef.current = true
         setWindowBetPlaced(true)
         setOrderError(null)
+        notify(
+          `Sentient: Bet placed — ${exec.side?.toUpperCase()}`,
+          `${contracts}× @ ${exec.limitPrice}¢ on ${evTicker} | edge ${(prob.edge * 100).toFixed(1)}%`
+        )
       } else if (orderError) {
         orderFailedRef.current = true
         setOrderError(orderError)
+        notify('Sentient: Order failed', orderError)
       }
     }
 
@@ -347,6 +353,21 @@ export function useAgentEngine(liveMode: boolean, orModel?: string) {
     window.addEventListener('storage', handler)
     return () => window.removeEventListener('storage', handler)
   }, [])
+
+  // ── Browser notifications ─────────────────────────────────────────────────
+  const notify = useCallback((title: string, body: string) => {
+    if (typeof window === 'undefined' || !('Notification' in window)) return
+    if (Notification.permission === 'granted') {
+      new Notification(title, { body, icon: '/favicon.ico', tag: 'sentient-agent' })
+    }
+  }, [])
+
+  // Request notification permission when agent starts
+  useEffect(() => {
+    if (active && typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission()
+    }
+  }, [active])
 
   // ── D-poller: poll BTC price every 30s, fire when |d| > threshold ───────────
   const CONFIDENCE_THRESHOLD = 1.0  // |d|>1 → ~84% theoretical WR; achievable at 3-5 min left
@@ -384,9 +405,11 @@ export function useAgentEngine(liveMode: boolean, orModel?: string) {
         const candlesLeft = minutesLeft / 15
         const d           = Math.log(price / strikeRef.current) / (vol * Math.sqrt(candlesLeft))
         setCurrentD(d)
+        setLastPollAt(Date.now())
 
         if (Math.abs(d) >= CONFIDENCE_THRESHOLD) {
           stopDPoller()
+          notify('Sentient: Signal locked', `d=${Math.abs(d).toFixed(2)} — BTC ${d > 0 ? 'above' : 'below'} strike, running analysis`)
           runCycleRef.current?.()
         }
       } catch {}
@@ -579,7 +602,7 @@ export function useAgentEngine(liveMode: boolean, orModel?: string) {
     isRunning, nextCycleIn, error, orderError,
     stats: computeAgentStats(trades),
     windowKey, windowBetPlaced,
-    currentD, confidenceThreshold: CONFIDENCE_THRESHOLD,
+    currentD, confidenceThreshold: CONFIDENCE_THRESHOLD, lastPollAt,
     giveAllowance, setAllowanceAmount, startAgent, stopAgent, runCycle, clearHistory,
   }
 }
