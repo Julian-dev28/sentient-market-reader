@@ -74,16 +74,8 @@ export default function AgentAllowancePanel({
             {active ? 'LIVE' : 'IDLE'}
           </span>
         </div>
-        {active && (
-          <span style={{ fontSize: 9, fontFamily: 'var(--font-geist-mono)', color: 'var(--text-muted)' }}>
-            {isRunning
-              ? <span style={{ animation: 'spin-slow 1s linear infinite', display: 'inline-block' }}>◌</span>
-              : windowBetPlaced
-                ? <span style={{ color: 'var(--green-dark)', fontWeight: 700 }}>bet live ✓</span>
-                : nextCycleIn > 0
-                  ? `↻ ${mins}:${String(secs).padStart(2, '0')}`
-                  : <span style={{ color: 'var(--amber)' }}>watching…</span>}
-          </span>
+        {active && isRunning && (
+          <span style={{ animation: 'spin-slow 1s linear infinite', display: 'inline-block', color: 'var(--blue)', fontSize: 11 }}>◌</span>
         )}
       </div>
 
@@ -127,29 +119,82 @@ export default function AgentAllowancePanel({
         )}
       </div>
 
-      {/* Current window status */}
-      {windowKey && (
-        <div style={{ marginBottom: 12, padding: '8px 10px', borderRadius: 9, background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
-          <div style={{ fontSize: 8, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600, marginBottom: 4 }}>
-            Current Window
-          </div>
-          <div style={{ fontSize: 9, fontFamily: 'var(--font-geist-mono)', color: 'var(--text-secondary)', marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {windowKey}
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
-            <div style={{ width: 6, height: 6, borderRadius: '50%', background: windowBetPlaced ? 'var(--green)' : orderError ? 'var(--red)' : 'var(--amber)', flexShrink: 0 }} />
-            <span style={{ fontSize: 9, fontWeight: 700, color: windowBetPlaced ? 'var(--green-dark)' : orderError ? 'var(--red)' : 'var(--amber)' }}>
-              {windowBetPlaced ? 'Bet placed' : orderError ? 'Order failed' : currentD !== undefined && Math.abs(currentD) > 0 ? `Watching… d=${Math.abs(currentD).toFixed(2)}/${confidenceThreshold}` : 'Waiting for signal'}
+      {/* D-score monitor — always visible when active */}
+      {active && (
+        <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 9, background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
+          {/* Row: label + window key */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+            <span style={{ fontSize: 8, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: 700 }}>
+              D-Score Monitor
             </span>
+            {windowKey && (
+              <span style={{ fontSize: 8, fontFamily: 'var(--font-geist-mono)', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 130 }}>
+                {windowKey.split('-').slice(-2).join('-')}
+              </span>
+            )}
           </div>
-          {orderError && (
-            <div style={{ marginTop: 4, fontSize: 8, color: 'var(--red)', fontFamily: 'var(--font-geist-mono)', lineHeight: 1.4, wordBreak: 'break-word' }}>
-              {orderError}
+
+          {windowBetPlaced ? (
+            /* Bet placed state */
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--green)', boxShadow: '0 0 5px var(--green)', flexShrink: 0 }} />
+              <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--green-dark)' }}>Bet placed this window</span>
+            </div>
+          ) : isRunning ? (
+            /* Pipeline running */
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ animation: 'spin-slow 1s linear infinite', display: 'inline-block', color: 'var(--blue)', fontSize: 11 }}>◌</span>
+              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--blue-dark)' }}>Running pipeline…</span>
+            </div>
+          ) : lastPollAt ? (
+            /* Actively polling — show gauge */
+            <>
+              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 4 }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
+                  <span style={{
+                    fontFamily: 'var(--font-geist-mono)', fontSize: 20, fontWeight: 800, letterSpacing: '-0.03em',
+                    color: Math.abs(currentD ?? 0) >= confidenceThreshold ? 'var(--green-dark)' : 'var(--text-primary)',
+                  }}>
+                    {currentD !== undefined ? (currentD >= 0 ? '+' : '') + currentD.toFixed(3) : '—'}
+                  </span>
+                  <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>/ {currentD !== undefined && currentD < 0 ? '-' : ''}{confidenceThreshold}</span>
+                </div>
+                <span style={{ fontSize: 9, color: 'var(--text-muted)', fontFamily: 'var(--font-geist-mono)' }}>
+                  {secsAgo !== null ? `${secsAgo}s ago` : 'polling…'}
+                </span>
+              </div>
+              {/* Progress bar */}
+              <div style={{ height: 4, borderRadius: 2, background: 'var(--border)', overflow: 'hidden', marginBottom: 4 }}>
+                <div style={{
+                  height: '100%', borderRadius: 2,
+                  width: `${Math.min(100, (Math.abs(currentD ?? 0) / confidenceThreshold) * 100)}%`,
+                  background: Math.abs(currentD ?? 0) >= confidenceThreshold
+                    ? 'var(--green)'
+                    : Math.abs(currentD ?? 0) >= confidenceThreshold * 0.75
+                      ? 'var(--amber)'
+                      : 'var(--blue)',
+                  transition: 'width 0.4s ease, background 0.3s ease',
+                }} />
+              </div>
+              <div style={{ fontSize: 8, color: 'var(--text-muted)' }}>
+                {Math.abs(currentD ?? 0) >= confidenceThreshold
+                  ? '⚡ Threshold crossed — firing pipeline'
+                  : `${((1 - Math.abs(currentD ?? 0) / confidenceThreshold) * 100).toFixed(0)}% to threshold · polling every 30s`}
+              </div>
+            </>
+          ) : (
+            /* Waiting for window to open */
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--border)', flexShrink: 0 }} />
+              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                {nextCycleIn > 0 ? `Starts in ${mins}:${String(secs).padStart(2, '0')}` : 'Waiting for window…'}
+              </span>
             </div>
           )}
-          {secsAgo !== null && (
-            <div style={{ marginTop: 4, fontSize: 8, color: 'var(--text-muted)', fontFamily: 'var(--font-geist-mono)' }}>
-              last checked {secsAgo}s ago
+
+          {orderError && (
+            <div style={{ marginTop: 6, fontSize: 8, color: 'var(--red)', fontFamily: 'var(--font-geist-mono)', lineHeight: 1.4, wordBreak: 'break-word', borderTop: '1px solid var(--border)', paddingTop: 5 }}>
+              ⚠ {orderError}
             </div>
           )}
         </div>
