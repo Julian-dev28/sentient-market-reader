@@ -525,7 +525,6 @@ export function useAgentEngine(orModel?: string) {
 
         if (failed && minutesLeft >= MIN_MINUTES_LEFT) {
           // Order failed but window still open — retry d-poller in 60s
-          // so user can fix balance/issue and get another attempt this window
           const retryMs = 60_000
           nextRunAtRef.current = Date.now() + retryMs
           setNextCycleIn(Math.round(retryMs / 1000))
@@ -535,8 +534,12 @@ export function useAgentEngine(orModel?: string) {
               startDPoller(cm)
             }
           }, retryMs)
+        } else if (!windowBetRef.current && minutesLeft >= MIN_MINUTES_LEFT) {
+          // Pipeline ran but execution was PASS — no bet yet, window still open
+          // Restart d-poller to keep watching for a better entry this window
+          startDPoller(closeMs)
         } else {
-          // Normal: wait until window closes + buffer, then schedule next window
+          // Bet placed or window expired — wait for window close + buffer, then schedule next window
           const waitMs = Math.max(POST_WINDOW_BUFFER_MS, closeMs - Date.now() + POST_WINDOW_BUFFER_MS)
           nextRunAtRef.current = Date.now() + waitMs
           setNextCycleIn(Math.round(waitMs / 1000))
