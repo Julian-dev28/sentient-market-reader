@@ -7,35 +7,11 @@ import { usePathname } from 'next/navigation'
 interface HeaderProps {
   cycleId: number
   isRunning: boolean
-  nextCycleIn: number
   lastCompletedAt?: string   // ISO timestamp of last pipeline completion
   onRunCycle?: () => void
 }
 
-/** SVG ring showing fraction of next-cycle countdown remaining */
-function CycleRing({ seconds, total = 300, running }: { seconds: number; total?: number; running: boolean }) {
-  const r    = 14
-  const circ = 2 * Math.PI * r
-  const frac = running ? 1 : Math.max(0, Math.min(1, seconds / total))
-  const offset = circ * (1 - frac)
-
-  return (
-    <svg width={36} height={36} style={{ transform: 'rotate(-90deg)', flexShrink: 0 }}>
-      <circle cx={18} cy={18} r={r} fill="none" stroke="var(--border)" strokeWidth={2.5} />
-      <circle
-        cx={18} cy={18} r={r} fill="none"
-        stroke={running ? 'var(--pink)' : frac < 0.25 ? 'var(--amber)' : 'var(--green)'}
-        strokeWidth={2.5}
-        strokeDasharray={circ}
-        strokeDashoffset={running ? 0 : offset}
-        strokeLinecap="round"
-        style={{ transition: 'stroke-dashoffset 1s linear, stroke 0.4s ease' }}
-      />
-    </svg>
-  )
-}
-
-export default function Header({ cycleId, isRunning, nextCycleIn, lastCompletedAt, onRunCycle }: HeaderProps) {
+export default function Header({ cycleId, isRunning, lastCompletedAt, onRunCycle }: HeaderProps) {
   const pathname = usePathname()
   const [time, setTime] = useState('')
   const [dataAgeSec, setDataAgeSec] = useState<number | null>(null)
@@ -124,30 +100,6 @@ export default function Header({ cycleId, isRunning, nextCycleIn, lastCompletedA
       {/* Right controls */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
 
-        {/* Cycle ring + label */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <CycleRing seconds={nextCycleIn} running={isRunning} />
-            <div style={{
-              position: 'absolute',
-              fontFamily: 'var(--font-geist-mono)', fontSize: 8, fontWeight: 800,
-              color: isRunning ? 'var(--pink)' : 'var(--text-secondary)',
-              transition: 'color 0.3s',
-            }}>
-              {isRunning ? (
-                <span style={{ animation: 'pulse-dot 0.7s ease infinite', display: 'inline-block' }}>●</span>
-              ) : nextCycleIn}
-            </div>
-          </div>
-          <div>
-            <div style={{ fontSize: 9, color: 'var(--text-muted)', lineHeight: 1 }}>
-              {isRunning ? 'Running' : 'Next cycle'}
-            </div>
-            <div style={{ fontSize: 10, fontWeight: 700, color: isRunning ? 'var(--pink)' : 'var(--text-secondary)', lineHeight: 1.4 }}>
-              {isRunning ? 'ACTIVE' : `${nextCycleIn}s`}
-            </div>
-          </div>
-        </div>
 
         {/* Cycle badge */}
         <div style={{

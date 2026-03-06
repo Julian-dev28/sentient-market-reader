@@ -202,7 +202,6 @@ export default function Home() {
       <Header
         cycleId={pipeline?.cycleId ?? 0}
         isRunning={isRunning}
-        nextCycleIn={nextCycleIn}
         lastCompletedAt={pipeline?.cycleCompletedAt}
         onRunCycle={isRunning || serverLocked ? undefined : runCycle}
       />

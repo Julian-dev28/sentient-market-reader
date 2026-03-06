@@ -19,7 +19,6 @@ export default function AgentPage() {
       <Header
         cycleId={engine.pipeline?.cycleId ?? 0}
         isRunning={engine.isRunning}
-        nextCycleIn={engine.nextCycleIn}
       />
 
       <main style={{ maxWidth: 1200, margin: '0 auto', padding: '18px 16px' }}>
