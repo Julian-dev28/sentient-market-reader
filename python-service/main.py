@@ -663,6 +663,7 @@ def backtest(
     days: int = 3,
     provider: Optional[str] = None,
     roma_mode: str = "blitz",
+    starting_cash: float = 100.0,
     max_llm: int = 20,
     limit: Optional[int] = None,
     model: Optional[str] = None,
@@ -694,7 +695,7 @@ def backtest(
 
     try:
         from backtest import run_backtest
-        records = run_backtest(
+        result = run_backtest(
             days_back=days,
             provider=provider or None,
             api_keys=api_keys or None,
@@ -702,8 +703,9 @@ def backtest(
             max_llm=max_llm,
             limit=limit,
             model_override=model or None,
+            starting_cash=starting_cash,
         )
-        return {"records": records, "count": len(records), "days": days, "provider": provider}
+        return result
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Backtest failed: {str(e)}")
