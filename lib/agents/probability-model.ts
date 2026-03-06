@@ -216,6 +216,15 @@ ${prevContext}`] : []),
 
   pModel = Math.max(0.05, Math.min(0.95, pModel))
 
+  // ── DIRECTION LOCK: always bet the side BTC currently sits on ─────────────
+  // Brownian motion: wherever BTC is now is the best predictor of where it closes.
+  // Never bet against the current position — that just adds reversal noise.
+  // The quant model sets confidence (magnitude), current position sets direction.
+  const aboveStrike = distanceFromStrikePct >= 0
+  if (aboveStrike && pModel < 0.5) pModel = 1 - pModel   // flip to YES
+  if (!aboveStrike && pModel > 0.5) pModel = 1 - pModel  // flip to NO
+  pModel = Math.max(0.05, Math.min(0.95, pModel))
+
   const hurst    = quant.hurstExponent
   const hurstNote = hurst !== null
     ? (hurst > 0.6 ? ` H=${hurst.toFixed(3)}(persist)` : hurst < 0.4 ? ` H=${hurst.toFixed(3)}(mrv)` : ` H=${hurst.toFixed(3)}(rw)`)
@@ -229,10 +238,12 @@ ${prevContext}`] : []),
       ' P_fat=' + (pFatTail !== null ? (pFatTail * 100).toFixed(1) + '% nu=' + quant.fatTailBinary?.nu.toFixed(1) : 'n/a') +
       ' P_brow=' + (pBrownian !== null ? (pBrownian * 100).toFixed(1) + '%' : 'n/a') +
       (pOB !== null ? ' P_OB=' + (pOB * 100).toFixed(1) + '%' : '') +
-      ' -> P_quant=' + (pQuantCombined * 100).toFixed(1) + '%(LOP)' + hurstNote + vovNote + cusumNote + gateNote
+      ' -> P_quant=' + (pQuantCombined * 100).toFixed(1) + '%(LOP)' + hurstNote + vovNote + cusumNote + gateNote +
+      ` DIR_LOCK(${aboveStrike ? 'YES' : 'NO'})`
     : ''
 
-  const recommendation: ProbabilityOutput['recommendation'] = pModel >= 0.5 ? 'YES' : 'NO'
+  // Direction is locked to current BTC position — recommendation always matches
+  const recommendation: ProbabilityOutput['recommendation'] = aboveStrike ? 'YES' : 'NO'
   const edge    = recommendation === 'YES' ? pModel - pMarket : (1 - pModel) - noAsk
   const edgePct = edge * 100
   const edgeAbs = Math.abs(pModel - 0.5)
