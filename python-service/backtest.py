@@ -236,6 +236,7 @@ def _call_roma_for_window(
     provider: str,
     api_keys: dict,
     roma_mode: str = "blitz",
+    model_override: Optional[str] = None,
 ) -> Optional[float]:
     """
     Call the local ROMA /analyze endpoint for one historical market window.
@@ -247,6 +248,9 @@ def _call_roma_for_window(
     dist_usd  = abs(distance_pct / 100) * current_price
     candle_txt = _format_candle_lines(candles_newest, n=8)
 
+    pb_str = f"{p_brownian:.3f}" if p_brownian is not None else "n/a"
+    pl_str = f"{p_ln:.3f}"       if p_ln       is not None else "n/a"
+    pf_str = f"{p_fat:.3f}"      if p_fat      is not None else "n/a"
     context = (
         f"Historical KXBTC15M window: {ticker}\n"
         f"Entry time: {entry_dt.strftime('%Y-%m-%d %H:%M UTC')}\n"
@@ -256,10 +260,7 @@ def _call_roma_for_window(
         f"Minutes until expiry: 7.5\n"
         f"GK realized vol (per-15min candle): {gk_vol:.5f}\n"
         f"1h price momentum: {price_momentum_1h:+.2f}%\n"
-        f"Quant priors: "
-        f"P(brownian)={p_brownian:.3f if p_brownian else 'n/a'} "
-        f"P(lognormal)={p_ln:.3f if p_ln else 'n/a'} "
-        f"P(fat-tail)={p_fat:.3f if p_fat else 'n/a'}\n"
+        f"Quant priors: P(brownian)={pb_str} P(lognormal)={pl_str} P(fat-tail)={pf_str}\n"
         f"Last 8 × 15-min candles (newest first):\n{candle_txt}"
     )
     goal = (
@@ -273,12 +274,13 @@ def _call_roma_for_window(
         resp = _SESSION.post(
             "http://localhost:8001/analyze",
             json={
-                "goal":       goal,
-                "context":    context,
-                "max_depth":  1,
-                "roma_mode":  roma_mode,
-                "provider":   provider,
-                "api_keys":   api_keys or {},
+                "goal":           goal,
+                "context":        context,
+                "max_depth":      1,
+                "roma_mode":      roma_mode,
+                "provider":       provider,
+                "api_keys":       api_keys or {},
+                "model_override": model_override,
             },
             timeout=55,
         )
@@ -614,6 +616,8 @@ def run_backtest(
     api_keys: Optional[dict] = None,
     roma_mode: str = "blitz",
     max_llm: int = 20,
+    limit: Optional[int] = None,
+    model_override: Optional[str] = None,
 ) -> list[dict]:
     """
     Run historical backtest for the last `days_back` days.
@@ -631,10 +635,12 @@ def run_backtest(
     max_llm: max number of markets to enrich with LLM (default 20)
     """
     mode_str = f"LLM({provider}/{roma_mode}, max={max_llm})" if provider else "quant-only"
-    logger.info(f"[BACKTEST] Starting {days_back}d backtest [{mode_str}]")
+    logger.info(f"[BACKTEST] Starting {days_back}d backtest [{mode_str}]{f' limit={limit}' if limit else ''}")
 
     # 1. Settled markets
     markets = fetch_kalshi_settled_markets(days_back)
+    if limit:
+        markets = markets[:limit]
     if not markets:
         logger.warning("[BACKTEST] No settled markets found")
         return []
@@ -715,6 +721,7 @@ def run_backtest(
             provider=provider,
             api_keys=api_keys or {},
             roma_mode=roma_mode,
+            model_override=model_override,
         )
         return ticker, p
 

@@ -8,13 +8,8 @@ import MarketCard from '@/components/MarketCard'
 import PriceChart from '@/components/PriceChart'
 import AgentPipeline from '@/components/AgentPipeline'
 import SignalPanel from '@/components/SignalPanel'
-import TradeLog from '@/components/TradeLog'
-import PerformancePanel from '@/components/PerformancePanel'
 import PositionsPanel from '@/components/PositionsPanel'
 import PipelineHistory from '@/components/PipelineHistory'
-import ChallengePanel from '@/components/ChallengePanel'
-import StrategyPanel from '@/components/StrategyPanel'
-import CalibrationPanel from '@/components/CalibrationPanel'
 
 export default function Home() {
   const [liveMode, setLiveMode]           = useState(false)
@@ -90,7 +85,7 @@ export default function Home() {
     ? parseFloat(liveMarket.yes_sub_title.replace(/[^0-9.]/g, ''))
     : 0) || liveMarket?.floor_strike || 0
 
-  const { pipeline, history, streamingAgents, trades, isRunning, serverLocked, nextCycleIn, error, stats, strikeFlipped, dismissStrikeFlip, runCycle, stopCycle } = usePipeline(
+  const { pipeline, history, streamingAgents, isRunning, serverLocked, nextCycleIn, error, strikeFlipped, dismissStrikeFlip, runCycle, stopCycle } = usePipeline(
     liveMode, botActive, aiRisk, undefined, undefined, orModel || undefined,
     liveBTCPrice || undefined, liveStrikePrice || undefined,
   )
@@ -108,19 +103,28 @@ export default function Home() {
   }, [md?.activeMarket?.ticker])
 
   // ── Trade alert pop-up ─────────────────────────────────────────────────────
-  type TradeAlert = { action: string; side: 'yes' | 'no'; limitPrice: number; ticker: string; edge: number; pModel: number }
+  type TradeAlert = { action: string; side: 'yes' | 'no'; limitPrice: number; ticker: string; edge: number; pModel: number; windowKey: string }
   const [tradeAlert, setTradeAlert]       = useState<TradeAlert | null>(null)
   const [alertStatus, setAlertStatus]     = useState<'idle' | 'placing' | 'ok' | 'err'>('idle')
-  const lastAlertCycleRef                 = useRef<number>(0)
+  const alertShownWindowRef               = useRef<string | null>(null)   // window key alert was shown for
+
+  function getDismissedKey() { return typeof window !== 'undefined' ? localStorage.getItem('alertDismissedWindow') : null }
+  function setDismissedKey(k: string) { localStorage.setItem('alertDismissedWindow', k) }
 
   useEffect(() => {
     if (!pipeline) return
-    const { cycleId } = pipeline
     const ex   = pipeline.agents.execution.output
     const prob = pipeline.agents.probability.output
-    if (ex.action !== 'PASS' && ex.side && ex.limitPrice != null && cycleId > lastAlertCycleRef.current) {
-      lastAlertCycleRef.current = cycleId
-      setTradeAlert({ action: ex.action, side: ex.side as 'yes' | 'no', limitPrice: ex.limitPrice, ticker: ex.marketTicker, edge: prob.edge, pModel: prob.pModel })
+    const mdOut = pipeline.agents.marketDiscovery.output
+    const windowKey = (mdOut.activeMarket as { event_ticker?: string } | undefined)?.event_ticker
+      ?? mdOut.activeMarket?.ticker.split('-').slice(0, 2).join('-')
+      ?? null
+    if (!windowKey) return
+    if (alertShownWindowRef.current === windowKey) return      // already shown this window
+    if (getDismissedKey() === windowKey) return                // user dismissed this window (persists across refresh)
+    if (ex.action !== 'PASS' && ex.side && ex.limitPrice != null) {
+      alertShownWindowRef.current = windowKey
+      setTradeAlert({ action: ex.action, side: ex.side as 'yes' | 'no', limitPrice: ex.limitPrice, ticker: ex.marketTicker, edge: prob.edge, pModel: prob.pModel, windowKey })
       setAlertStatus('idle')
     }
   }, [pipeline])
@@ -472,7 +476,7 @@ export default function Home() {
             {/* Action buttons */}
             {alertStatus === 'idle' && (
               <div style={{ display: 'flex', gap: 8 }}>
-                <button onClick={() => setTradeAlert(null)} style={{
+                <button onClick={() => { setDismissedKey(tradeAlert.windowKey); setTradeAlert(null) }} style={{
                   flex: 1, padding: '10px 0', borderRadius: 9, cursor: 'pointer',
                   border: '1px solid var(--border)', background: 'var(--bg-secondary)',
                   fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)',
@@ -877,19 +881,11 @@ export default function Home() {
             <AgentPipeline pipeline={pipeline} isRunning={isRunning} streamingAgents={streamingAgents} />
             <PipelineHistory history={history} />
 
-            {/* ── Challenge + Strategy — beneath pipeline ── */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <ChallengePanel stats={stats} trades={trades} />
-              <StrategyPanel stats={stats} trades={trades} market={activeMarket} />
-            </div>
           </div>
 
           {/* ─── RIGHT ─── */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <PositionsPanel liveMode={liveMode} />
-            <PerformancePanel stats={stats} trades={trades} />
-            <TradeLog trades={trades} />
-            <CalibrationPanel trades={trades} />
           </div>
         </div>
       </main>

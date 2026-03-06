@@ -57,7 +57,7 @@ export async function placeOrder(params: PlaceOrderParams): Promise<PlaceOrderRe
     count: params.count,
     ...(params.yesPrice !== undefined ? { yes_price: params.yesPrice } : {}),
     ...(params.noPrice  !== undefined ? { no_price:  params.noPrice  } : {}),
-    time_in_force: 'good_till_canceled',
+    time_in_force: 'good_till_canceled',  // rests at ask price until filled
     ...(params.clientOrderId ? { client_order_id: params.clientOrderId } : {}),
   }
 
