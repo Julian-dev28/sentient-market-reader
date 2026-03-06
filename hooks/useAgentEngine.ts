@@ -349,7 +349,7 @@ export function useAgentEngine(liveMode: boolean, orModel?: string) {
   }, [])
 
   // ── D-poller: poll BTC price every 30s, fire when |d| > threshold ───────────
-  const CONFIDENCE_THRESHOLD = 1.3
+  const CONFIDENCE_THRESHOLD = 1.0  // |d|>1 → ~84% theoretical WR; achievable at 3-5 min left
 
   const stopDPoller = useCallback(() => {
     if (dPollerRef.current) { clearInterval(dPollerRef.current); dPollerRef.current = null }
@@ -367,17 +367,22 @@ export function useAgentEngine(liveMode: boolean, orModel?: string) {
         return  // window closed — runCycle's finally handles next scheduling
       }
 
+      // Bootstrap: if we don't have strike yet, run the pipeline once to get it
+      if (strikeRef.current <= 0) {
+        stopDPoller()
+        runCycleRef.current?.()
+        return
+      }
+
       try {
         const res = await fetch('/api/btc-price')
         if (!res.ok) return
         const { price } = await res.json()
         if (!price || price <= 0) return
-        const strike = strikeRef.current
-        if (strike <= 0) return
 
-        const vol          = gkVolRef.current
-        const candlesLeft  = minutesLeft / 15
-        const d            = Math.log(price / strike) / (vol * Math.sqrt(candlesLeft))
+        const vol         = gkVolRef.current
+        const candlesLeft = minutesLeft / 15
+        const d           = Math.log(price / strikeRef.current) / (vol * Math.sqrt(candlesLeft))
         setCurrentD(d)
 
         if (Math.abs(d) >= CONFIDENCE_THRESHOLD) {
