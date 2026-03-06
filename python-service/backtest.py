@@ -454,10 +454,10 @@ def _process_market(mkt: dict, candles_oldest_first: list[dict], p_llm: Optional
         return None
 
     open_dt  = close_dt - timedelta(minutes=15)
-    entry_dt = open_dt  + timedelta(minutes=7, seconds=30)  # mid-window entry
+    entry_dt = open_dt  + timedelta(minutes=10)  # agent enters at 10 min mark (5 min left)
     entry_ts = entry_dt.timestamp()
 
-    minutes_left = 7.5  # time remaining at simulated entry
+    minutes_left = 5.0  # time remaining at simulated entry (matches live TARGET_MINUTES_BEFORE_CLOSE=10)
 
     # Candles complete before entry: a 15-min candle starting at T covers [T, T+900)
     # It's complete when T + 900 <= entry_ts
@@ -492,19 +492,28 @@ def _process_market(mkt: dict, candles_oldest_first: list[dict], p_llm: Optional
             return None
 
     # candles_left = fraction of a 15-min candle remaining at entry
-    candles_left = minutes_left / 15.0  # = 0.5
+    candles_left = minutes_left / 15.0  # = 0.333 at 5 min left
 
     # Three independent quant estimates of P(YES)
     p_brownian = brownian_p_yes(current_price, floor_strike, gk_vol, candles_left)
     p_ln       = lognormal_p_yes(current_price, floor_strike, gk_vol, candles_left)
     p_fat      = fat_tail_p_yes(current_price, floor_strike, gk_vol, candles_left, nu=4.0)
 
-    p_quant = blend_p_model(p_brownian, p_ln, p_fat, minutes_left)
-    p_model = blend_p_model(p_brownian, p_ln, p_fat, minutes_left, p_llm=p_llm)
+    # ── Pure Brownian reachability model (mirrors new live probability-model.ts) ─
+    # P(YES) = Φ(d) where d = log(S/K) / (σ√T)
+    # Direction is LOCKED to current BTC position — never bet against where BTC sits.
+    p_model = p_brownian if p_brownian is not None else (p_ln if p_ln is not None else 0.5)
 
     # Derived signals
     distance_pct   = (current_price - floor_strike) / floor_strike * 100.0
     above_strike   = current_price >= floor_strike
+
+    # Direction lock: mirror pModel if it contradicts current position
+    if above_strike and p_model < 0.5:
+        p_model = 1.0 - p_model
+    elif not above_strike and p_model > 0.5:
+        p_model = 1.0 - p_model
+    p_model = max(0.05, min(0.95, p_model))
 
     # 1h price momentum (4 × 15-min candles ago)
     price_1h_ago = last_32_newest[3]['close'] if len(last_32_newest) >= 4 else current_price
@@ -520,8 +529,8 @@ def _process_market(mkt: dict, candles_oldest_first: list[dict], p_llm: Optional
     if edge_abs < MIN_EDGE or abs(distance_pct) < MIN_DIST_PCT:
         return None        # NO_TRADE — filtered out
 
-    # Bet the direction with edge
-    side      = 'yes' if p_model >= 0.50 else 'no'
+    # Direction is locked to current position (same as live)
+    side      = 'yes' if above_strike else 'no'
     p_win     = p_model if side == 'yes' else (1.0 - p_model)
     limit_price = 50      # cents (historical book not available → assume fair 50¢)
     cost_per  = limit_price / 100.0
@@ -562,7 +571,7 @@ def _process_market(mkt: dict, candles_oldest_first: list[dict], p_llm: Optional
             'minutesLeft':       minutes_left,
             'aboveStrike':       above_strike,
             'priceMomentum1h':   round(price_momentum_1h, 4),
-            'pLLM':              round(p_llm if p_llm is not None else p_quant, 6),
+            'pLLM':              round(p_llm if p_llm is not None else p_model, 6),
             'confidence':        confidence,
         },
         'pnl':       0.0,
