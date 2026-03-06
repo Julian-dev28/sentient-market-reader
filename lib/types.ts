@@ -250,6 +250,44 @@ export interface TradeRecord {
   isBacktest?: boolean
 }
 
+// ─── Agent Engine ────────────────────────────────────────────────────────────
+
+export interface AgentTrade {
+  id: string
+  cycleId: number
+  windowKey: string       // event_ticker identifying the 15-min window
+  sliceNum: number        // 1-based slice index within this window
+  side: 'yes' | 'no'
+  limitPrice: number      // cents
+  contracts: number
+  cost: number            // dollars deployed for this slice
+  marketTicker: string
+  strikePrice: number
+  expiresAt: string
+  enteredAt: string
+  status: 'open' | 'won' | 'lost'
+  pnl?: number            // profit/loss in dollars (net of cost)
+  settlementPrice?: number
+  pModel: number
+  pMarket: number
+  edge: number
+  liveOrderId?: string
+  liveMode: boolean       // true = real Kalshi order attempted
+  orderError?: string     // set if live order placement failed
+}
+
+export interface AgentStats {
+  windowsTraded: number
+  totalSlices: number
+  totalDeployed: number
+  totalPnl: number
+  wins: number
+  losses: number
+  winRate: number
+  bestWindow: number
+  worstWindow: number
+}
+
 // ─── Calibration ────────────────────────────────────────────────────────────
 
 /** Calibration bucket: "when model says X%, how often does YES actually win?" */

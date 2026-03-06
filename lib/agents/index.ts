@@ -7,7 +7,6 @@
  * Pipeline DAG:
  *   MarketDiscovery ──┐
  *   PriceFeed ─────────┼──► SentimentAgent (roma-dspy) ──► ProbabilityModelAgent (roma-dspy) ──► RiskManager ──► Execution
- *   (Orderbook) ───────┘
  */
 
 import type {
@@ -58,10 +57,7 @@ export async function runAgentPipeline(
 ): Promise<PipelineState> {
   const cycleId = ++cycleCounter
   const cycleStartedAt = new Date().toISOString()
-  const mode = romaMode ?? 'blitz'
   const portfolioValue = portfolioValueCents / 100  // convert cents → dollars
-  const sentMode = mode
-  const probMode = mode
 
   // ── Previous cycle context ─────────────────────────────────────────────
   const last = getLastAnalysis()
@@ -77,57 +73,46 @@ export async function runAgentPipeline(
   const pfResult = runPriceFeed(quote, mdResult.output.strikePrice)
   emit?.('priceFeed', pfResult)
 
-  const probProvider = provider2 ?? provider
-  // When provider2 is set, route BOTH sentiment and probability through it so both
-  // parallel stages hit different API rate-limit pools → wall time = max(sent, prob).
-  // Primary provider (grok) is preserved for JSON extraction in both agents.
-  const sentProvider = provider2 ?? provider
-  const sentProviders = providers && providers.length > 1 ? providers : undefined
-const probProviders = providers && providers.length > 1 ? providers : undefined
+  // ── Stage 3: Sentiment — price-based (no Kalshi orderbook) ──────────────
+  const sentResult = await runSentiment(
+    quote,
+    mdResult.output.strikePrice,
+    pfResult.output.distanceFromStrikePct,
+    mdResult.output.minutesUntilExpiry,
+    mdResult.output.activeMarket,
+    null,   // no orderbook — sentiment is purely price-based
+    provider,
+    romaMode,
+    providers,
+    prevContext,
+    candles,
+    liveCandles,
+    derivatives ?? undefined,
+    provider2,
+    orModelOverride,
+    signal,
+    apiKeys,
+  )
+  emit?.('sentiment', sentResult)
 
-  // ── Stages 3 + 4: Sentiment + Probability in parallel ─────────────────
-  // Both solves run on the split provider (openrouter) simultaneously.
-  // Extraction (JSON parsing) stays on the primary provider for reliability.
-  // Wall time = max(sentimentMs, probabilityMs) instead of sent + prob.
-  const [sentResult, probResult] = await Promise.all([
-    runSentiment(
-      quote,
-      mdResult.output.strikePrice,
-      pfResult.output.distanceFromStrikePct,
-      mdResult.output.minutesUntilExpiry,
-      mdResult.output.activeMarket,
-      orderbook,
-      sentProvider,
-      sentMode,
-      sentProviders,
-      prevContext,
-      candles,
-      liveCandles,
-      derivatives ?? undefined,
-      provider,  // extractionProvider — always primary (grok) for reliable tool-call JSON
-      orModelOverride,
-      signal,
-      apiKeys,
-    ).then(r => { emit?.('sentiment', r); return r }),
-    runProbabilityModel(
-      null,   // parallel mode — no sentiment context available yet
-      null,
-      pfResult.output.distanceFromStrikePct,
-      mdResult.output.minutesUntilExpiry,
-      mdResult.output.activeMarket,
-      probProvider,
-      probMode,
-      probProviders,
-      provider,   // extraction always on primary (grok) for reliable tool-call JSON
-      prevContext,
-      candles,
-      liveCandles,
-      derivatives ?? undefined,
-      orModelOverride,
-      signal,
-      apiKeys,
-    ).then(r => { emit?.('probability', r); return r }),
-  ])
+  // ── Stage 4: Probability ───────────────────────────────────────────────────
+  const probResult = await runProbabilityModel(
+    sentResult.output.score,
+    sentResult.output.signals,
+    pfResult.output.distanceFromStrikePct,
+    mdResult.output.minutesUntilExpiry,
+    mdResult.output.activeMarket,
+    provider,
+    undefined, undefined, undefined,
+    prevContext,
+    candles,
+    liveCandles,
+    derivatives ?? undefined,
+    orModelOverride,
+    signal,
+    apiKeys,
+  )
+  emit?.('probability', probResult)
 
   // ── Stage 5: Risk Manager ──────────────────────────────────────────────
   const side = probResult.output.recommendation === 'YES' ? 'yes' : 'no'
@@ -158,6 +143,8 @@ const probProviders = providers && providers.length > 1 ? providers : undefined
         probResult.output.gkVol15m,
         probResult.output.confidence,
         portfolioValue,
+        mdResult.output.minutesUntilExpiry,
+        pfResult.output.distanceFromStrikePct,
       )
   emit?.('risk', riskResult)
 

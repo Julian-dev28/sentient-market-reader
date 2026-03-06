@@ -28,6 +28,9 @@ const RISK_PARAMS = {
   maxDrawdownPct:   15,    // % from peak
   maxTradesPerDay:  48,    // caps at one per 15-min window
   minEdgePct:        3,    // % minimum edge to trade
+  minMinutesLeft:    3,    // skip if < 3 min left (too late to size)
+  maxMinutesLeft:   12,    // skip if > 12 min left (signal not yet settled)
+  minDistancePct:   0.02,  // skip near-strike noise (|dist| < 0.02% → ~50/50)
   baseContractSize: 100,   // floor position size (contracts)
   maxContractSize:  500,   // ceiling position size (contracts)
   maxTradePct:      10,    // % of portfolio — max capital at risk per trade
@@ -57,6 +60,8 @@ export function runRiskManager(
   gkVol15m?: number | null,
   confidence?: 'high' | 'medium' | 'low',
   portfolioValue: number = 500,   // actual Kalshi account value in dollars
+  minutesUntilExpiry?: number,    // minutes remaining in the 15-min window
+  distanceFromStrikePct?: number, // how far BTC is from strike (%)
 ): AgentResult<RiskOutput> {
   const start = Date.now()
   checkDailyReset()
@@ -74,6 +79,15 @@ export function runRiskManager(
   if (recommendation === 'NO_TRADE') {
     approved = false
     rejectionReason = `Edge ${edgePct.toFixed(1)}% below minimum threshold (${RISK_PARAMS.minEdgePct}%)`
+  } else if (minutesUntilExpiry !== undefined && minutesUntilExpiry < RISK_PARAMS.minMinutesLeft) {
+    approved = false
+    rejectionReason = `Too late in window (${minutesUntilExpiry.toFixed(1)}min left < ${RISK_PARAMS.minMinutesLeft}min minimum)`
+  } else if (minutesUntilExpiry !== undefined && minutesUntilExpiry > RISK_PARAMS.maxMinutesLeft) {
+    approved = false
+    rejectionReason = `Too early in window (${minutesUntilExpiry.toFixed(1)}min left > ${RISK_PARAMS.maxMinutesLeft}min — signal not settled)`
+  } else if (distanceFromStrikePct !== undefined && Math.abs(distanceFromStrikePct) < RISK_PARAMS.minDistancePct) {
+    approved = false
+    rejectionReason = `Price too close to strike (${distanceFromStrikePct.toFixed(4)}% — near-strike trades are ~50/50 noise)`
   } else if (
     sentimentScore !== undefined &&
     ((recommendation === 'YES' && sentimentScore < -0.4) ||

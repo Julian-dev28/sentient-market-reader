@@ -664,6 +664,8 @@ def backtest(
     provider: Optional[str] = None,
     roma_mode: str = "blitz",
     max_llm: int = 20,
+    limit: Optional[int] = None,
+    model: Optional[str] = None,
 ):
     """
     Run historical backtest against settled KXBTC15M markets.
@@ -698,6 +700,8 @@ def backtest(
             api_keys=api_keys or None,
             roma_mode=roma_mode,
             max_llm=max_llm,
+            limit=limit,
+            model_override=model or None,
         )
         return {"records": records, "count": len(records), "days": days, "provider": provider}
     except Exception as e:

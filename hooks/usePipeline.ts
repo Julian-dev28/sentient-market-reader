@@ -1,41 +1,9 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import type { PipelineState, PartialPipelineAgents, TradeRecord, TradeSignals, PerformanceStats } from '@/lib/types'
+import type { PipelineState, PartialPipelineAgents } from '@/lib/types'
 
 const CYCLE_INTERVAL_MS = 5 * 60 * 1000  // 5-minute cycles
-const BOT_TRADE_DOLLARS = 100             // fixed $ size per bot trade
-
-function computeStats(trades: TradeRecord[]): PerformanceStats {
-  const settled = trades.filter(t => t.outcome !== 'PENDING')
-  const wins = settled.filter(t => t.outcome === 'WIN')
-  const losses = settled.filter(t => t.outcome === 'LOSS')
-  const totalPnl = settled.reduce((s, t) => s + (t.pnl ?? 0), 0)
-  const pnls = settled.map(t => t.pnl ?? 0)
-
-  return {
-    totalTrades: settled.length,
-    wins: wins.length,
-    losses: losses.length,
-    pending: trades.filter(t => t.outcome === 'PENDING').length,
-    winRate: settled.length > 0 ? wins.length / settled.length : 0,
-    totalPnl,
-    avgEdge: trades.length > 0 ? trades.reduce((s, t) => s + t.edge, 0) / trades.length : 0,
-    avgReturn: settled.length > 0 ? totalPnl / settled.length : 0,
-    bestTrade: pnls.length ? Math.max(...pnls) : 0,
-    worstTrade: pnls.length ? Math.min(...pnls) : 0,
-  }
-}
-
-function simulateOutcome(trade: TradeRecord, settlementPrice: number): TradeRecord {
-  const priceAboveStrike = settlementPrice > trade.strikePrice
-  const win = trade.side === 'yes' ? priceAboveStrike : !priceAboveStrike
-  const pnl = win
-    ? trade.contracts - trade.estimatedCost
-    : -trade.estimatedCost
-
-  return { ...trade, outcome: win ? 'WIN' : 'LOSS', settlementPrice, pnl }
-}
 
 /**
  * usePipeline — drives the agent pipeline.
@@ -59,8 +27,6 @@ export function usePipeline(
   const [pipeline, setPipeline]           = useState<PipelineState | null>(null)
   const [history, setHistory]             = useState<PipelineState[]>([])
   const [streamingAgents, setStreamingAgents] = useState<PartialPipelineAgents>({})
-  const [trades, setTrades]               = useState<TradeRecord[]>([])
-  const [tradesLoaded, setTradesLoaded]   = useState(false)  // guards persist until restore done
   const [isRunning, setIsRunning]         = useState(false)
   const [serverLocked, setServerLocked]   = useState(false)
   // Always start at default to match SSR — corrected from localStorage in useEffect below
@@ -79,11 +45,6 @@ export function usePipeline(
   // so SSR and client both start with the same values and hydration passes.
   useEffect(() => {
     try {
-      const savedTrades = localStorage.getItem('sentient-trades')
-      if (savedTrades) setTrades(JSON.parse(savedTrades) as TradeRecord[])
-    } catch {}
-    setTradesLoaded(true)   // signal that persist effect may now write
-    try {
       const savedPipeline = localStorage.getItem('sentient-pipeline')
       if (savedPipeline) setPipeline(JSON.parse(savedPipeline) as PipelineState)
     } catch {}
@@ -97,13 +58,6 @@ export function usePipeline(
     } catch {}
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-
-  // Persist trades — guarded by tradesLoaded so we never overwrite localStorage
-  // with [] before the restore effect has had a chance to read it.
-  useEffect(() => {
-    if (!tradesLoaded) return
-    try { localStorage.setItem('sentient-trades', JSON.stringify(trades)) } catch {}
-  }, [trades, tradesLoaded])
 
   useEffect(() => {
     if (pipeline) {
@@ -197,86 +151,24 @@ export function usePipeline(
       setHistory(prev => [data, ...prev])
 
       const exec = data.agents.execution.output
-      const md   = data.agents.marketDiscovery.output
-      const pf   = data.agents.priceFeed.output
-      const prob = data.agents.probability.output
-      const sent = data.agents.sentiment.output
 
-      if (exec.action !== 'PASS' && exec.side && exec.limitPrice && md.activeMarket) {
-        // Agent: fixed $100 trade. Manual analysis: use agent's contract count.
-        const contracts    = autoTrade
-          ? Math.max(1, Math.floor(BOT_TRADE_DOLLARS / (exec.limitPrice / 100)))
-          : exec.contracts
-        const estimatedCost = contracts * exec.limitPrice / 100
-
-        let liveOrderId: string | undefined
-
-        // ── Real order: ONLY when Agent is active ──────────────────────────────
-        if (autoTrade && liveMode) {
-          try {
-            const orderRes = await fetch('/api/place-order', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                ticker: exec.marketTicker,
-                side: exec.side,
-                count: contracts,
-                yesPrice: exec.side === 'yes' ? exec.limitPrice : (100 - exec.limitPrice),
-                clientOrderId: `bot-${data.cycleId}-${Date.now()}`,
-              }),
-            })
-            if (orderRes.ok) {
-              const orderData = await orderRes.json()
-              liveOrderId = orderData.order?.order_id
-            }
-          } catch { /* live order failed — still record as paper */ }
-        }
-
-        // ── Full signal snapshot for calibration/attribution ──────────────────
-        const signals: TradeSignals = {
-          sentimentScore:    sent.score ?? 0,
-          sentimentMomentum: sent.momentum ?? 0,
-          orderbookSkew:     sent.orderbookSkew ?? 0,
-          sentimentLabel:    sent.label ?? 'neutral',
-          pLLM:              prob.pModel,  // pModel IS the blended LLM+quant value
-          confidence:        prob.confidence ?? 'low',
-          gkVol:             prob.gkVol15m ?? null,
-          distancePct:       pf.distanceFromStrikePct,
-          minutesLeft:       md.minutesUntilExpiry,
-          aboveStrike:       pf.aboveStrike,
-          priceMomentum1h:   pf.priceChangePct1h,
-        }
-
-        const trade: TradeRecord = {
-          id: `${data.cycleId}-${Date.now()}`,
-          cycleId: data.cycleId,
-          marketTicker: exec.marketTicker,
-          side: exec.side,
-          limitPrice: exec.limitPrice,
-          contracts,
-          estimatedCost,
-          enteredAt: new Date().toISOString(),
-          expiresAt: md.activeMarket.close_time,
-          strikePrice: md.strikePrice,
-          btcPriceAtEntry: pf.currentPrice,
-          outcome: 'PENDING',
-          pModel: prob.pModel,
-          pMarket: prob.pMarket,
-          edge: prob.edge,
-          signals,
-          liveOrderId,
-          liveMode: autoTrade && liveMode,
-        }
-        setTrades(prev => [...prev, trade])
+      // ── Real order: ONLY when Agent is active ──────────────────────────────
+      if (autoTrade && liveMode && exec.action !== 'PASS' && exec.side && exec.limitPrice && exec.marketTicker) {
+        const contracts = Math.max(1, Math.floor(100 / (exec.limitPrice / 100)))
+        try {
+          await fetch('/api/place-order', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              ticker: exec.marketTicker,
+              side: exec.side,
+              count: contracts,
+              yesPrice: exec.side === 'yes' ? exec.limitPrice : (100 - exec.limitPrice),
+              clientOrderId: `bot-${data.cycleId}-${Date.now()}`,
+            }),
+          })
+        } catch { /* live order failed — continue */ }
       }
-
-      // Settle expired pending trades
-      setTrades(prev => prev.map(t => {
-        if (t.outcome === 'PENDING' && Date.now() >= new Date(t.expiresAt).getTime()) {
-          return simulateOutcome(t, pf.currentPrice)
-        }
-        return t
-      }))
 
     } catch (err) {
       // Next.js 16 Turbopack throws "BodyStreamBuffer was aborted" instead of
@@ -343,9 +235,7 @@ export function usePipeline(
     return () => { if (countdownRef.current) clearInterval(countdownRef.current) }
   }, [])
 
-  const stats = computeStats(trades)
-
   const dismissStrikeFlip = useCallback(() => setStrikeFlipped(false), [])
 
-  return { pipeline, history, streamingAgents, trades, isRunning, serverLocked, nextCycleIn, error, stats, strikeFlipped, dismissStrikeFlip, runCycle, stopCycle }
+  return { pipeline, history, streamingAgents, isRunning, serverLocked, nextCycleIn, error, strikeFlipped, dismissStrikeFlip, runCycle, stopCycle }
 }

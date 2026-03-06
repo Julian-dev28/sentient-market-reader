@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import { usePathname } from 'next/navigation'
 
 interface HeaderProps {
   cycleId: number
@@ -37,6 +38,7 @@ function CycleRing({ seconds, total = 300, running }: { seconds: number; total?:
 }
 
 export default function Header({ cycleId, isRunning, nextCycleIn, liveMode, onToggleLive, lastCompletedAt, onRunCycle }: HeaderProps) {
+  const pathname = usePathname()
   const [time, setTime] = useState('')
   const [dataAgeSec, setDataAgeSec] = useState<number | null>(null)
 
@@ -89,6 +91,26 @@ export default function Header({ cycleId, isRunning, nextCycleIn, liveMode, onTo
             </div>
           </div>
         </div>
+
+        <div style={{ height: 22, width: 1, background: 'var(--border)', margin: '0 2px' }} />
+
+        {/* Page nav */}
+        {(['/dashboard', '/agent'] as const).map((href, i) => {
+          const label = i === 0 ? 'Dashboard' : 'Agent'
+          const active = pathname === href
+          return (
+            <Link key={href} href={href} style={{
+              fontSize: 11, fontWeight: active ? 800 : 600,
+              padding: '3px 10px', borderRadius: 7, textDecoration: 'none',
+              border: active ? '1.5px solid var(--blue)' : '1px solid transparent',
+              background: active ? 'rgba(74,127,165,0.10)' : 'transparent',
+              color: active ? 'var(--blue)' : 'var(--text-muted)',
+              transition: 'all 0.15s',
+            }}>
+              {label}
+            </Link>
+          )
+        })}
 
         <div style={{ height: 22, width: 1, background: 'var(--border)', margin: '0 2px' }} />
 

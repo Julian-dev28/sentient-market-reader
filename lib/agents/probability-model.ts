@@ -66,6 +66,7 @@ export async function runProbabilityModel(
   const start = Date.now()
 
   const pMarket  = market ? market.yes_ask / 100 : 0.5
+  const noAsk    = market ? market.no_ask  / 100 : 0.5  // cost of NO  — used for NO  edge
   const spread   = market ? (market.yes_ask - market.yes_bid) / 100 : 0.05
   const distSign = distanceFromStrikePct >= 0 ? '+' : ''
 
@@ -159,88 +160,19 @@ ${prevContext}`] : []),
     ` Clamp to [0.05, 0.95]. Recommendation is automatic: P≥0.50 → YES, P<0.50 → NO.` +
     ` Time remaining: ${minutesUntilExpiry.toFixed(1)}min. BTC is ${distanceFromStrikePct >= 0 ? 'ABOVE' : 'BELOW'} strike by ${Math.abs(distanceFromStrikePct).toFixed(3)}%.`
 
-  // Depth controlled by ROMA_MAX_DEPTH env var (default 1). ROMA treats 0 as unlimited — never send 0.
-  const maxDepth = 1
-  const pythonResult = await callPythonRoma(goal, context, maxDepth, 4, romaMode, provider, providers, orModelOverride, signal, apiKeys)
-  const romaAnswer = pythonResult.answer
-  const agentLabel = `ProbabilityModelAgent (roma-dspy · ${pythonResult.provider})`
-  const romaTrace  = formatRomaTrace(pythonResult)
+  // ── Pure quant mode — no LLM call ────────────────────────────────────────────
+  // ROMA solve skipped. pModel derives entirely from physics priors (GK vol,
+  // Brownian, fat-tail Student-t, Cornish-Fisher) via Logarithmic Opinion Pool.
+  // Backtested 54.8% accuracy over 1000 windows — LLM blending reduced this.
+  const agentLabel = 'ProbabilityModelAgent (quant)'
 
-  // Use fast tier for extraction — always on the primary provider (grok), never on the
-  // split provider2, since smaller HF models can't reliably produce tool-call JSON.
-  const extracted = await llmToolCall<{
-    pModel: number
-    confidence: ProbabilityOutput['confidence']
-  }>({
-    provider: extractionProvider ?? provider,
-    tier: 'fast',
-    maxTokens: romaMode === 'blitz' ? 256 : 512,
-    toolName: 'extract_probability',
-    toolDescription: 'Extract probability estimate from ROMA analysis',
-    schema: {
-      properties: {
-        pModel:     { type: 'number', description: 'Estimated P(YES) 0.0–1.0 that BTC ends above strike at window close' },
-        confidence: { type: 'string', enum: ['high', 'medium', 'low'], description: 'Confidence in the probability estimate based on signal alignment' },
-      },
-      required: ['pModel', 'confidence'],
-    },
-    prompt: `Extract the probability estimate from this ROMA analysis. Return ONLY pModel (P(BTC > strike)) and confidence.
-
-${romaAnswer}`,
-  })
-
-  const pLLM = Math.max(0, Math.min(1, extracted.pModel))
-
-  // ── Quantitative prior combination via Logarithmic Opinion Pool ──────────────
-  // Three independent quant estimates of P(YES):
-  //   pBrownian — mean absolute return, no-drift Brownian motion
-  //   pLN       — log-normal binary (Black-Scholes digital) with normal CDF
-  //   pFatTail  — log-normal binary with Student-t(ν=4) CDF [preferred: heavier BTC tails]
-  //
-  // LOP is used instead of linear average: p_lop ∝ p1^w1 × p2^w2
-  // This preserves forecast sharpness — linear averages regress probabilities toward 0.5.
-  // ── Hard time-distance gate ───────────────────────────────────────────────
-  // When BTC must cover a large distance but velocity is insufficient, clamp the LLM's
-  // P(YES) estimate before blending — prevents narrative overriding physics.
-  // Applies in both directions:
-  //   BTC below strike: caps P(YES) down — can't reach strike = NO wins
-  //   BTC above strike: floors P(YES) up — can't fall to strike = YES wins
-  let pLLMGated = pLLM
-  if (minutesUntilExpiry > 0 && spotApprox > 0) {
-    const distUSD    = Math.abs(distanceFromStrikePct / 100) * spotApprox
-    const reqVel     = distUSD / minutesUntilExpiry   // $/min needed to cross strike
-    // Gate window scales with distance: larger gap → check further out
-    const gateWindow = Math.max(8, Math.min(13, distUSD / 20))  // ~8–13 min
-    if (minutesUntilExpiry <= gateWindow && quant.velocity) {
-      const curVel       = quant.velocity.velocityPerMin
-      const movingToward = (distanceFromStrikePct < 0 && curVel > 0) || (distanceFromStrikePct > 0 && curVel < 0)
-      const velRatio     = reqVel > 0 ? Math.abs(curVel) / reqVel : 0
-      // Trigger gate: not heading toward strike, OR pace is < 55% of what's needed
-      if (!movingToward || velRatio < 0.55) {
-        pLLMGated = distanceFromStrikePct < 0
-          ? Math.min(pLLM, 0.20)  // BTC below strike, can't recover → cap P(YES)
-          : Math.max(pLLM, 0.80)  // BTC above strike, can't fall far enough → floor P(YES)
-      }
-    } else if (minutesUntilExpiry <= gateWindow && !quant.velocity) {
-      // No velocity data — use physics model directly (no LLM override needed)
-      // but still clamp extreme LLM estimates when distance is large
-      if (distUSD > 200 && minutesUntilExpiry < 5) {
-        pLLMGated = distanceFromStrikePct < 0
-          ? Math.min(pLLM, 0.25)
-          : Math.max(pLLM, 0.75)
-      }
-    }
-  }
-
-  let pModel = pLLMGated
-  let quantBlendNote = ''
+  // ── Logarithmic Opinion Pool of physics priors ────────────────────────────
   const pBrownian = quant.brownianPrior?.pQuant ?? null
   const pLN       = quant.lnBinary?.pYes ?? null
   const pFatTail  = quant.fatTailBinary?.pYesFat ?? null
   const pSkewAdj  = quant.skewAdjBinary?.pYesSkewAdj ?? null
   const pOB       = quant.obImpliedProb ?? null
 
-  // Physics priors — priority: Cornish-Fisher (skew+kurt+σ) > fat-tail (dynamic ν+σ) > LN (σ only) > Brownian
   const pPhysicsCombined =
     pSkewAdj  !== null && pFatTail  !== null ? logOpinionPool(pSkewAdj, pFatTail,   0.50, 0.50) :
     pSkewAdj  !== null && pBrownian !== null ? logOpinionPool(pSkewAdj, pBrownian,  0.55, 0.45) :
@@ -248,65 +180,65 @@ ${romaAnswer}`,
     pBrownian !== null && pLN       !== null ? logOpinionPool(pBrownian, pLN,       0.50, 0.50) :
     (pSkewAdj ?? pFatTail ?? pBrownian ?? pLN)
 
-  // Blend in orderbook crowd signal at low weight (15%) — orthogonal auxiliary input
   const pQuantCombined = pPhysicsCombined !== null && pOB !== null
     ? logOpinionPool(pPhysicsCombined, pOB, 0.85, 0.15)
     : pPhysicsCombined
 
-  if (pQuantCombined !== null) {
-    // ── Time-based quant weight (physics dominates near expiry) ──────────────
-    // Cap raised to 0.85: near expiry the math is more reliable than LLM narrative
-    let alpha = Math.max(0.15, Math.min(0.85, 1 - minutesUntilExpiry / 15))
+  let pModel = pQuantCombined ?? 0.5
 
-    // ── Hurst: long-memory regime modulates quant vs LLM trust ───────────────
-    const hurst = quant.hurstExponent
-    let hurstNote = ''
-    if (hurst !== null) {
-      if      (hurst > 0.6) { alpha = Math.max(0.10, alpha - 0.08); hurstNote = ` H=${hurst.toFixed(3)}(persist↓α)` }
-      else if (hurst < 0.4) { alpha = Math.min(0.80, alpha + 0.08); hurstNote = ` H=${hurst.toFixed(3)}(mrv↑α)`    }
-      else                  {                                         hurstNote = ` H=${hurst.toFixed(3)}(rw)`       }
+  // ── Hard reachability gate (physics cannot be wished away) ────────────────
+  let gateNote = ''
+  if (minutesUntilExpiry > 0 && spotApprox > 0) {
+    const distUSD    = Math.abs(distanceFromStrikePct / 100) * spotApprox
+    const reqVel     = distUSD / minutesUntilExpiry
+    const gateWindow = Math.max(8, Math.min(13, distUSD / 20))
+    if (minutesUntilExpiry <= gateWindow && quant.velocity) {
+      const curVel       = quant.velocity.velocityPerMin
+      const movingToward = (distanceFromStrikePct < 0 && curVel > 0) || (distanceFromStrikePct > 0 && curVel < 0)
+      const velRatio     = reqVel > 0 ? Math.abs(curVel) / reqVel : 0
+      if (!movingToward || velRatio < 0.55) {
+        const gated = distanceFromStrikePct < 0
+          ? Math.min(pModel, 0.20)
+          : Math.max(pModel, 0.80)
+        gateNote = ` GATE(vel=${curVel.toFixed(2)}/min,ratio=${(velRatio * 100).toFixed(0)}%->${(gated * 100).toFixed(1)}%)`
+        pModel = gated
+      }
+    } else if (minutesUntilExpiry <= gateWindow && !quant.velocity) {
+      if (distUSD > 200 && minutesUntilExpiry < 5) {
+        const gated = distanceFromStrikePct < 0
+          ? Math.min(pModel, 0.25)
+          : Math.max(pModel, 0.75)
+        gateNote = ` GATE(no-vel,dist=$${distUSD.toFixed(0)}->${(gated * 100).toFixed(1)}%)`
+        pModel = gated
+      }
     }
-
-    // ── Vol-of-Vol: unstable vol → less reliable quant models ────────────────
-    let vovNote = ''
-    const vov = quant.volOfVol
-    if (vov !== null && vov > 1.0) {
-      alpha = Math.max(0.08, alpha - 0.08)
-      vovNote = ` VoV=${vov.toFixed(2)}(unstable↓α)`
-    }
-
-    // ── CUSUM: structural break invalidates diffusion models ──────────────────
-    let cusumNote = ''
-    if (quant.cusum?.jumpDetected) {
-      alpha = Math.max(0.08, alpha - 0.12)
-      cusumNote = ` JUMP(${quant.cusum.direction}↓α)`
-    }
-
-    // ── Final blend: LLM^(1-α) × Quant^α via Log Opinion Pool ───────────────
-    const pBlended = logOpinionPool(pLLMGated, pQuantCombined, 1 - alpha, alpha)
-    pModel = Math.max(0, Math.min(1, pBlended))
-
-    const gateNote = pLLMGated !== pLLM ? ` LLM_gated=${(pLLMGated * 100).toFixed(1)}%` : ''
-    quantBlendNote =
-      ` | P_CF=${pSkewAdj !== null ? (pSkewAdj * 100).toFixed(1) + '%' : 'n/a'}` +
-      ` P_fatTail=${pFatTail !== null ? (pFatTail * 100).toFixed(1) + '%' + (pFatTail
-        ? ` ν=${quant.fatTailBinary?.nu.toFixed(1)}` : '') : 'n/a'}` +
-      ` P_brownian=${pBrownian !== null ? (pBrownian * 100).toFixed(1) + '%' : 'n/a'}` +
-      (pOB !== null ? ` P_OB=${(pOB * 100).toFixed(1)}%` : '') +
-      ` P_quant=${(pQuantCombined * 100).toFixed(1)}%(LOP)` +
-      ` α=${alpha.toFixed(2)}${hurstNote}${vovNote}${cusumNote}${gateNote}` +
-      ` → P_blend=${(pBlended * 100).toFixed(1)}%`
   }
 
-  // Recommendation is purely directional: P(model) ≥ 50% = YES (BTC ends above strike), else NO.
-  // Edge vs market is secondary — it informs confidence and sizing, not direction.
-  const recommendation: ProbabilityOutput['recommendation'] = pModel >= 0.5 ? 'YES' : 'NO'
+  pModel = Math.max(0.05, Math.min(0.95, pModel))
 
-  // Edge = how favorable is the RECOMMENDED trade?
-  //   rec=YES: pModel > pMarket → positive = YES underpriced → buy YES is +EV
-  //   rec=NO:  pMarket > pModel → positive = NO underpriced (market overprices YES) → buy NO is +EV
-  const edge    = recommendation === 'YES' ? pModel - pMarket : pMarket - pModel
+  const hurst    = quant.hurstExponent
+  const hurstNote = hurst !== null
+    ? (hurst > 0.6 ? ` H=${hurst.toFixed(3)}(persist)` : hurst < 0.4 ? ` H=${hurst.toFixed(3)}(mrv)` : ` H=${hurst.toFixed(3)}(rw)`)
+    : ''
+  const vov     = quant.volOfVol
+  const vovNote  = vov !== null && vov > 1.0 ? ` VoV=${vov.toFixed(2)}(unstable)` : ''
+  const cusumNote = quant.cusum?.jumpDetected ? ` JUMP(${quant.cusum.direction})` : ''
+
+  const quantBlendNote = pQuantCombined !== null
+    ? ' | P_CF=' + (pSkewAdj !== null ? (pSkewAdj * 100).toFixed(1) + '%' : 'n/a') +
+      ' P_fat=' + (pFatTail !== null ? (pFatTail * 100).toFixed(1) + '% nu=' + quant.fatTailBinary?.nu.toFixed(1) : 'n/a') +
+      ' P_brow=' + (pBrownian !== null ? (pBrownian * 100).toFixed(1) + '%' : 'n/a') +
+      (pOB !== null ? ' P_OB=' + (pOB * 100).toFixed(1) + '%' : '') +
+      ' -> P_quant=' + (pQuantCombined * 100).toFixed(1) + '%(LOP)' + hurstNote + vovNote + cusumNote + gateNote
+    : ''
+
+  const recommendation: ProbabilityOutput['recommendation'] = pModel >= 0.5 ? 'YES' : 'NO'
+  const edge    = recommendation === 'YES' ? pModel - pMarket : (1 - pModel) - noAsk
   const edgePct = edge * 100
+  const edgeAbs = Math.abs(pModel - 0.5)
+  const confidence: ProbabilityOutput['confidence'] = edgeAbs >= 0.15 ? 'high' : edgeAbs >= 0.07 ? 'medium' : 'low'
+
+  void normalCDF
 
   return {
     agentName: agentLabel,
@@ -314,13 +246,11 @@ ${romaAnswer}`,
     output: {
       pModel, pMarket, edge, edgePct,
       recommendation,
-      confidence:     extracted.confidence,
-      provider:       pythonResult.provider,
-      gkVol15m:       quant.gkVol15m,
+      confidence,
+      provider: 'quant',
+      gkVol15m: quant.gkVol15m,
     },
-    reasoning: romaTrace + `
-
-P(LLM)=${(pLLM * 100).toFixed(1)}%${quantBlendNote} → P(final)=${(pModel * 100).toFixed(1)}% vs P(market)=${(pMarket * 100).toFixed(1)}% — edge: ${edgePct >= 0 ? '+' : ''}${edgePct.toFixed(1)}%. Rec: ${recommendation} (${extracted.confidence}) [direction from P≥50%]`,
+    reasoning: 'Quant-only probability model' + quantBlendNote + '\n\nP(final)=' + (pModel * 100).toFixed(1) + '% vs P(market)=' + (pMarket * 100).toFixed(1) + '% — edge: ' + (edgePct >= 0 ? '+' : '') + edgePct.toFixed(1) + '%. Rec: ' + recommendation + ' (' + confidence + ')',
     durationMs: Date.now() - start,
     timestamp: new Date().toISOString(),
   }
