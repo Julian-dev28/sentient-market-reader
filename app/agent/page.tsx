@@ -112,7 +112,7 @@ export default function AgentPage() {
               pipeline={engine.pipeline}
               isRunning={engine.isRunning}
             />
-            <AgentTradeLog trades={engine.trades} />
+            <AgentTradeLog trades={engine.trades} onClearHistory={engine.clearHistory} />
           </div>
 
           {/* RIGHT — Stats */}

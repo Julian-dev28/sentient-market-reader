@@ -513,22 +513,45 @@ def _process_market(mkt: dict, candles_oldest_first: list[dict], p_llm: Optional
     edge_abs   = abs(p_model - 0.5)
     confidence = 'high' if edge_abs >= 0.20 else 'medium' if edge_abs >= 0.10 else 'low'
 
+    # ── Strategy simulation (mirrors live agent logic) ─────────────────────────
+    # Edge filter: skip near-50/50 and near-strike noise
+    MIN_EDGE      = 0.03   # 3% minimum edge (matches risk manager)
+    MIN_DIST_PCT  = 0.02   # skip within 0.02% of strike
+    if edge_abs < MIN_EDGE or abs(distance_pct) < MIN_DIST_PCT:
+        return None        # NO_TRADE — filtered out
+
+    # Bet the direction with edge
+    side      = 'yes' if p_model >= 0.50 else 'no'
+    p_win     = p_model if side == 'yes' else (1.0 - p_model)
+    limit_price = 50      # cents (historical book not available → assume fair 50¢)
+    cost_per  = limit_price / 100.0
+
+    # Outcome from model's perspective
+    actual_result = result  # 'yes' or 'no'
+    won = (side == actual_result)
+
+    # Half-Kelly sizing (placeholder contracts=1; actual sizing done in run_backtest)
+    b      = (100 - limit_price) / limit_price   # net odds = 1.0 at 50¢
+    kelly  = max(0.0, (b * p_win - (1.0 - p_win)) / b)
+    half_k = kelly * 0.5
+
     return {
         'id':              f'bt-{ticker}',
-        'cycleId':         -1,          # sentinel: backtest record
+        'cycleId':         -1,
         'marketTicker':    ticker,
-        'side':            'yes',       # always YES — measuring P(YES) calibration
-        'limitPrice':      50,          # cents
-        'contracts':       1,
-        'estimatedCost':   0.50,
+        'side':            side,
+        'limitPrice':      limit_price,
+        'contracts':       1,           # will be scaled by run_backtest Kelly sim
+        'estimatedCost':   cost_per,
         'enteredAt':       entry_dt.isoformat(),
         'expiresAt':       close_dt.isoformat(),
         'strikePrice':     floor_strike,
         'btcPriceAtEntry': current_price,
-        'outcome':         'WIN' if result == 'yes' else 'LOSS',
+        'outcome':         'WIN' if won else 'LOSS',
         'pModel':          round(p_model, 6),
-        'pMarket':         0.50,        # historical market price not available
+        'pMarket':         0.50,
         'edge':            round(p_model - 0.50, 6),
+        'halfKelly':       round(half_k, 6),
         'signals': {
             'sentimentScore':    0.0,
             'sentimentMomentum': 0.0,
@@ -608,6 +631,52 @@ def _extract_llm_inputs(mkt: dict, candles_oldest_first: list[dict]) -> Optional
     }
 
 
+# ── P&L simulation helper ─────────────────────────────────────────────────────
+
+def _build_result(records: list[dict], starting_cash: float, days: int) -> dict:
+    """Simulate half-Kelly compounding on the backtest records and return summary."""
+    cash = starting_cash
+    for r in records:
+        half_k   = r.get('halfKelly', 0.0)
+        limit_p  = r['limitPrice'] / 100.0
+        bet      = min(cash * half_k, cash * 0.10)  # cap at 10% of bankroll
+        bet      = max(0.0, bet)
+        contracts = max(1, int(bet / limit_p)) if limit_p > 0 else 1
+        cost     = contracts * limit_p
+        if cost > cash:
+            contracts = max(1, int(cash / limit_p))
+            cost = contracts * limit_p
+        if r['outcome'] == 'WIN':
+            pnl = contracts * (1.0 - limit_p)   # net gain per contract
+        else:
+            pnl = -cost
+        cash = max(0.0, cash + pnl)
+        r['contracts']     = contracts
+        r['estimatedCost'] = round(cost, 4)
+        r['pnl']           = round(pnl, 4)
+
+    wins   = [r for r in records if r['outcome'] == 'WIN']
+    losses = [r for r in records if r['outcome'] == 'LOSS']
+    total_pnl = sum(r['pnl'] for r in records)
+
+    return {
+        'records': records,
+        'count':   len(records),
+        'days':    days,
+        'provider': None,
+        'summary': {
+            'starting_cash':    round(starting_cash, 2),
+            'final_cash':       round(cash, 2),
+            'total_pnl':        round(total_pnl, 2),
+            'total_return_pct': round((cash - starting_cash) / starting_cash * 100, 2) if starting_cash > 0 else 0,
+            'total_trades':     len(records),
+            'wins':             len(wins),
+            'losses':           len(losses),
+            'win_rate':         round(len(wins) / len(records), 4) if records else 0,
+        },
+    }
+
+
 # ── Main orchestrator ─────────────────────────────────────────────────────────
 
 def run_backtest(
@@ -618,7 +687,8 @@ def run_backtest(
     max_llm: int = 20,
     limit: Optional[int] = None,
     model_override: Optional[str] = None,
-) -> list[dict]:
+    starting_cash: float = 100.0,
+) -> dict:
     """
     Run historical backtest for the last `days_back` days.
 
@@ -643,7 +713,7 @@ def run_backtest(
         markets = markets[:limit]
     if not markets:
         logger.warning("[BACKTEST] No settled markets found")
-        return []
+        return _build_result([], starting_cash, days_back)
 
     # 2. Date range for BTC candles
     close_times = []
@@ -665,7 +735,7 @@ def run_backtest(
     candles = fetch_btc_candles_bulk(earliest, latest)
     if len(candles) < 10:
         logger.warning(f"[BACKTEST] Only {len(candles)} candles fetched — aborting")
-        return []
+        return _build_result([], starting_cash, days_back)
 
     # 4. Quant pass — compute all records without LLM
     quant_records: list[dict] = []
@@ -686,7 +756,7 @@ def run_backtest(
             f"[BACKTEST] Done — {len(quant_records)} records produced, "
             f"{skipped} skipped (of {len(markets)} total markets)"
         )
-        return quant_records
+        return _build_result(quant_records, starting_cash, days_back)
 
     # 5. LLM enrichment pass — parallel ROMA calls for a sample of markets
     from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -764,4 +834,4 @@ def run_backtest(
         f"({llm_enriched} LLM-enriched, {len(final_records) - llm_enriched} quant-only), "
         f"{skipped} skipped"
     )
-    return final_records
+    return _build_result(final_records, starting_cash, days_back)

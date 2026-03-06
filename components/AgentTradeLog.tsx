@@ -2,7 +2,7 @@
 
 import type { AgentTrade } from '@/lib/types'
 
-export default function AgentTradeLog({ trades }: { trades: AgentTrade[] }) {
+export default function AgentTradeLog({ trades, onClearHistory }: { trades: AgentTrade[]; onClearHistory?: () => void }) {
   // Group by window, newest first
   const windowKeys = [...new Set([...trades].reverse().map(t => t.windowKey))]
 
@@ -10,11 +10,25 @@ export default function AgentTradeLog({ trades }: { trades: AgentTrade[] }) {
     <div className="card">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
         <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>Agent Trade Log</div>
-        {trades.length > 0 && (
-          <span className="pill pill-brown" style={{ animation: 'scaleIn 0.25s ease' }}>
-            {trades.length} bet{trades.length !== 1 ? 's' : ''}
-          </span>
-        )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          {trades.length > 0 && (
+            <span className="pill pill-brown" style={{ animation: 'scaleIn 0.25s ease' }}>
+              {trades.length} bet{trades.length !== 1 ? 's' : ''}
+            </span>
+          )}
+          {trades.length > 0 && onClearHistory && (
+            <button
+              onClick={onClearHistory}
+              style={{
+                fontSize: 9, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase',
+                color: 'var(--text-muted)', background: 'none', border: '1px solid var(--border)',
+                borderRadius: 4, padding: '2px 7px', cursor: 'pointer',
+              }}
+            >
+              Clear
+            </button>
+          )}
+        </div>
       </div>
 
       {trades.length === 0 ? (

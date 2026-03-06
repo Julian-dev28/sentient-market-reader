@@ -42,18 +42,20 @@ function getDelayMs(): { delayMs: number; closeMs: number; minutesLeft: number }
 }
 
 function computeAgentStats(trades: AgentTrade[]): AgentStats {
-  const settled = trades.filter(t => t.status !== 'open')
-  const wins = settled.filter(t => t.status === 'won')
+  // Only count confirmed live orders — exclude failed attempts (no liveOrderId)
+  const confirmed = trades.filter(t => t.liveOrderId)
+  const settled   = confirmed.filter(t => t.status !== 'open')
+  const wins      = settled.filter(t => t.status === 'won')
 
-  const windowKeys = [...new Set(trades.map(t => t.windowKey))]
+  const windowKeys = [...new Set(confirmed.map(t => t.windowKey))]
   const windowPnls = windowKeys.map(wk =>
-    trades.filter(t => t.windowKey === wk).reduce((s, t) => s + (t.pnl ?? 0), 0)
+    confirmed.filter(t => t.windowKey === wk).reduce((s, t) => s + (t.pnl ?? 0), 0)
   )
 
   return {
     windowsTraded: windowKeys.length,
-    totalSlices: trades.length,
-    totalDeployed: trades.reduce((s, t) => s + t.cost, 0),
+    totalSlices: confirmed.length,
+    totalDeployed: confirmed.reduce((s, t) => s + t.cost, 0),
     totalPnl: settled.reduce((s, t) => s + (t.pnl ?? 0), 0),
     wins: wins.length,
     losses: settled.length - wins.length,
@@ -119,7 +121,9 @@ export function useAgentEngine(liveMode: boolean, orModel?: string) {
   useEffect(() => {
     try {
       const saved = localStorage.getItem('sentient-agent-trades')
-      const parsed: AgentTrade[] = saved ? JSON.parse(saved) : []
+      const all: AgentTrade[] = saved ? JSON.parse(saved) : []
+      // Auto-purge failed trades (no liveOrderId) on mount — keep only confirmed orders
+      const parsed = all.filter(t => t.liveOrderId)
       if (parsed.length > 0) {
         setTrades(parsed)
         // Only lock window if there's a confirmed live order (not a failed attempt)
@@ -194,6 +198,16 @@ export function useAgentEngine(liveMode: boolean, orModel?: string) {
     allowanceRef.current = n
   }, [])
 
+  const clearHistory = useCallback(() => {
+    setTrades([])
+    tradesRef.current = []
+    windowKeyRef.current = null
+    windowBetRef.current = false
+    setWindowKey(null)
+    setWindowBetPlaced(false)
+    try { localStorage.removeItem('sentient-agent-trades') } catch {}
+  }, [])
+
   // ── Process pipeline result ────────────────────────────────────────────────
   const processResult = useCallback(async (data: PipelineState) => {
     setPipeline(data)
@@ -215,14 +229,13 @@ export function useAgentEngine(liveMode: boolean, orModel?: string) {
       setWindowBetPlaced(false)
     }
 
-    // Place bet: LIVE MODE ONLY — no paper trades
+    // Place bet: LIVE MODE ONLY — trust risk manager, no redundant edge check
     const risk = data.agents.risk.output
     if (
       liveMode &&
       exec.action !== 'PASS' &&
       exec.side != null &&
       exec.limitPrice != null &&
-      Math.abs(prob.edge) >= 0.03 &&
       risk.approved &&
       md.activeMarket &&
       evTicker &&
@@ -295,10 +308,10 @@ export function useAgentEngine(liveMode: boolean, orModel?: string) {
       }
     }
 
-    // Settle expired trades using actual Kalshi market result
+    // Settle expired trades — only confirmed live orders (liveOrderId present)
     const now = Date.now()
     const expiredTrades = tradesRef.current.filter(
-      t => t.status === 'open' && now >= new Date(t.expiresAt).getTime()
+      t => t.status === 'open' && t.liveOrderId && now >= new Date(t.expiresAt).getTime()
     )
     if (expiredTrades.length > 0) {
       const settled = await Promise.all(expiredTrades.map(async t => {
@@ -475,6 +488,6 @@ export function useAgentEngine(liveMode: boolean, orModel?: string) {
     isRunning, nextCycleIn, error,
     stats: computeAgentStats(trades),
     windowKey, windowBetPlaced,
-    giveAllowance, setAllowanceAmount, startAgent, stopAgent, runCycle,
+    giveAllowance, setAllowanceAmount, startAgent, stopAgent, runCycle, clearHistory,
   }
 }
