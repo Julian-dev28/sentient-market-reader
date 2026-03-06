@@ -85,6 +85,7 @@ export default function AgentPage() {
               orderError={engine.orderError}
               currentD={engine.currentD}
               confidenceThreshold={engine.confidenceThreshold}
+              lastPollAt={engine.lastPollAt}
               onStart={handleStart}
               onStop={engine.stopAgent}
               onSetAllowance={engine.setAllowanceAmount}
