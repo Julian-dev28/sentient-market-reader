@@ -76,144 +76,28 @@ function Fact({ label, value, color, mono = true }: { label: string; value: stri
   )
 }
 
-// ── Running loader ──────────────────────────────────────────────────────────
-function RomaLoader({ elapsed }: { elapsed: number }) {
-  const sec    = elapsed / 1000
-  const mins   = Math.floor(sec / 60)
-  const secs   = Math.floor(sec % 60)
-  const timeStr = `${mins}:${String(secs).padStart(2, '0')}`
-
-  const visibleLogs = LOG_MESSAGES.filter(([t]) => sec >= t).slice(-5)
-
+// ── Running indicator (minimal scan bar) ────────────────────────────────────
+function ScanLoader({ elapsed }: { elapsed: number }) {
+  const sec = (elapsed / 1000).toFixed(1)
   return (
-    <div style={{ padding: '2px 0' }}>
-
-      {/* ── Stage pipeline ── */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', marginBottom: 20, padding: '8px 4px 0' }}>
-        {ROMA_STAGES.map((stage, i) => {
-          const active = sec >= stage.startAt && sec < stage.endAt
-          const done   = sec >= stage.endAt
-
-          return (
-            <div key={stage.id} style={{ display: 'flex', alignItems: 'center', flex: 1, minWidth: 0 }}>
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, flex: 'none', position: 'relative' }}>
-
-                {active && ([64, 52] as const).map((size, ri) => (
-                  <div key={ri} style={{
-                    position: 'absolute', top: '50%', left: '50%',
-                    transform: 'translate(-50%, -62%)',
-                    width: size + 20, height: size + 20, borderRadius: '50%',
-                    border: `1px solid rgba(${stage.rgb},${0.3 - ri * 0.1})`,
-                    animation: `rippleOut 1.6s ease-out ${ri * 0.5}s infinite`,
-                    pointerEvents: 'none',
-                  }} />
-                ))}
-
-                <div style={{
-                  width: 58, height: 58, borderRadius: '50%',
-                  border: `2px solid ${(active || done) ? stage.color : 'var(--border)'}`,
-                  background: done
-                    ? `rgba(${stage.rgb},0.12)`
-                    : active ? `rgba(${stage.rgb},0.07)`
-                    : 'rgba(255,255,255,0.5)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: done ? 16 : 20,
-                  color: (active || done) ? stage.color : 'var(--text-light)',
-                  transition: 'all 0.5s cubic-bezier(0.34,1.56,0.64,1)',
-                  boxShadow: active
-                    ? `0 0 0 4px rgba(${stage.rgb},0.12), 0 0 20px 4px rgba(${stage.rgb},0.18)`
-                    : 'none',
-                  position: 'relative', overflow: 'hidden',
-                }}>
-                  {active && (
-                    <div style={{
-                      position: 'absolute', inset: 0, borderRadius: '50%',
-                      background: `conic-gradient(from 0deg, transparent 70%, rgba(${stage.rgb},0.28) 100%)`,
-                      animation: 'spin-slow 1.8s linear infinite',
-                    }} />
-                  )}
-                  <span style={{ position: 'relative', zIndex: 1, animation: active ? 'iconBeat 1.2s ease-in-out infinite' : 'none' }}>
-                    {done ? '✓' : stage.icon}
-                  </span>
-                </div>
-
-                <span style={{
-                  fontSize: 9, fontWeight: 700, letterSpacing: '0.08em',
-                  color: active ? stage.color : done ? stage.color + 'bb' : 'var(--text-light)',
-                  textTransform: 'uppercase', textAlign: 'center', lineHeight: 1.2,
-                  maxWidth: 60, whiteSpace: 'nowrap',
-                  transition: 'color 0.4s',
-                }}>{stage.label}</span>
-              </div>
-
-              {i < ROMA_STAGES.length - 1 && (
-                <div style={{
-                  flex: 1, height: 3, margin: '0 6px', marginBottom: 24,
-                  background: done ? `rgba(${stage.rgb},0.3)` : 'var(--border)',
-                  position: 'relative', overflow: 'hidden',
-                  borderRadius: 2, transition: 'background 0.6s ease',
-                }}>
-                  {(active || (sec >= stage.startAt && sec < ROMA_STAGES[i + 1].endAt)) && [0, 0.35, 0.7].map((delay, di) => (
-                    <div key={di} style={{
-                      position: 'absolute', top: '50%', transform: 'translateY(-50%)',
-                      width: 6, height: 6, borderRadius: '50%',
-                      background: stage.color,
-                      animation: `dataPacket 1.1s ${delay}s linear infinite`,
-                    }} />
-                  ))}
-                  {done && (
-                    <div style={{
-                      position: 'absolute', inset: 0,
-                      background: `linear-gradient(90deg, rgba(${stage.rgb},0.45), rgba(${stage.rgb},0.15))`,
-                    }} />
-                  )}
-                </div>
-              )}
-            </div>
-          )
-        })}
-      </div>
-
-      {/* ── Terminal log ── */}
-      <div style={{
-        borderRadius: 10,
-        background: 'rgba(26,24,20,0.03)',
-        border: '1px solid var(--border)',
-        overflow: 'hidden',
-      }}>
+    <div style={{ padding: '24px 0 20px' }}>
+      {/* Scan bar */}
+      <div style={{ position: 'relative', height: 2, borderRadius: 1, background: 'var(--border)', overflow: 'hidden', marginBottom: 20 }}>
         <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '7px 14px',
-          borderBottom: '1px solid var(--border)',
-          background: 'rgba(26,24,20,0.02)',
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-            <span className="status-dot running" style={{ width: 6, height: 6 }} />
-            <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 9, fontWeight: 700, letterSpacing: '0.1em', color: 'var(--text-muted)', textTransform: 'uppercase' }}>roma · solve</span>
-          </div>
-          <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)' }}>{timeStr}</span>
+          position: 'absolute', top: 0, left: 0, height: '100%', width: '40%',
+          background: 'linear-gradient(90deg, transparent, var(--green), transparent)',
+          animation: 'scanLine 1.2s ease-in-out infinite',
+        }} />
+      </div>
+      {/* Status */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span className="status-dot running" style={{ width: 6, height: 6 }} />
+          <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 10, color: 'var(--text-muted)', letterSpacing: '0.06em' }}>
+            SCANNING MARKET
+          </span>
         </div>
-
-        <div style={{ padding: '10px 14px', minHeight: 78, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', gap: 4 }}>
-          {visibleLogs.map(([t, msg], idx) => {
-            const isLatest = idx === visibleLogs.length - 1
-            return (
-              <div key={t} style={{
-                display: 'flex', alignItems: 'center', gap: 10,
-                opacity: isLatest ? 1 : 0.35 + idx * 0.12,
-                animation: isLatest ? 'logEntry 0.25s ease forwards' : 'none',
-              }}>
-                <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 9.5, color: isLatest ? 'var(--brown)' : 'var(--text-light)', flexShrink: 0 }}>
-                  {String(Math.floor(t / 60)).padStart(1, '0')}:{String(t % 60).padStart(2, '0')}
-                </span>
-                <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 10.5, color: isLatest ? 'var(--text-primary)' : 'var(--text-muted)', lineHeight: 1.4 }}>
-                  {msg}
-                  {isLatest && <span style={{ animation: 'blink 0.9s step-end infinite', marginLeft: 2, color: 'var(--blue)' }}>▌</span>}
-                </span>
-              </div>
-            )
-          })}
-        </div>
+        <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 10, color: 'var(--text-muted)', opacity: 0.5 }}>{sec}s</span>
       </div>
     </div>
   )
@@ -799,26 +683,30 @@ export default function AgentPipeline({
   return (
     <div className="card" style={{ padding: '18px 18px 16px' }}>
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-        <div>
-          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '-0.01em' }}>ROMA Agent Pipeline</div>
-          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2, letterSpacing: '0.02em' }}>
-            Atomizer → Planner → Executors → Aggregator → Extract
+      <div style={{ marginBottom: isRunning ? 10 : 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: isRunning ? 8 : 0 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '-0.01em' }}>
+            Quant Pipeline
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {pipeline && <span className="pill pill-brown">cycle #{pipeline.cycleId}</span>}
           </div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          {isRunning && (
-            <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--pink)', fontWeight: 600 }}>
-              <span className="status-dot running" /> Running
-            </span>
-          )}
-          {pipeline && !isRunning && <span className="pill pill-brown">cycle #{pipeline.cycleId}</span>}
-        </div>
+        {/* Scan bar — visible whenever pipeline is running */}
+        {isRunning && (
+          <div style={{ position: 'relative', height: 2, borderRadius: 1, background: 'var(--border)', overflow: 'hidden' }}>
+            <div style={{
+              position: 'absolute', top: 0, left: 0, height: '100%', width: '40%',
+              background: 'linear-gradient(90deg, transparent, var(--green), transparent)',
+              animation: 'scanLine 1.2s ease-in-out infinite',
+            }} />
+          </div>
+        )}
       </div>
 
       {/* Body */}
       {isRunning && !Object.keys(streamingAgents ?? {}).length ? (
-        <RomaLoader elapsed={elapsedMs} />
+        <ScanLoader elapsed={elapsedMs} />
       ) : (isRunning || pipeline) ? (
         <>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>

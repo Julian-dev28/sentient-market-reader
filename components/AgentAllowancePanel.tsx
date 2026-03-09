@@ -1,11 +1,13 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 
 interface AgentAllowancePanelProps {
   active: boolean
   isRunning: boolean
   allowance: number
+  bankroll: number
+  kellyMode: boolean
   nextCycleIn: number
   windowKey: string | null
   windowBetPlaced: boolean
@@ -13,29 +15,53 @@ interface AgentAllowancePanelProps {
   currentD?: number
   confidenceThreshold?: number
   lastPollAt?: number | null
-  onStart: () => void
+  strikePrice?: number
+  gkVol?: number
+  onStart: (kellyMode: boolean, bankroll: number, kellyPct: number) => void
   onStop: () => void
-  onSetAllowance: (amount: number) => void
+  onSetAllowance: (amount: number, kellyMode?: boolean, bankroll?: number) => void
   onRunCycle: () => void
 }
 
 export default function AgentAllowancePanel({
-  active, isRunning, allowance, nextCycleIn,
-  windowKey, windowBetPlaced, orderError, currentD, confidenceThreshold = 1.0,
-  lastPollAt, onStart, onStop, onSetAllowance, onRunCycle,
+  active, isRunning, allowance, bankroll, kellyMode, nextCycleIn,
+  windowKey, windowBetPlaced, orderError, currentD: serverD, confidenceThreshold = 1.0,
+  lastPollAt, strikePrice, gkVol = 0.002, onStart, onStop, onSetAllowance,
 }: AgentAllowancePanelProps) {
-  const [editing, setEditing] = useState(false)
+  const [editingBankroll, setEditingBankroll] = useState(false)
   const [editVal, setEditVal] = useState('')
-  const [secsAgo, setSecsAgo] = useState<number | null>(null)
+  const [localKelly, setLocalKelly] = useState(kellyMode)
+  const [localBankroll, setLocalBankroll] = useState(bankroll || 400)
+  const [kellyPct, setKellyPct] = useState(25)
+  const [liveD, setLiveD] = useState<number | undefined>(serverD)
+  const liveDRef = useRef<number | undefined>(serverD)
 
+  useEffect(() => { setLiveD(serverD); liveDRef.current = serverD }, [serverD])
+  useEffect(() => { setLocalKelly(kellyMode) }, [kellyMode])
+  useEffect(() => { if (bankroll > 0) setLocalBankroll(bankroll) }, [bankroll])
+
+  // Fetch BTC price every 2s and recompute d locally
   useEffect(() => {
-    if (!lastPollAt) { setSecsAgo(null); return }
-    const tick = () => setSecsAgo(Math.round((Date.now() - lastPollAt) / 1000))
-    tick()
-    const id = setInterval(tick, 1000)
+    if (!active || !strikePrice || strikePrice <= 0) return
+    const compute = async () => {
+      try {
+        const res = await fetch('/api/btc-price', { cache: 'no-store' })
+        if (!res.ok) return
+        const { price } = await res.json()
+        if (!price || price <= 0) return
+        const minutesLeft = 7
+        const candlesLeft = minutesLeft / 15
+        const d = Math.log(price / strikePrice) / (gkVol * Math.sqrt(candlesLeft))
+        setLiveD(d)
+        liveDRef.current = d
+      } catch {}
+    }
+    compute()
+    const id = setInterval(compute, 2_000)
     return () => clearInterval(id)
-  }, [lastPollAt])
+  }, [active, strikePrice, gkVol])
 
+  const currentD = liveD
   const mins = Math.floor(nextCycleIn / 60)
   const secs = Math.floor(nextCycleIn % 60)
 
@@ -44,6 +70,9 @@ export default function AgentAllowancePanel({
   const accentPale = active ? 'var(--green-pale)' : 'var(--blue-pale)'
   const accentBdr  = active ? '#164030'           : '#243850'
 
+  const perTrade = localKelly
+    ? Math.max(1, (localBankroll * kellyPct) / 100)
+    : allowance
 
   return (
     <div className="card bracket-card" style={{
@@ -67,62 +96,141 @@ export default function AgentAllowancePanel({
           </span>
           <span style={{
             fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 4,
-            background: accentPale,
-            border: `1px solid ${accentBdr}`,
+            background: accentPale, border: `1px solid ${accentBdr}`,
             color: active ? accentDark : 'var(--blue-dark)',
           }}>
             {active ? 'LIVE' : 'IDLE'}
           </span>
+          {(active ? kellyMode : localKelly) && (
+            <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 4, background: 'var(--amber-pale)', border: '1px solid var(--amber)', color: 'var(--amber)' }}>
+              KELLY
+            </span>
+          )}
         </div>
         {active && isRunning && (
           <span style={{ animation: 'spin-slow 1s linear infinite', display: 'inline-block', color: 'var(--blue)', fontSize: 11 }}>◌</span>
         )}
       </div>
 
-      {/* Allowance hero — click to edit */}
-      <div
-        onClick={() => { if (!editing) { setEditVal(allowance.toFixed(2)); setEditing(true) } }}
-        style={{ padding: '10px 12px', borderRadius: 10, background: 'var(--bg-secondary)', border: `1px solid ${editing ? 'var(--blue)' : 'var(--border-bright)'}`, marginBottom: 12, cursor: editing ? 'default' : 'text', transition: 'border-color 0.15s' }}
-      >
-        <div style={{ fontSize: 8, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: 600, marginBottom: 2 }}>
-          Bet per trade {!active && !editing && <span style={{ color: 'var(--blue)', fontStyle: 'normal' }}>· tap to edit</span>}
+      {/* Kelly / Fixed toggle — only show when not active */}
+      {!active && (
+        <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+          {(['Fixed', 'Kelly'] as const).map(mode => (
+            <button key={mode} onClick={() => setLocalKelly(mode === 'Kelly')} style={{
+              flex: 1, padding: '5px 0', borderRadius: 7, cursor: 'pointer', fontSize: 11, fontWeight: 700,
+              border: `1px solid ${(mode === 'Kelly') === localKelly ? 'var(--brown)' : 'var(--border)'}`,
+              background: (mode === 'Kelly') === localKelly ? 'var(--brown-pale)' : 'transparent',
+              color: (mode === 'Kelly') === localKelly ? 'var(--brown-dark)' : 'var(--text-muted)',
+              transition: 'all 0.15s',
+            }}>
+              {mode}
+            </button>
+          ))}
         </div>
-        {editing ? (
-          <input
-            autoFocus
-            type="number" min="1" step="10"
-            value={editVal}
-            onChange={e => setEditVal(e.target.value)}
-            onBlur={() => {
-              const n = parseFloat(editVal)
-              if (!isNaN(n) && n > 0) onSetAllowance(n)
-              setEditing(false)
-            }}
-            onKeyDown={e => {
-              if (e.key === 'Enter') { (e.target as HTMLInputElement).blur() }
-              if (e.key === 'Escape') { setEditing(false) }
-            }}
-            style={{
-              fontFamily: 'var(--font-geist-mono)', fontSize: 24, fontWeight: 800,
-              color: 'var(--brown)', letterSpacing: '-0.02em',
-              background: 'transparent', border: 'none', outline: 'none',
-              width: '100%', padding: 0,
-            }}
-          />
-        ) : (
-          <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 24, fontWeight: 800, color: allowance > 0 ? 'var(--brown)' : 'var(--red)', letterSpacing: '-0.02em' }}>
-            ${allowance.toFixed(2)}
-          </div>
-        )}
-        {allowance <= 0 && !editing && (
-          <div style={{ fontSize: 9, color: 'var(--red)', marginTop: 2 }}>Set a bet amount to continue</div>
-        )}
-      </div>
+      )}
 
-      {/* D-score monitor — always visible when active */}
+      {/* Bet config */}
+      {localKelly && !active ? (
+        /* Kelly mode: bankroll + pct inputs */
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ padding: '10px 12px', borderRadius: 10, background: 'var(--bg-secondary)', border: '1px solid var(--border-bright)', marginBottom: 8 }}>
+            <div style={{ fontSize: 8, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: 600, marginBottom: 4 }}>
+              Total Bankroll
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 18, fontWeight: 800, color: 'var(--text-secondary)' }}>$</span>
+              <input
+                type="number" min="10" step="10"
+                value={localBankroll}
+                onChange={e => setLocalBankroll(parseFloat(e.target.value) || 0)}
+                style={{
+                  fontFamily: 'var(--font-geist-mono)', fontSize: 22, fontWeight: 800,
+                  color: 'var(--brown)', letterSpacing: '-0.02em',
+                  background: 'transparent', border: 'none', outline: 'none', width: '100%', padding: 0,
+                }}
+              />
+            </div>
+          </div>
+
+          {/* Kelly percentage slider */}
+          <div style={{ padding: '10px 12px', borderRadius: 10, background: 'var(--bg-secondary)', border: '1px solid var(--border-bright)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+              <span style={{ fontSize: 8, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: 600 }}>
+                Per Trade
+              </span>
+              <span style={{ fontSize: 8, fontFamily: 'var(--font-geist-mono)', color: 'var(--amber)', fontWeight: 700 }}>
+                {kellyPct}% = ${Math.max(1, (localBankroll * kellyPct / 100)).toFixed(2)}
+              </span>
+            </div>
+            <input
+              type="range" min="5" max="50" step="5"
+              value={kellyPct}
+              onChange={e => setKellyPct(parseInt(e.target.value))}
+              style={{ width: '100%', accentColor: 'var(--amber)' }}
+            />
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 2 }}>
+              <span style={{ fontSize: 7, color: 'var(--text-muted)' }}>5% safe</span>
+              <span style={{ fontSize: 7, color: 'var(--text-muted)' }}>25% optimal</span>
+              <span style={{ fontSize: 7, color: 'var(--red)' }}>50% risky</span>
+            </div>
+          </div>
+        </div>
+      ) : kellyMode && active ? (
+        /* Kelly mode active: show live bankroll */
+        <div style={{ padding: '10px 12px', borderRadius: 10, background: 'var(--bg-secondary)', border: '1px solid var(--border-bright)', marginBottom: 12 }}>
+          <div style={{ fontSize: 8, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: 600, marginBottom: 2 }}>
+            Bankroll · auto-compounding
+          </div>
+          <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 22, fontWeight: 800, color: 'var(--amber)', letterSpacing: '-0.02em' }}>
+            ${bankroll.toFixed(2)}
+          </div>
+          <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2 }}>
+            Next bet: <span style={{ color: 'var(--amber)', fontWeight: 700 }}>${allowance.toFixed(2)}</span> ({Math.round(allowance / bankroll * 100)}% of bankroll)
+          </div>
+        </div>
+      ) : (
+        /* Fixed mode: tap to edit allowance */
+        <div
+          onClick={() => { if (!editingBankroll) { setEditVal(allowance.toFixed(2)); setEditingBankroll(true) } }}
+          style={{ padding: '10px 12px', borderRadius: 10, background: 'var(--bg-secondary)', border: `1px solid ${editingBankroll ? 'var(--blue)' : 'var(--border-bright)'}`, marginBottom: 12, cursor: editingBankroll ? 'default' : 'text', transition: 'border-color 0.15s' }}
+        >
+          <div style={{ fontSize: 8, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: 600, marginBottom: 2 }}>
+            Bet per trade {!active && !editingBankroll && <span style={{ color: 'var(--blue)' }}>· tap to edit</span>}
+          </div>
+          {editingBankroll ? (
+            <input
+              autoFocus type="number" min="1" step="10"
+              value={editVal}
+              onChange={e => setEditVal(e.target.value)}
+              onBlur={() => {
+                const n = parseFloat(editVal)
+                if (!isNaN(n) && n > 0) onSetAllowance(n)
+                setEditingBankroll(false)
+              }}
+              onKeyDown={e => {
+                if (e.key === 'Enter') { (e.target as HTMLInputElement).blur() }
+                if (e.key === 'Escape') { setEditingBankroll(false) }
+              }}
+              style={{
+                fontFamily: 'var(--font-geist-mono)', fontSize: 24, fontWeight: 800,
+                color: 'var(--brown)', letterSpacing: '-0.02em',
+                background: 'transparent', border: 'none', outline: 'none', width: '100%', padding: 0,
+              }}
+            />
+          ) : (
+            <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 24, fontWeight: 800, color: allowance > 0 ? 'var(--brown)' : 'var(--red)', letterSpacing: '-0.02em' }}>
+              ${allowance.toFixed(2)}
+            </div>
+          )}
+          {allowance <= 0 && !editingBankroll && (
+            <div style={{ fontSize: 9, color: 'var(--red)', marginTop: 2 }}>Set a bet amount to continue</div>
+          )}
+        </div>
+      )}
+
+      {/* D-score monitor */}
       {active && (
         <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 9, background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
-          {/* Row: label + window key */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
             <span style={{ fontSize: 8, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: 700 }}>
               D-Score Monitor
@@ -135,19 +243,16 @@ export default function AgentAllowancePanel({
           </div>
 
           {windowBetPlaced ? (
-            /* Bet placed state */
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <div style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--green)', boxShadow: '0 0 5px var(--green)', flexShrink: 0 }} />
               <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--green-dark)' }}>Bet placed this window</span>
             </div>
           ) : isRunning ? (
-            /* Pipeline running */
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <span style={{ animation: 'spin-slow 1s linear infinite', display: 'inline-block', color: 'var(--blue)', fontSize: 11 }}>◌</span>
               <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--blue-dark)' }}>Running pipeline…</span>
             </div>
           ) : lastPollAt ? (
-            /* Actively polling — show gauge */
             <>
               <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 4 }}>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
@@ -159,11 +264,7 @@ export default function AgentAllowancePanel({
                   </span>
                   <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>/ {currentD !== undefined && currentD < 0 ? '-' : ''}{confidenceThreshold}</span>
                 </div>
-                <span style={{ fontSize: 9, color: 'var(--text-muted)', fontFamily: 'var(--font-geist-mono)' }}>
-                  {secsAgo !== null ? `${secsAgo}s ago` : 'polling…'}
-                </span>
               </div>
-              {/* Progress bar */}
               <div style={{ height: 4, borderRadius: 2, background: 'var(--border)', overflow: 'hidden', marginBottom: 4 }}>
                 <div style={{
                   height: '100%', borderRadius: 2,
@@ -179,11 +280,10 @@ export default function AgentAllowancePanel({
               <div style={{ fontSize: 8, color: 'var(--text-muted)' }}>
                 {Math.abs(currentD ?? 0) >= confidenceThreshold
                   ? '⚡ Threshold crossed — firing pipeline'
-                  : `${((1 - Math.abs(currentD ?? 0) / confidenceThreshold) * 100).toFixed(0)}% to threshold · polling every 30s`}
+                  : `${((1 - Math.abs(currentD ?? 0) / confidenceThreshold) * 100).toFixed(0)}% to threshold · live · updates every 2s`}
               </div>
             </>
           ) : (
-            /* Waiting for window to open */
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <div style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--border)', flexShrink: 0 }} />
               <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
@@ -202,18 +302,19 @@ export default function AgentAllowancePanel({
 
       {/* Start / Stop */}
       {!active ? (
-        <button onClick={onStart} style={{
-          width: '100%', padding: '12px 0', borderRadius: 9, cursor: 'pointer',
-          border: '1px solid var(--green)',
-          background: 'linear-gradient(135deg, #164030 0%, var(--green) 100%)',
-          fontSize: 13, fontWeight: 800, color: '#fff', letterSpacing: '0.03em',
-          boxShadow: '0 2px 12px rgba(80,168,120,0.25)',
-          transition: 'all 0.15s',
-        }}
+        <button
+          onClick={() => onStart(localKelly, localBankroll, kellyPct)}
+          style={{
+            width: '100%', padding: '12px 0', borderRadius: 9, cursor: 'pointer',
+            border: '1px solid var(--green)',
+            background: 'linear-gradient(135deg, #164030 0%, var(--green) 100%)',
+            fontSize: 13, fontWeight: 800, color: '#fff', letterSpacing: '0.03em',
+            boxShadow: '0 2px 12px rgba(80,168,120,0.25)', transition: 'all 0.15s',
+          }}
           onMouseEnter={e => { e.currentTarget.style.opacity = '0.88' }}
           onMouseLeave={e => { e.currentTarget.style.opacity = '1' }}
         >
-          ▶ Start Agent
+          ▶ Start Agent {localKelly ? `· Kelly ${kellyPct}%` : '· Fixed'}
         </button>
       ) : (
         <button onClick={onStop} style={{
@@ -228,7 +329,6 @@ export default function AgentAllowancePanel({
           ■ Stop Agent
         </button>
       )}
-
     </div>
   )
 }
