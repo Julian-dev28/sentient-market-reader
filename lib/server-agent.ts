@@ -13,20 +13,24 @@
 import { EventEmitter } from 'events'
 import { runAgentPipeline } from './agents'
 import { buildKalshiHeaders } from './kalshi-auth'
-import { getBalance, placeOrder } from './kalshi-trade'
+import { getBalance, placeOrder, limitSellOrder } from './kalshi-trade'
 import { tryLockPipeline, releasePipelineLock } from './pipeline-lock'
 import type {
   PipelineState, AgentTrade, AgentStats,
   KalshiMarket, KalshiOrderbook, BTCQuote, OHLCVCandle, DerivativesSignal,
 } from './types'
 import type { AIProvider } from './llm-client'
+import { CONFIDENCE_THRESHOLD, KELLY_FRACTION } from './agent-shared'
+import type { AgentStateSnapshot } from './agent-shared'
 
-// ── Constants (mirrors useAgentEngine) ──────────────────────────────────────
+export { CONFIDENCE_THRESHOLD }
+export type { AgentStateSnapshot }
+
+// ── Constants ────────────────────────────────────────────────────────────────
 const TARGET_MINUTES_BEFORE_CLOSE = 10
 const MIN_MINUTES_LEFT  = 3
 const MAX_MINUTES_LEFT  = 12
 const POST_WINDOW_BUFFER_MS = 30_000
-export const CONFIDENCE_THRESHOLD = 1.0
 
 // ── Window timing helpers ────────────────────────────────────────────────────
 function getWindowClose(): number {
@@ -98,24 +102,6 @@ function computeStats(trades: AgentTrade[]): AgentStats {
   }
 }
 
-// ── Public state snapshot (sent to browser) ──────────────────────────────────
-export interface AgentStateSnapshot {
-  active:           boolean
-  allowance:        number
-  initialAllowance: number
-  isRunning:        boolean
-  windowKey:        string | null
-  windowBetPlaced:  boolean
-  currentD:         number
-  lastPollAt:       number | null
-  nextCycleIn:      number
-  error:            string | null
-  orderError:       string | null
-  trades:           AgentTrade[]
-  stats:            AgentStats
-  pipeline:         PipelineState | null
-}
-
 // ── Server Agent ─────────────────────────────────────────────────────────────
 class ServerAgent extends EventEmitter {
   private active           = false
@@ -138,21 +124,33 @@ class ServerAgent extends EventEmitter {
   private nextRunAt    = 0
   private strikePrice  = 0
   private gkVol        = 0.002
-  private orderFailed  = false
+  private orderFailed    = false
+  private pipelineError  = false
+  private kellyMode      = false
+  private kellyPct       = 0.25   // fraction e.g. 0.25 = 25%
+  private bankroll       = 0
   private orModel:     string | undefined
 
   // ── Public API ─────────────────────────────────────────────────────────────
 
-  start(allowance: number, orModel?: string) {
+  start(allowance: number, orModel?: string, kellyMode = false, bankroll?: number, kellyPct = 0.25) {
     if (this.active) {
-      // Already running — update allowance and model if changed
-      this.allowance = allowance
-      this.orModel   = orModel
+      this.allowance  = allowance
+      this.orModel    = orModel
+      this.kellyMode  = kellyMode
+      this.kellyPct   = kellyPct
+      if (kellyMode && bankroll && bankroll > 0) {
+        this.bankroll  = bankroll
+        this.allowance = Math.max(1, bankroll * kellyPct)
+      }
       this.pushState()
       return
     }
-    this.allowance        = allowance
-    this.initialAllowance = allowance
+    this.kellyMode        = kellyMode
+    this.kellyPct         = kellyPct
+    this.bankroll         = kellyMode && bankroll && bankroll > 0 ? bankroll : allowance / kellyPct
+    this.allowance        = kellyMode ? Math.max(1, this.bankroll * kellyPct) : allowance
+    this.initialAllowance = this.allowance
     this.orModel          = orModel
     this.active           = true
     this.error            = null
@@ -160,7 +158,7 @@ class ServerAgent extends EventEmitter {
     this.startCountdown()
     this.scheduleNextRun()
     this.pushState()
-    console.log(`[ServerAgent] Started — allowance=$${allowance}`)
+    console.log(`[ServerAgent] Started — ${kellyMode ? `Kelly ${kellyPct*100}% bankroll=$${this.bankroll} allowance=$${this.allowance.toFixed(2)}` : `fixed allowance=$${allowance}`}`)
   }
 
   stop() {
@@ -171,8 +169,14 @@ class ServerAgent extends EventEmitter {
     console.log('[ServerAgent] Stopped')
   }
 
-  setAllowance(amount: number) {
-    this.allowance = Math.max(0, amount)
+  setAllowance(amount: number, kellyMode?: boolean, bankroll?: number) {
+    if (kellyMode !== undefined) this.kellyMode = kellyMode
+    if (this.kellyMode && bankroll && bankroll > 0) {
+      this.bankroll  = bankroll
+      this.allowance = Math.max(1, bankroll * KELLY_FRACTION)
+    } else if (!this.kellyMode) {
+      this.allowance = Math.max(0, amount)
+    }
     this.pushState()
   }
 
@@ -195,6 +199,8 @@ class ServerAgent extends EventEmitter {
       active:           this.active,
       allowance:        this.allowance,
       initialAllowance: this.initialAllowance,
+      bankroll:         this.bankroll,
+      kellyMode:        this.kellyMode,
       isRunning:        this.isRunning,
       windowKey:        this.windowKey,
       windowBetPlaced:  this.windowBetPlaced,
@@ -206,6 +212,8 @@ class ServerAgent extends EventEmitter {
       trades:           this.trades,
       stats:            computeStats(this.trades),
       pipeline:         this.pipeline,
+      strikePrice:      this.strikePrice,
+      gkVol:            this.gkVol,
     }
   }
 
@@ -238,6 +246,8 @@ class ServerAgent extends EventEmitter {
 
   private startDPoller(closeMs: number) {
     this.stopDPoller()
+    // Starting fresh for a new window — clear the previous window's bet flag
+    this.windowBetPlaced = false
 
     const check = async () => {
       if (!this.active || this.isRunning || this.windowBetPlaced) return
@@ -245,10 +255,19 @@ class ServerAgent extends EventEmitter {
       const minutesLeft = (closeMs - Date.now()) / 60_000
       if (minutesLeft < MIN_MINUTES_LEFT) {
         this.stopDPoller()
+        // Window expiring without a bet — schedule next window
+        if (!this.windowBetPlaced && !this.autoTimeout) {
+          const waitMs = Math.max(POST_WINDOW_BUFFER_MS, closeMs - Date.now() + POST_WINDOW_BUFFER_MS)
+          this.nextRunAt   = Date.now() + waitMs
+          this.nextCycleIn = Math.round(waitMs / 1000)
+          this.autoTimeout = setTimeout(() => { if (this.active) this.scheduleNextRun() }, waitMs)
+          this.pushState()
+          console.log(`[ServerAgent] Window expiring without bet — next window in ${Math.round(waitMs/1000)}s`)
+        }
         return
       }
 
-      // Bootstrap: no strike yet → run pipeline to get it
+      // Bootstrap: no strike yet → run pipeline once to get market data
       if (this.strikePrice <= 0) {
         this.stopDPoller()
         await this.runCycle()
@@ -264,15 +283,13 @@ class ServerAgent extends EventEmitter {
 
         const candlesLeft = minutesLeft / 15
         const d = Math.log(price / this.strikePrice) / (this.gkVol * Math.sqrt(candlesLeft))
-        this.currentD  = d
+        this.currentD   = d
         this.lastPollAt = Date.now()
         this.pushState()
 
-        console.log(`[ServerAgent] poll — BTC=$${price.toFixed(2)}, K=$${this.strikePrice}, d=${d.toFixed(3)}, T=${minutesLeft.toFixed(1)}min`)
-
         if (Math.abs(d) >= CONFIDENCE_THRESHOLD) {
           this.stopDPoller()
-          console.log(`[ServerAgent] ⚡ Signal locked d=${Math.abs(d).toFixed(2)} — firing pipeline`)
+          console.log(`[ServerAgent] ⚡ d=${d.toFixed(3)} — firing pipeline`)
           await this.runCycle()
         }
       } catch (e) {
@@ -281,13 +298,16 @@ class ServerAgent extends EventEmitter {
     }
 
     check()
-    this.pollerInterval = setInterval(check, 30_000)
+    this.pollerInterval = setInterval(check, 2_000)
   }
 
   private scheduleNextRun() {
     if (!this.active) return
     if (this.autoTimeout) { clearTimeout(this.autoTimeout); this.autoTimeout = null }
     this.stopDPoller()
+    // Moving to a new window — clear previous window's state immediately
+    this.windowBetPlaced = false
+    this.strikePrice     = 0   // force bootstrap pipeline run on next window
 
     const { delayMs, closeMs, minutesLeft } = getDelayMs()
 
@@ -314,6 +334,7 @@ class ServerAgent extends EventEmitter {
     if (this.isRunning) return
     this.isRunning = true
     this.error     = null
+    const wasBootstrap = this.strikePrice <= 0   // track before pipeline sets strikePrice
     this.emit('pipeline_start', {})
     this.pushState()
 
@@ -433,28 +454,49 @@ class ServerAgent extends EventEmitter {
 
     } catch (err) {
       console.error('[ServerAgent] runCycle error:', err)
-      this.error = String(err)
+      this.error        = String(err)
+      this.pipelineError = true
     } finally {
       this.isRunning = false
 
       if (this.active) {
-        const { minutesLeft } = getDelayMs()
-        const failed      = this.orderFailed
-        this.orderFailed  = false
+        // Always get fresh timing — closeMs from the try block may be stale if pipeline took long
+        const { minutesLeft, closeMs: freshClose } = getDelayMs()
+        const failed       = this.orderFailed
+        const pipeErr      = this.pipelineError
+        this.orderFailed   = false
+        this.pipelineError = false
 
-        if (failed && minutesLeft >= MIN_MINUTES_LEFT) {
-          // Order failed — retry d-poller in 60s
+        if (pipeErr) {
+          // Pipeline failed completely (markets closed, network error, etc.) — back off 5 min
+          const retryMs    = 5 * 60_000
+          this.nextRunAt   = Date.now() + retryMs
+          this.nextCycleIn = Math.round(retryMs / 1000)
+          console.log('[ServerAgent] Pipeline error — retrying in 5 min')
+          this.autoTimeout = setTimeout(() => { if (this.active) this.scheduleNextRun() }, retryMs)
+        } else if (failed && minutesLeft >= MIN_MINUTES_LEFT) {
+          // Order placement failed — retry d-poller in 60s within same window
           this.nextRunAt   = Date.now() + 60_000
           this.nextCycleIn = 60
           this.autoTimeout = setTimeout(() => {
             if (this.active) { const { closeMs: cm } = getDelayMs(); this.startDPoller(cm) }
           }, 60_000)
         } else if (!this.windowBetPlaced && minutesLeft >= MIN_MINUTES_LEFT) {
-          // PASS — restart d-poller to keep watching this window
-          this.startDPoller(closeMs)
+          if (wasBootstrap) {
+            // Bootstrap run just fetched market data — restart d-poller to watch for signal
+            this.startDPoller(freshClose)
+          } else {
+            // Threshold-triggered PASS (execution/risk declined) — cooldown 5 min to avoid
+            // immediate re-trigger since d is still >= threshold in the same market conditions
+            const cooldownMs = 5 * 60_000
+            this.nextRunAt   = Date.now() + cooldownMs
+            this.nextCycleIn = Math.round(cooldownMs / 1000)
+            console.log('[ServerAgent] Threshold-triggered PASS — cooling down 5 min before next window')
+            this.autoTimeout = setTimeout(() => { if (this.active) this.scheduleNextRun() }, cooldownMs)
+          }
         } else {
-          // Bet placed or window expired — wait, then schedule next window
-          const waitMs     = Math.max(POST_WINDOW_BUFFER_MS, closeMs - Date.now() + POST_WINDOW_BUFFER_MS)
+          // Bet placed or window expired — wait for window to close then schedule next
+          const waitMs     = Math.max(POST_WINDOW_BUFFER_MS, freshClose - Date.now() + POST_WINDOW_BUFFER_MS)
           this.nextRunAt   = Date.now() + waitMs
           this.nextCycleIn = Math.round(waitMs / 1000)
           this.autoTimeout = setTimeout(() => { if (this.active) this.scheduleNextRun() }, waitMs)
@@ -515,8 +557,16 @@ class ServerAgent extends EventEmitter {
             : Math.min(99, (100 - exec.limitPrice) + 2),
           clientOrderId: `agent-${data.cycleId}-${Date.now()}`,
         })
-        if (res.ok) { liveOrderId = res.order?.order_id }
-        else        { orderErrorMsg = res.error ?? 'Order failed' }
+        if (res.ok) {
+          liveOrderId = res.order?.order_id
+          // Immediately place a GTC limit-sell at 99¢ to take profit if price spikes
+          limitSellOrder({ ticker: exec.marketTicker, side: exec.side, count: contracts })
+            .then(sr => {
+              if (!sr.ok) console.warn(`[ServerAgent] limit-sell failed: ${sr.error}`)
+              else console.log(`[ServerAgent] ✓ Limit-sell placed @ 99¢ on ${exec.marketTicker}`)
+            })
+            .catch(e => console.warn('[ServerAgent] limit-sell error:', e))
+        } else { orderErrorMsg = res.error ?? 'Order failed' }
       } catch (e) {
         orderErrorMsg = String(e)
       }
@@ -547,6 +597,11 @@ class ServerAgent extends EventEmitter {
       if (liveOrderId) {
         this.windowBetPlaced = true
         this.orderError      = null
+        // Kelly: update bankroll based on expected outcome (will be corrected on settlement)
+        // For now just track cost as deployed capital; settlement loop will update pnl
+        if (this.kellyMode) {
+          this.bankroll = Math.max(1, this.bankroll - cost) // reserve the bet
+        }
         console.log(`[ServerAgent] ✓ Bet placed — ${exec.side.toUpperCase()} ${contracts}× @ ${exec.limitPrice}¢ on ${evTicker}`)
       } else if (orderErrorMsg) {
         this.orderFailed = true
@@ -578,7 +633,22 @@ class ServerAgent extends EventEmitter {
         } catch {}
         return t
       }))
+      const justSettled = settled.filter(s => s.status !== 'open')
       this.trades = this.trades.map(t => settled.find(s => s.id === t.id) ?? t)
+
+      // Kelly: update bankroll from settlement and recalculate allowance
+      if (this.kellyMode && justSettled.length > 0) {
+        for (const t of justSettled) {
+          if (t.status === 'won') {
+            // Return cost + profit: contracts payout
+            this.bankroll += t.contracts  // full payout (cost already deducted at bet time)
+          }
+          // On loss, cost was already deducted at bet time — nothing extra to do
+        }
+        this.bankroll  = Math.max(1, this.bankroll)
+        this.allowance = Math.max(1, Math.round(this.bankroll * this.kellyPct * 100) / 100)
+        console.log(`[ServerAgent] Kelly update — bankroll=$${this.bankroll.toFixed(2)} → allowance=$${this.allowance.toFixed(2)}`)
+      }
     }
   }
 }

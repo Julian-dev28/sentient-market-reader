@@ -12,7 +12,11 @@ export default function AgentPage() {
   const [orModel] = useState('')
   const engine    = useAgentEngine(orModel || undefined)
 
-  function handleStart() { engine.startAgent(engine.allowance) }
+  function handleStart(kellyMode: boolean, bankroll: number, kellyPct: number) {
+    const frac = kellyPct / 100
+    const allowance = kellyMode ? Math.max(1, bankroll * frac) : engine.allowance
+    engine.startAgent(allowance, kellyMode, kellyMode ? bankroll : undefined, kellyMode ? frac : undefined)
+  }
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg-primary)' }}>
@@ -58,6 +62,8 @@ export default function AgentPage() {
               active={engine.active}
               isRunning={engine.isRunning}
               allowance={engine.allowance}
+              bankroll={engine.bankroll}
+              kellyMode={engine.kellyMode}
               nextCycleIn={engine.nextCycleIn}
               windowKey={engine.windowKey}
               windowBetPlaced={engine.windowBetPlaced}
@@ -65,6 +71,8 @@ export default function AgentPage() {
               currentD={engine.currentD}
               confidenceThreshold={engine.confidenceThreshold}
               lastPollAt={engine.lastPollAt}
+              strikePrice={engine.strikePrice}
+              gkVol={engine.gkVol}
               onStart={handleStart}
               onStop={engine.stopAgent}
               onSetAllowance={engine.setAllowanceAmount}

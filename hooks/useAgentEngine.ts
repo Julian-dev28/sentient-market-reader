@@ -12,13 +12,15 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import type { PipelineState, PartialPipelineAgents, AgentTrade, AgentStats } from '@/lib/types'
-import type { AgentStateSnapshot } from '@/lib/server-agent'
-import { CONFIDENCE_THRESHOLD } from '@/lib/server-agent'
+import type { AgentStateSnapshot } from '@/lib/agent-shared'
+import { CONFIDENCE_THRESHOLD } from '@/lib/agent-shared'
 
 const DEFAULT_STATE: AgentStateSnapshot = {
   active:           false,
   allowance:        100,
   initialAllowance: 100,
+  bankroll:         400,
+  kellyMode:        false,
   isRunning:        false,
   windowKey:        null,
   windowBetPlaced:  false,
@@ -33,6 +35,8 @@ const DEFAULT_STATE: AgentStateSnapshot = {
     wins: 0, losses: 0, winRate: 0, bestWindow: 0, worstWindow: 0,
   },
   pipeline: null,
+  strikePrice: 0,
+  gkVol: 0.002,
 }
 
 export function useAgentEngine(orModel?: string) {
@@ -77,11 +81,11 @@ export function useAgentEngine(orModel?: string) {
 
   // ── Actions (call server API routes) ────────────────────────────────────
 
-  const startAgent = useCallback(async (allowance: number) => {
+  const startAgent = useCallback(async (allowance: number, kellyMode?: boolean, bankroll?: number, kellyPct?: number) => {
     await fetch('/api/agent/start', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ allowance, orModel }),
+      body: JSON.stringify({ allowance, orModel, kellyMode, bankroll, kellyPct }),
     })
   }, [orModel])
 
@@ -89,11 +93,11 @@ export function useAgentEngine(orModel?: string) {
     await fetch('/api/agent/stop', { method: 'POST' })
   }, [])
 
-  const setAllowanceAmount = useCallback(async (amount: number) => {
+  const setAllowanceAmount = useCallback(async (amount: number, kellyMode?: boolean, bankroll?: number) => {
     await fetch('/api/agent/config', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ allowance: amount }),
+      body: JSON.stringify({ allowance: amount, kellyMode, bankroll }),
     })
   }, [])
 
@@ -123,6 +127,10 @@ export function useAgentEngine(orModel?: string) {
     currentD:         serverState.currentD,
     confidenceThreshold: CONFIDENCE_THRESHOLD,
     lastPollAt:       serverState.lastPollAt,
+    strikePrice:      serverState.strikePrice,
+    gkVol:            serverState.gkVol,
+    bankroll:         serverState.bankroll,
+    kellyMode:        serverState.kellyMode,
     startAgent,
     stopAgent,
     setAllowanceAmount,
