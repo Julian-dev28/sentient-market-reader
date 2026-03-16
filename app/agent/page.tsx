@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useAgentEngine } from '@/hooks/useAgentEngine'
 import Header from '@/components/Header'
 import AgentAllowancePanel from '@/components/AgentAllowancePanel'
@@ -11,6 +11,19 @@ import AgentPipeline from '@/components/AgentPipeline'
 export default function AgentPage() {
   const [orModel] = useState('')
   const engine    = useAgentEngine(orModel || undefined)
+  const [kalshiBalance, setKalshiBalance] = useState<number>(0)
+
+  // Fetch real Kalshi balance on mount to use as default bankroll
+  useEffect(() => {
+    fetch('/api/balance')
+      .then(r => r.json())
+      .then(d => {
+        // API returns { balance, portfolio_value } in cents
+        const dollars = ((d.balance ?? 0) + (d.portfolio_value ?? 0)) / 100
+        if (dollars > 0) setKalshiBalance(dollars)
+      })
+      .catch(() => {})
+  }, [])
 
   function handleStart(kellyMode: boolean, bankroll: number, kellyPct: number) {
     const frac = kellyPct / 100
@@ -62,7 +75,8 @@ export default function AgentPage() {
               active={engine.active}
               isRunning={engine.isRunning}
               allowance={engine.allowance}
-              bankroll={engine.bankroll}
+              bankroll={engine.kellyMode ? engine.bankroll : (kalshiBalance || engine.bankroll)}
+              defaultBankroll={kalshiBalance}
               kellyMode={engine.kellyMode}
               nextCycleIn={engine.nextCycleIn}
               windowKey={engine.windowKey}
@@ -114,6 +128,7 @@ export default function AgentPage() {
               stats={engine.stats}
               allowance={engine.allowance}
               initialAllowance={engine.initialAllowance}
+              kalshiBalance={kalshiBalance}
             />
           </div>
         </div>

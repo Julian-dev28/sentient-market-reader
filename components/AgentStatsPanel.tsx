@@ -6,13 +6,15 @@ interface AgentStatsPanelProps {
   stats: AgentStats
   allowance: number
   initialAllowance: number
+  kalshiBalance?: number  // live Kalshi account balance in dollars
 }
 
-export default function AgentStatsPanel({ stats, allowance, initialAllowance }: AgentStatsPanelProps) {
-  // Account balance = starting cash + running P&L (allowance is fixed bet size, not depleted)
-  const accountBalance = initialAllowance + stats.totalPnl
-  const totalReturn = initialAllowance > 0
-    ? (stats.totalPnl / initialAllowance) * 100
+export default function AgentStatsPanel({ stats, allowance, initialAllowance, kalshiBalance }: AgentStatsPanelProps) {
+  // Account balance: use live Kalshi balance + session P&L if available, else fallback to initialAllowance
+  const baseBalance = kalshiBalance && kalshiBalance > 0 ? kalshiBalance : initialAllowance
+  const accountBalance = baseBalance + stats.totalPnl
+  const totalReturn = baseBalance > 0
+    ? (stats.totalPnl / baseBalance) * 100
     : 0
 
   const rows: [string, string, string?][] = [
@@ -40,10 +42,10 @@ export default function AgentStatsPanel({ stats, allowance, initialAllowance }: 
         <div style={{ fontSize: 8, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>
           Account balance
         </div>
-        <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 20, fontWeight: 800, color: accountBalance >= initialAllowance ? 'var(--green)' : 'var(--red)' }}>
+        <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 20, fontWeight: 800, color: accountBalance >= baseBalance ? 'var(--green)' : 'var(--red)' }}>
           ${accountBalance.toFixed(2)}
         </div>
-        {initialAllowance > 0 && (
+        {baseBalance > 0 && (
           <div style={{ fontSize: 9, fontFamily: 'var(--font-geist-mono)', color: totalReturn >= 0 ? 'var(--green)' : 'var(--red)', marginTop: 1 }}>
             {totalReturn >= 0 ? '+' : ''}{totalReturn.toFixed(1)}% vs start
           </div>

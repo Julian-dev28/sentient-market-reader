@@ -8,6 +8,7 @@ interface AgentAllowancePanelProps {
   isRunning: boolean
   allowance: number
   bankroll: number
+  defaultBankroll?: number
   kellyMode: boolean
   nextCycleIn: number
   windowKey: string | null
@@ -27,7 +28,7 @@ interface AgentAllowancePanelProps {
 }
 
 export default function AgentAllowancePanel({
-  active, isRunning, allowance, bankroll, kellyMode, nextCycleIn,
+  active, isRunning, allowance, bankroll, defaultBankroll, kellyMode, nextCycleIn,
   windowKey, windowBetPlaced, orderError, currentD: serverD, confidenceThreshold = 1.0,
   lastPollAt, strikePrice, gkVol = 0.002, agentPhase = 'idle', windowCloseAt = 0,
   onStart, onStop, onSetAllowance,
@@ -36,13 +37,17 @@ export default function AgentAllowancePanel({
   const [editVal, setEditVal] = useState('')
   const [localKelly, setLocalKelly] = useState(kellyMode)
   const [localBankroll, setLocalBankroll] = useState(bankroll || 400)
-  const [kellyPct, setKellyPct] = useState(25)
+  const [kellyPct, setKellyPct] = useState(20)
   const [liveD, setLiveD] = useState<number | undefined>(serverD)
   const liveDRef = useRef<number | undefined>(serverD)
 
   useEffect(() => { setLiveD(serverD); liveDRef.current = serverD }, [serverD])
   useEffect(() => { setLocalKelly(kellyMode) }, [kellyMode])
-  useEffect(() => { if (bankroll > 0) setLocalBankroll(bankroll) }, [bankroll])
+  // Prefer defaultBankroll (live Kalshi balance) over server bankroll for initial display
+  useEffect(() => {
+    if (defaultBankroll && defaultBankroll > 0 && !active) setLocalBankroll(defaultBankroll)
+    else if (bankroll > 0) setLocalBankroll(bankroll)
+  }, [defaultBankroll, bankroll, active])
 
   // Fetch BTC price every 2s and recompute d locally — only while actively monitoring
   useEffect(() => {
