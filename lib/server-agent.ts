@@ -612,7 +612,29 @@ class ServerAgent extends EventEmitter {
       this.allowance >= 1    &&
       !this.windowBetPlaced
     ) {
-      const costPerContract  = exec.limitPrice / 100
+      // Fetch a fresh market quote right before placing the order — pipeline data may be stale
+      let liveLimitPrice = exec.limitPrice
+      try {
+        const quotePath = `/trade-api/v2/markets/${encodeURIComponent(exec.marketTicker)}`
+        const quoteRes = await fetch(`https://api.elections.kalshi.com${quotePath}`, {
+          headers: { ...buildKalshiHeaders('GET', quotePath), Accept: 'application/json' },
+          cache: 'no-store',
+        })
+        if (quoteRes.ok) {
+          const quoteData = await quoteRes.json()
+          const liveMarket = normalizeKalshiMarket(quoteData.market ?? quoteData)
+          const freshPrice = exec.side === 'yes' ? liveMarket.yes_ask : liveMarket.no_ask
+          if (freshPrice > 0) {
+            console.log(`[ServerAgent] Fresh quote: ${exec.side}_ask=${freshPrice}¢ (was ${exec.limitPrice}¢)`)
+            liveLimitPrice = freshPrice
+          }
+        }
+      } catch (qe) {
+        console.warn('[ServerAgent] Fresh quote fetch failed, using pipeline price:', qe)
+      }
+
+      // Compute contract count using live price
+      const costPerContract  = liveLimitPrice / 100
       const budgetContracts  = Math.floor(this.allowance / costPerContract)
       const contracts        = Math.max(1, Math.min(risk.positionSize, budgetContracts))
       const cost             = contracts * costPerContract
@@ -626,8 +648,11 @@ class ServerAgent extends EventEmitter {
           side:    exec.side,
           count:   contracts,
           yesPrice: exec.side === 'yes'
-            ? Math.min(99, exec.limitPrice + 2)
-            : Math.min(99, (100 - exec.limitPrice) + 2),
+            ? Math.min(99, liveLimitPrice + 2)
+            : undefined,
+          noPrice: exec.side === 'no'
+            ? Math.min(99, liveLimitPrice + 2)
+            : undefined,
           clientOrderId: `agent-${data.cycleId}-${Date.now()}`,
         })
         if (res.ok) {
@@ -650,7 +675,7 @@ class ServerAgent extends EventEmitter {
         windowKey:    evTicker,
         sliceNum:     1,
         side:         exec.side,
-        limitPrice:   exec.limitPrice,
+        limitPrice:   liveLimitPrice,
         contracts,
         cost,
         marketTicker: exec.marketTicker,
@@ -674,7 +699,7 @@ class ServerAgent extends EventEmitter {
         if (this.kellyMode) {
           this.bankroll = Math.max(1, this.bankroll - cost) // reserve the bet
         }
-        console.log(`[ServerAgent] ✓ Bet placed — ${exec.side.toUpperCase()} ${contracts}× @ ${exec.limitPrice}¢ on ${evTicker}`)
+        console.log(`[ServerAgent] ✓ Bet placed — ${exec.side.toUpperCase()} ${contracts}× @ ${liveLimitPrice}¢ on ${evTicker}`)
       } else if (orderErrorMsg) {
         this.orderFailed = true
         this.orderError  = orderErrorMsg

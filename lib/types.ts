@@ -42,12 +42,16 @@ export function normalizeKalshiMarket(m: any): KalshiMarket {
     if (dollars !== undefined && dollars >= 0) return Math.round(dollars * 100)
     return 0
   }
+  const fp = (v: unknown) => parseFloat(String(v ?? 0)) || 0
   return {
     ...m,
-    yes_ask: toC(m.yes_ask_dollars, m.yes_ask),
-    yes_bid: toC(m.yes_bid_dollars, m.yes_bid),
-    no_ask:  toC(m.no_ask_dollars,  m.no_ask),
-    no_bid:  toC(m.no_bid_dollars,  m.no_bid),
+    yes_ask:       toC(m.yes_ask_dollars,      m.yes_ask),
+    yes_bid:       toC(m.yes_bid_dollars,      m.yes_bid),
+    no_ask:        toC(m.no_ask_dollars,       m.no_ask),
+    no_bid:        toC(m.no_bid_dollars,       m.no_bid),
+    last_price:    toC(m.last_price_dollars,   m.last_price),
+    volume:        fp(m.volume_fp       ?? m.volume),
+    open_interest: fp(m.open_interest_fp ?? m.open_interest),
   }
 }
 
