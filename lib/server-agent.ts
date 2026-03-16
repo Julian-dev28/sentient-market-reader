@@ -251,6 +251,15 @@ class ServerAgent extends EventEmitter {
     this.stopDPoller()
   }
 
+  /** Schedule the next autoTimeout, ensuring only one is ever pending and it self-nulls on fire. */
+  private schedule(fn: () => void, ms: number) {
+    if (this.autoTimeout) { clearTimeout(this.autoTimeout); this.autoTimeout = null }
+    this.autoTimeout = setTimeout(() => {
+      this.autoTimeout = null   // always null before executing — fixes the stale-reference hang
+      if (this.active) fn()
+    }, ms)
+  }
+
   private stopDPoller() {
     if (this.pollerInterval) { clearInterval(this.pollerInterval); this.pollerInterval = null }
   }
@@ -327,11 +336,12 @@ class ServerAgent extends EventEmitter {
       if (minutesLeft < MIN_MINUTES_LEFT) {
         this.stopDPoller()
         // Window expiring without a bet — schedule next window
-        if (!this.windowBetPlaced && !this.autoTimeout) {
+        if (!this.windowBetPlaced) {
           const waitMs = Math.max(POST_WINDOW_BUFFER_MS, closeMs - Date.now() + POST_WINDOW_BUFFER_MS)
+          this.agentPhase  = 'waiting'
           this.nextRunAt   = Date.now() + waitMs
           this.nextCycleIn = Math.round(waitMs / 1000)
-          this.autoTimeout = setTimeout(() => { if (this.active) this.scheduleNextRun() }, waitMs)
+          this.schedule(() => this.scheduleNextRun(), waitMs)
           this.pushState()
           console.log(`[ServerAgent] Window expiring without bet — next window in ${Math.round(waitMs/1000)}s`)
         }
@@ -346,7 +356,10 @@ class ServerAgent extends EventEmitter {
       }
 
       try {
-        const res = await fetch('https://api.coinbase.com/v2/prices/BTC-USD/spot', { cache: 'no-store' })
+        const res = await fetch('https://api.coinbase.com/v2/prices/BTC-USD/spot', {
+          cache: 'no-store',
+          signal: AbortSignal.timeout(5_000),  // 5s max — never block the poll loop
+        })
         if (!res.ok) return
         const { data } = await res.json()
         const price = parseFloat(data?.amount)
@@ -393,8 +406,7 @@ class ServerAgent extends EventEmitter {
       this.agentPhase  = 'waiting'
       this.nextRunAt   = Date.now() + delayMs
       this.nextCycleIn = Math.round(delayMs / 1000)
-      this.autoTimeout = setTimeout(() => {
-        if (!this.active) return
+      this.schedule(() => {
         const { closeMs: cm } = getDelayMs()
         this.startDPoller(cm)
       }, delayMs)
@@ -549,13 +561,14 @@ class ServerAgent extends EventEmitter {
           this.nextRunAt   = Date.now() + retryMs
           this.nextCycleIn = Math.round(retryMs / 1000)
           console.log('[ServerAgent] Pipeline error — retrying in 5 min')
-          this.autoTimeout = setTimeout(() => { if (this.active) this.scheduleNextRun() }, retryMs)
+          this.schedule(() => this.scheduleNextRun(), retryMs)
         } else if (failed && minutesLeft >= MIN_MINUTES_LEFT) {
           // Order placement failed — retry d-poller in 60s within same window
           this.nextRunAt   = Date.now() + 60_000
           this.nextCycleIn = 60
-          this.autoTimeout = setTimeout(() => {
-            if (this.active) { const { closeMs: cm } = getDelayMs(); this.startDPoller(cm) }
+          this.schedule(() => {
+            const { closeMs: cm } = getDelayMs()
+            this.startDPoller(cm)
           }, 60_000)
         } else if (!this.windowBetPlaced && minutesLeft >= MIN_MINUTES_LEFT) {
           if (wasBootstrap) {
@@ -570,7 +583,7 @@ class ServerAgent extends EventEmitter {
             this.nextRunAt   = Date.now() + waitMs
             this.nextCycleIn = Math.round(waitMs / 1000)
             console.log(`[ServerAgent] PASS — skipping window, next cycle in ${Math.round(waitMs/1000)}s`)
-            this.autoTimeout = setTimeout(() => { if (this.active) this.scheduleNextRun() }, waitMs)
+            this.schedule(() => this.scheduleNextRun(), waitMs)
           }
         } else {
           // Bet placed or window expired — wait for window to close then schedule next
@@ -578,7 +591,7 @@ class ServerAgent extends EventEmitter {
           this.agentPhase  = this.windowBetPlaced ? 'bet_placed' : 'waiting'
           this.nextRunAt   = Date.now() + waitMs
           this.nextCycleIn = Math.round(waitMs / 1000)
-          this.autoTimeout = setTimeout(() => { if (this.active) this.scheduleNextRun() }, waitMs)
+          this.schedule(() => this.scheduleNextRun(), waitMs)
         }
       }
 
