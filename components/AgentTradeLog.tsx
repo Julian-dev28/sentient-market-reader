@@ -2,6 +2,51 @@
 
 import type { AgentTrade } from '@/lib/types'
 
+function exportCSV() {
+  fetch('/api/trade-log')
+    .then(r => r.json())
+    .then(({ trades }: { trades: AgentTrade[] }) => {
+      const cols = [
+        'id','enteredAt','expiresAt','windowKey','marketTicker','side','limitPrice',
+        'contracts','cost','strikePrice','btcPriceAtEntry','pModel','pMarket','edge',
+        'status','pnl','settlementPrice','liveMode',
+        'sentimentScore','sentimentMomentum','orderbookSkew','sentimentLabel',
+        'pLLM','confidence','gkVol','distancePct','minutesLeft','aboveStrike',
+        'priceMomentum1h','signals',
+      ]
+      const esc = (v: unknown) => {
+        const s = v === undefined || v === null ? '' : String(v)
+        return s.includes(',') || s.includes('"') || s.includes('\n')
+          ? `"${s.replace(/"/g, '""')}"` : s
+      }
+      const rows = trades.map(t => [
+        t.id, t.enteredAt, t.expiresAt, t.windowKey, t.marketTicker, t.side,
+        t.limitPrice, t.contracts, t.cost, t.strikePrice, t.btcPriceAtEntry ?? '',
+        t.pModel, t.pMarket, t.edge, t.status, t.pnl ?? '', t.settlementPrice ?? '',
+        t.liveMode ?? '',
+        t.signals?.sentimentScore ?? '', t.signals?.sentimentMomentum ?? '',
+        t.signals?.orderbookSkew ?? '', t.signals?.sentimentLabel ?? '',
+        t.signals?.pLLM ?? '', t.signals?.confidence ?? '',
+        t.signals?.gkVol ?? '', t.signals?.distancePct ?? '',
+        t.signals?.minutesLeft ?? '', t.signals?.aboveStrike ?? '',
+        t.signals?.priceMomentum1h ?? '',
+        // signals column = the SentimentOutput.signals string array joined by |
+        // (not the TradeSignals object — those are already flattened above)
+        '',
+      ].map(esc).join(','))
+
+      const csv  = [cols.join(','), ...rows].join('\n')
+      const blob = new Blob([csv], { type: 'text/csv' })
+      const url  = URL.createObjectURL(blob)
+      const a    = document.createElement('a')
+      a.href     = url
+      a.download = `trade-log-${new Date().toISOString().slice(0, 10)}.csv`
+      a.click()
+      URL.revokeObjectURL(url)
+    })
+    .catch(e => console.error('CSV export failed:', e))
+}
+
 export default function AgentTradeLog({ trades, onClearHistory }: { trades: AgentTrade[]; onClearHistory?: () => void }) {
   // Group by window, newest first
   const windowKeys = [...new Set([...trades].reverse().map(t => t.windowKey))]
@@ -16,6 +61,16 @@ export default function AgentTradeLog({ trades, onClearHistory }: { trades: Agen
               {trades.length} bet{trades.length !== 1 ? 's' : ''}
             </span>
           )}
+          <button
+            onClick={exportCSV}
+            style={{
+              fontSize: 9, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase',
+              color: 'var(--blue)', background: 'none', border: '1px solid var(--blue)',
+              borderRadius: 4, padding: '2px 7px', cursor: 'pointer',
+            }}
+          >
+            Export CSV
+          </button>
           {trades.length > 0 && onClearHistory && (
             <button
               onClick={onClearHistory}

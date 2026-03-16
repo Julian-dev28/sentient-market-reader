@@ -15,6 +15,7 @@ import { runAgentPipeline } from './agents'
 import { buildKalshiHeaders } from './kalshi-auth'
 import { getBalance, placeOrder, limitSellOrder } from './kalshi-trade'
 import { tryLockPipeline, releasePipelineLock } from './pipeline-lock'
+import { appendTrade, updateTrade } from './trade-log'
 import type {
   PipelineState, AgentTrade, AgentStats,
   KalshiMarket, KalshiOrderbook, BTCQuote, OHLCVCandle, DerivativesSignal,
@@ -290,6 +291,11 @@ class ServerAgent extends EventEmitter {
     if (!justSettled.length) return
 
     this.trades = this.trades.map(t => settled.find(s => s.id === t.id) ?? t)
+
+    // Persist settlement updates to disk log
+    for (const t of justSettled) {
+      updateTrade(t.id, { status: t.status, pnl: t.pnl, settlementPrice: t.settlementPrice })
+    }
 
     if (this.kellyMode) {
       for (const t of justSettled) {
@@ -588,6 +594,7 @@ class ServerAgent extends EventEmitter {
     const pf    = data.agents.priceFeed.output
     const prob  = data.agents.probability.output
     const risk  = data.agents.risk.output
+    const sent  = data.agents.sentiment.output
 
     const evTicker = (md.activeMarket as { event_ticker?: string } | undefined)?.event_ticker
       ?? md.activeMarket?.ticker.split('-').slice(0, 2).join('-')
@@ -670,27 +677,42 @@ class ServerAgent extends EventEmitter {
       }
 
       const trade: AgentTrade = {
-        id:           `${data.cycleId}-${Date.now()}`,
-        cycleId:      data.cycleId,
-        windowKey:    evTicker,
-        sliceNum:     1,
-        side:         exec.side,
-        limitPrice:   liveLimitPrice,
+        id:               `${data.cycleId}-${Date.now()}`,
+        cycleId:          data.cycleId,
+        windowKey:        evTicker,
+        sliceNum:         1,
+        side:             exec.side,
+        limitPrice:       liveLimitPrice,
         contracts,
         cost,
-        marketTicker: exec.marketTicker,
-        strikePrice:  md.strikePrice,
-        expiresAt:    md.activeMarket.close_time,
-        enteredAt:    new Date().toISOString(),
-        status:       'open',
-        pModel:       prob.pModel,
-        pMarket:      prob.pMarket,
-        edge:         prob.edge,
+        marketTicker:     exec.marketTicker,
+        strikePrice:      md.strikePrice,
+        btcPriceAtEntry:  pf.currentPrice,
+        expiresAt:        md.activeMarket.close_time,
+        enteredAt:        new Date().toISOString(),
+        status:           'open',
+        pModel:           prob.pModel,
+        pMarket:          prob.pMarket,
+        edge:             prob.edge,
+        signals: {
+          sentimentScore:    sent.score,
+          sentimentMomentum: sent.momentum,
+          orderbookSkew:     sent.orderbookSkew,
+          sentimentLabel:    sent.label,
+          pLLM:              prob.pModel,
+          confidence:        prob.confidence,
+          gkVol:             prob.gkVol15m ?? null,
+          distancePct:       pf.distanceFromStrikePct,
+          minutesLeft:       md.minutesUntilExpiry,
+          aboveStrike:       pf.aboveStrike,
+          priceMomentum1h:   pf.priceChangePct1h,
+        },
         liveOrderId,
-        orderError:   orderErrorMsg,
+        orderError:       orderErrorMsg,
       }
 
       this.trades = [...this.trades, trade]
+      appendTrade(trade)
 
       if (liveOrderId) {
         this.windowBetPlaced = true
@@ -733,6 +755,11 @@ class ServerAgent extends EventEmitter {
       }))
       const justSettled = settled.filter(s => s.status !== 'open')
       this.trades = this.trades.map(t => settled.find(s => s.id === t.id) ?? t)
+
+      // Persist settlement updates to disk log
+      for (const t of justSettled) {
+        updateTrade(t.id, { status: t.status, pnl: t.pnl, settlementPrice: t.settlementPrice })
+      }
 
       // Kelly: update bankroll from settlement and recalculate allowance
       if (this.kellyMode && justSettled.length > 0) {
