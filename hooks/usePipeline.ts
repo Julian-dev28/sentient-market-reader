@@ -155,18 +155,55 @@ export function usePipeline(
       // ── Real order: ONLY when Agent is active ──────────────────────────────
       if (autoTrade && liveMode && exec.action !== 'PASS' && exec.side && exec.limitPrice && exec.marketTicker) {
         const contracts = Math.max(1, Math.floor(100 / (exec.limitPrice / 100)))
+        // Fetch fresh quote right before submitting — use current ask, not stale pipeline price
+        let submitPrice = exec.limitPrice
         try {
-          await fetch('/api/place-order', {
+          const quoteRes = await fetch(`/api/market-quote/${encodeURIComponent(exec.marketTicker)}`)
+          if (quoteRes.ok) {
+            const quoteData = await quoteRes.json()
+            const freshAsk = exec.side === 'yes'
+              ? quoteData?.market?.yes_ask
+              : quoteData?.market?.no_ask
+            if (typeof freshAsk === 'number' && freshAsk > 0) submitPrice = freshAsk
+          }
+        } catch { /* fall back to pipeline price */ }
+        const yesPrice = exec.side === 'yes' ? submitPrice : (100 - submitPrice)
+        const clientOrderId = `bot-${data.cycleId}-${Date.now()}`
+        try {
+          const orderRes = await fetch('/api/place-order', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               ticker: exec.marketTicker,
               side: exec.side,
               count: contracts,
-              yesPrice: exec.side === 'yes' ? exec.limitPrice : (100 - exec.limitPrice),
-              clientOrderId: `bot-${data.cycleId}-${Date.now()}`,
+              yesPrice,
+              clientOrderId,
             }),
           })
+          const orderData = orderRes.ok ? await orderRes.json() : null
+          const orderId = orderData?.order?.order_id ?? orderData?.orderId ?? null
+
+          // Poll every 2s for up to 30s — cancel if still resting after timeout
+          if (orderId) {
+            let filled = false
+            for (let i = 0; i < 15; i++) {
+              await new Promise(r => setTimeout(r, 2000))
+              try {
+                const statusRes = await fetch(`/api/orders/${orderId}`)
+                if (statusRes.ok) {
+                  const s = await statusRes.json()
+                  const status = s?.order?.status ?? s?.status
+                  if (status === 'filled' || status === 'closed') { filled = true; break }
+                  if (status === 'canceled' || status === 'expired') break
+                }
+              } catch { break }
+            }
+            // Cancel unfilled resting order after 30s
+            if (!filled) {
+              fetch(`/api/cancel-order/${orderId}`, { method: 'DELETE' }).catch(() => {})
+            }
+          }
         } catch { /* live order failed — continue */ }
       }
 

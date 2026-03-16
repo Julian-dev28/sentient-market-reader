@@ -37,6 +37,8 @@ const DEFAULT_STATE: AgentStateSnapshot = {
   pipeline: null,
   strikePrice: 0,
   gkVol: 0.002,
+  agentPhase: 'idle',
+  windowCloseAt: 0,
 }
 
 export function useAgentEngine(orModel?: string) {
@@ -131,6 +133,8 @@ export function useAgentEngine(orModel?: string) {
     gkVol:            serverState.gkVol,
     bankroll:         serverState.bankroll,
     kellyMode:        serverState.kellyMode,
+    agentPhase:       serverState.agentPhase,
+    windowCloseAt:    serverState.windowCloseAt,
     startAgent,
     stopAgent,
     setAllowanceAmount,

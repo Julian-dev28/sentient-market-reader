@@ -69,18 +69,28 @@ export async function runAgentPipeline(
   const mdResult = await runMarketDiscovery(markets)
   emit?.('marketDiscovery', mdResult)
 
+  // ── Enrich quote: compute real 1h momentum from candles if source returned 0 ──
+  const enrichedQuote = { ...quote }
+  if (enrichedQuote.percent_change_1h === 0 && candles && candles.length >= 4) {
+    // candles are newest-first; index 3 = close ~60 min ago (4 × 15-min bars)
+    const price1hAgo = candles[3][4]
+    if (price1hAgo > 0) {
+      enrichedQuote.percent_change_1h = ((quote.price - price1hAgo) / price1hAgo) * 100
+    }
+  }
+
   // ── Stage 2: Price Feed ────────────────────────────────────────────────
-  const pfResult = runPriceFeed(quote, mdResult.output.strikePrice)
+  const pfResult = runPriceFeed(enrichedQuote, mdResult.output.strikePrice)
   emit?.('priceFeed', pfResult)
 
-  // ── Stage 3: Sentiment — price-based (no Kalshi orderbook) ──────────────
+  // ── Stage 3: Sentiment — price + orderbook ──────────────────────────────
   const sentResult = await runSentiment(
-    quote,
+    enrichedQuote,
     mdResult.output.strikePrice,
     pfResult.output.distanceFromStrikePct,
     mdResult.output.minutesUntilExpiry,
     mdResult.output.activeMarket,
-    null,   // no orderbook — sentiment is purely price-based
+    orderbook,   // real Kalshi orderbook depth — wired into OB imbalance scoring
     provider,
     romaMode,
     providers,

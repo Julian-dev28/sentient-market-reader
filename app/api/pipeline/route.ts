@@ -3,6 +3,7 @@ import { runAgentPipeline } from '@/lib/agents'
 import { buildKalshiHeaders } from '@/lib/kalshi-auth'
 import { getBalance } from '@/lib/kalshi-trade'
 import type { KalshiMarket, KalshiOrderbook, BTCQuote, OHLCVCandle, DerivativesSignal } from '@/lib/types'
+import { normalizeKalshiMarket } from '@/lib/types'
 import type { AIProvider } from '@/lib/llm-client'
 import { tryLockPipeline, releasePipelineLock } from '@/lib/pipeline-lock'
 
@@ -78,7 +79,7 @@ export async function GET(req: NextRequest) {
 
     if (eventRes?.ok) {
       const data = await eventRes.json()
-      markets = (data.markets ?? []).filter(isTradeable)
+      markets = (data.markets ?? []).map(normalizeKalshiMarket).filter(isTradeable)
     }
 
     // Fallback: query recent series markets without status filter
@@ -90,7 +91,7 @@ export async function GET(req: NextRequest) {
       ).catch(() => null)
       if (fallbackRes?.ok) {
         const data = await fallbackRes.json()
-        markets = (data.markets ?? []).filter(isTradeable)
+        markets = (data.markets ?? []).map(normalizeKalshiMarket).filter(isTradeable)
       }
     }
 

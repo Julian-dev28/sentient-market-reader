@@ -19,9 +19,10 @@ import type {
   PipelineState, AgentTrade, AgentStats,
   KalshiMarket, KalshiOrderbook, BTCQuote, OHLCVCandle, DerivativesSignal,
 } from './types'
+import { normalizeKalshiMarket } from './types'
 import type { AIProvider } from './llm-client'
 import { CONFIDENCE_THRESHOLD, KELLY_FRACTION } from './agent-shared'
-import type { AgentStateSnapshot } from './agent-shared'
+import type { AgentStateSnapshot, AgentPhase } from './agent-shared'
 
 export { CONFIDENCE_THRESHOLD }
 export type { AgentStateSnapshot }
@@ -118,9 +119,10 @@ class ServerAgent extends EventEmitter {
   private trades:      AgentTrade[]  = []
   private pipeline:    PipelineState | null = null
 
-  private autoTimeout:      NodeJS.Timeout | null = null
-  private pollerInterval:   NodeJS.Timeout | null = null
+  private autoTimeout:       NodeJS.Timeout | null = null
+  private pollerInterval:    NodeJS.Timeout | null = null
   private countdownInterval: NodeJS.Timeout | null = null
+  private settlementInterval: NodeJS.Timeout | null = null
   private nextRunAt    = 0
   private strikePrice  = 0
   private gkVol        = 0.002
@@ -130,6 +132,8 @@ class ServerAgent extends EventEmitter {
   private kellyPct       = 0.25   // fraction e.g. 0.25 = 25%
   private bankroll       = 0
   private orModel:     string | undefined
+  private agentPhase: AgentPhase = 'idle'
+  private windowCloseAt = 0
 
   // ── Public API ─────────────────────────────────────────────────────────────
 
@@ -155,15 +159,18 @@ class ServerAgent extends EventEmitter {
     this.active           = true
     this.error            = null
     this.orderError       = null
+    this.agentPhase       = 'waiting'
     this.startCountdown()
+    this.startSettlementLoop()
     this.scheduleNextRun()
     this.pushState()
     console.log(`[ServerAgent] Started — ${kellyMode ? `Kelly ${kellyPct*100}% bankroll=$${this.bankroll} allowance=$${this.allowance.toFixed(2)}` : `fixed allowance=$${allowance}`}`)
   }
 
   stop() {
-    this.active    = false
-    this.isRunning = false
+    this.active     = false
+    this.isRunning  = false
+    this.agentPhase = 'idle'
     this.clearTimers()
     this.pushState()
     console.log('[ServerAgent] Stopped')
@@ -214,6 +221,8 @@ class ServerAgent extends EventEmitter {
       pipeline:         this.pipeline,
       strikePrice:      this.strikePrice,
       gkVol:            this.gkVol,
+      agentPhase:       this.agentPhase,
+      windowCloseAt:    this.windowCloseAt,
     }
   }
 
@@ -235,8 +244,9 @@ class ServerAgent extends EventEmitter {
   }
 
   private clearTimers() {
-    if (this.autoTimeout)       { clearTimeout(this.autoTimeout);         this.autoTimeout       = null }
-    if (this.countdownInterval) { clearInterval(this.countdownInterval);  this.countdownInterval = null }
+    if (this.autoTimeout)        { clearTimeout(this.autoTimeout);          this.autoTimeout        = null }
+    if (this.countdownInterval)  { clearInterval(this.countdownInterval);   this.countdownInterval  = null }
+    if (this.settlementInterval) { clearInterval(this.settlementInterval);  this.settlementInterval = null }
     this.stopDPoller()
   }
 
@@ -244,10 +254,65 @@ class ServerAgent extends EventEmitter {
     if (this.pollerInterval) { clearInterval(this.pollerInterval); this.pollerInterval = null }
   }
 
+  private startSettlementLoop() {
+    if (this.settlementInterval) clearInterval(this.settlementInterval)
+    this.settlementInterval = setInterval(() => {
+      if (this.active) this.checkSettlements().catch(e => console.error('[ServerAgent] settlement loop error:', e))
+    }, 30_000)
+  }
+
+  private async checkSettlements() {
+    const now = Date.now()
+    const expired = this.trades.filter(
+      t => t.status === 'open' && t.liveOrderId && now >= new Date(t.expiresAt).getTime()
+    )
+    if (!expired.length) return
+
+    const settled = await Promise.all(expired.map(async t => {
+      try {
+        const path = `/trade-api/v2/markets/${encodeURIComponent(t.marketTicker)}`
+        const res  = await fetch(`https://api.elections.kalshi.com${path}`, {
+          headers: { ...buildKalshiHeaders('GET', path), Accept: 'application/json' },
+          cache: 'no-store',
+        })
+        if (res.ok) {
+          const { market } = await res.json()
+          if (market?.result === 'yes' || market?.result === 'no') {
+            const win = t.side === market.result
+            return { ...t, status: (win ? 'won' : 'lost') as 'won' | 'lost', pnl: win ? t.contracts - t.cost : -t.cost }
+          }
+        }
+      } catch {}
+      return t
+    }))
+
+    const justSettled = settled.filter(s => s.status !== 'open')
+    if (!justSettled.length) return
+
+    this.trades = this.trades.map(t => settled.find(s => s.id === t.id) ?? t)
+
+    if (this.kellyMode) {
+      for (const t of justSettled) {
+        if (t.status === 'won') this.bankroll += t.contracts
+      }
+      this.bankroll  = Math.max(1, this.bankroll)
+      this.allowance = Math.max(1, Math.round(this.bankroll * this.kellyPct * 100) / 100)
+      console.log(`[ServerAgent] Kelly update — bankroll=$${this.bankroll.toFixed(2)} → allowance=$${this.allowance.toFixed(2)}`)
+    }
+
+    this.pushState()
+    console.log(`[ServerAgent] Settled ${justSettled.length} trade(s) via background loop`)
+  }
+
   private startDPoller(closeMs: number) {
     this.stopDPoller()
-    // Starting fresh for a new window — clear the previous window's bet flag
+    // Starting fresh for a new window — clear bet flag and stale d-score display
     this.windowBetPlaced = false
+    this.lastPollAt      = null
+    this.currentD        = 0
+    this.windowCloseAt   = closeMs
+    this.agentPhase      = this.strikePrice > 0 ? 'monitoring' : 'bootstrap'
+    this.pushState()
 
     const check = async () => {
       if (!this.active || this.isRunning || this.windowBetPlaced) return
@@ -305,17 +370,21 @@ class ServerAgent extends EventEmitter {
     if (!this.active) return
     if (this.autoTimeout) { clearTimeout(this.autoTimeout); this.autoTimeout = null }
     this.stopDPoller()
-    // Moving to a new window — clear previous window's state immediately
+    // Moving to a new window — clear all previous window state
     this.windowBetPlaced = false
-    this.strikePrice     = 0   // force bootstrap pipeline run on next window
+    this.strikePrice     = 0   // force bootstrap pipeline on next window
+    this.lastPollAt      = null
+    this.currentD        = 0
 
     const { delayMs, closeMs, minutesLeft } = getDelayMs()
+    this.windowCloseAt = closeMs
 
     if (delayMs === 0) {
       this.startDPoller(closeMs)
       this.nextRunAt   = closeMs - MIN_MINUTES_LEFT * 60_000
       this.nextCycleIn = Math.round((minutesLeft - MIN_MINUTES_LEFT) * 60)
     } else {
+      this.agentPhase  = 'waiting'
       this.nextRunAt   = Date.now() + delayMs
       this.nextCycleIn = Math.round(delayMs / 1000)
       this.autoTimeout = setTimeout(() => {
@@ -332,9 +401,10 @@ class ServerAgent extends EventEmitter {
 
   private async runCycle() {
     if (this.isRunning) return
-    this.isRunning = true
-    this.error     = null
+    this.isRunning  = true
+    this.error      = null
     const wasBootstrap = this.strikePrice <= 0   // track before pipeline sets strikePrice
+    this.agentPhase = wasBootstrap ? 'bootstrap' : 'pipeline'
     this.emit('pipeline_start', {})
     this.pushState()
 
@@ -344,7 +414,7 @@ class ServerAgent extends EventEmitter {
       // ── Fetch markets ──────────────────────────────────────────────────────
       let markets: KalshiMarket[] = []
       const isTradeable = (m: KalshiMarket) =>
-        m.status === 'active' && m.yes_ask > 0 &&
+        m.status === 'active' && m.yes_ask > 0 && m.yes_ask < 100 &&
         (m.close_time ? new Date(m.close_time).getTime() > Date.now() : true)
 
       const eventTicker = getCurrentEventTicker()
@@ -356,7 +426,7 @@ class ServerAgent extends EventEmitter {
 
       if (eventRes?.ok) {
         const d = await eventRes.json()
-        markets = (d.markets ?? []).filter(isTradeable)
+        markets = (d.markets ?? []).map(normalizeKalshiMarket).filter(isTradeable)
       }
 
       if (!markets.length) {
@@ -367,7 +437,7 @@ class ServerAgent extends EventEmitter {
         ).catch(() => null)
         if (fbRes?.ok) {
           const d = await fbRes.json()
-          markets = (d.markets ?? []).filter(isTradeable)
+          markets = (d.markets ?? []).map(normalizeKalshiMarket).filter(isTradeable)
         }
       }
 
@@ -484,19 +554,22 @@ class ServerAgent extends EventEmitter {
         } else if (!this.windowBetPlaced && minutesLeft >= MIN_MINUTES_LEFT) {
           if (wasBootstrap) {
             // Bootstrap run just fetched market data — restart d-poller to watch for signal
+            this.agentPhase = 'monitoring'
             this.startDPoller(freshClose)
           } else {
-            // Threshold-triggered PASS (execution/risk declined) — cooldown 5 min to avoid
-            // immediate re-trigger since d is still >= threshold in the same market conditions
-            const cooldownMs = 5 * 60_000
-            this.nextRunAt   = Date.now() + cooldownMs
-            this.nextCycleIn = Math.round(cooldownMs / 1000)
-            console.log('[ServerAgent] Threshold-triggered PASS — cooling down 5 min before next window')
-            this.autoTimeout = setTimeout(() => { if (this.active) this.scheduleNextRun() }, cooldownMs)
+            // Threshold-triggered PASS — skip the rest of this window entirely.
+            // Re-running in the same conditions would just PASS again.
+            const waitMs     = Math.max(POST_WINDOW_BUFFER_MS, freshClose - Date.now() + POST_WINDOW_BUFFER_MS)
+            this.agentPhase  = 'pass_skipped'
+            this.nextRunAt   = Date.now() + waitMs
+            this.nextCycleIn = Math.round(waitMs / 1000)
+            console.log(`[ServerAgent] PASS — skipping window, next cycle in ${Math.round(waitMs/1000)}s`)
+            this.autoTimeout = setTimeout(() => { if (this.active) this.scheduleNextRun() }, waitMs)
           }
         } else {
           // Bet placed or window expired — wait for window to close then schedule next
           const waitMs     = Math.max(POST_WINDOW_BUFFER_MS, freshClose - Date.now() + POST_WINDOW_BUFFER_MS)
+          this.agentPhase  = this.windowBetPlaced ? 'bet_placed' : 'waiting'
           this.nextRunAt   = Date.now() + waitMs
           this.nextCycleIn = Math.round(waitMs / 1000)
           this.autoTimeout = setTimeout(() => { if (this.active) this.scheduleNextRun() }, waitMs)
@@ -597,8 +670,7 @@ class ServerAgent extends EventEmitter {
       if (liveOrderId) {
         this.windowBetPlaced = true
         this.orderError      = null
-        // Kelly: update bankroll based on expected outcome (will be corrected on settlement)
-        // For now just track cost as deployed capital; settlement loop will update pnl
+        this.agentPhase      = 'bet_placed'
         if (this.kellyMode) {
           this.bankroll = Math.max(1, this.bankroll - cost) // reserve the bet
         }
@@ -606,6 +678,7 @@ class ServerAgent extends EventEmitter {
       } else if (orderErrorMsg) {
         this.orderFailed = true
         this.orderError  = orderErrorMsg
+        this.agentPhase  = 'order_failed'
         console.error(`[ServerAgent] ✗ Order failed: ${orderErrorMsg}`)
       }
     }

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
+import type { AgentPhase } from '@/lib/agent-shared'
 
 interface AgentAllowancePanelProps {
   active: boolean
@@ -17,6 +18,8 @@ interface AgentAllowancePanelProps {
   lastPollAt?: number | null
   strikePrice?: number
   gkVol?: number
+  agentPhase?: AgentPhase
+  windowCloseAt?: number
   onStart: (kellyMode: boolean, bankroll: number, kellyPct: number) => void
   onStop: () => void
   onSetAllowance: (amount: number, kellyMode?: boolean, bankroll?: number) => void
@@ -26,7 +29,8 @@ interface AgentAllowancePanelProps {
 export default function AgentAllowancePanel({
   active, isRunning, allowance, bankroll, kellyMode, nextCycleIn,
   windowKey, windowBetPlaced, orderError, currentD: serverD, confidenceThreshold = 1.0,
-  lastPollAt, strikePrice, gkVol = 0.002, onStart, onStop, onSetAllowance,
+  lastPollAt, strikePrice, gkVol = 0.002, agentPhase = 'idle', windowCloseAt = 0,
+  onStart, onStop, onSetAllowance,
 }: AgentAllowancePanelProps) {
   const [editingBankroll, setEditingBankroll] = useState(false)
   const [editVal, setEditVal] = useState('')
@@ -40,16 +44,19 @@ export default function AgentAllowancePanel({
   useEffect(() => { setLocalKelly(kellyMode) }, [kellyMode])
   useEffect(() => { if (bankroll > 0) setLocalBankroll(bankroll) }, [bankroll])
 
-  // Fetch BTC price every 2s and recompute d locally
+  // Fetch BTC price every 2s and recompute d locally — only while actively monitoring
   useEffect(() => {
-    if (!active || !strikePrice || strikePrice <= 0) return
+    if (!active || !strikePrice || strikePrice <= 0 || agentPhase !== 'monitoring') return
     const compute = async () => {
       try {
         const res = await fetch('/api/btc-price', { cache: 'no-store' })
         if (!res.ok) return
         const { price } = await res.json()
         if (!price || price <= 0) return
-        const minutesLeft = 7
+        // Use actual window close time if available, else fall back to 7 min
+        const minutesLeft = windowCloseAt > 0
+          ? Math.max(0.5, (windowCloseAt - Date.now()) / 60_000)
+          : 7
         const candlesLeft = minutesLeft / 15
         const d = Math.log(price / strikePrice) / (gkVol * Math.sqrt(candlesLeft))
         setLiveD(d)
@@ -59,7 +66,7 @@ export default function AgentAllowancePanel({
     compute()
     const id = setInterval(compute, 2_000)
     return () => clearInterval(id)
-  }, [active, strikePrice, gkVol])
+  }, [active, strikePrice, gkVol, agentPhase, windowCloseAt])
 
   const currentD = liveD
   const mins = Math.floor(nextCycleIn / 60)
@@ -242,17 +249,47 @@ export default function AgentAllowancePanel({
             )}
           </div>
 
-          {windowBetPlaced ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <div style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--green)', boxShadow: '0 0 5px var(--green)', flexShrink: 0 }} />
-              <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--green-dark)' }}>Bet placed this window</span>
-            </div>
-          ) : isRunning ? (
+          {/* Phase-aware status display */}
+          {(agentPhase === 'bootstrap' || agentPhase === 'pipeline') ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <span style={{ animation: 'spin-slow 1s linear infinite', display: 'inline-block', color: 'var(--blue)', fontSize: 11 }}>◌</span>
-              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--blue-dark)' }}>Running pipeline…</span>
+              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--blue-dark)' }}>
+                {agentPhase === 'bootstrap' ? 'Fetching market data…' : 'Running pipeline…'}
+              </span>
             </div>
-          ) : lastPollAt ? (
+          ) : agentPhase === 'bet_placed' ? (
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+                <div style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--green)', boxShadow: '0 0 5px var(--green)', flexShrink: 0 }} />
+                <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--green-dark)' }}>Bet placed ✓</span>
+              </div>
+              {windowCloseAt > 0 && (
+                <div style={{ fontSize: 8, color: 'var(--text-muted)' }}>
+                  Window closes in {mins}:{String(secs).padStart(2, '0')} · awaiting result
+                </div>
+              )}
+            </div>
+          ) : agentPhase === 'pass_skipped' ? (
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+                <div style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--amber)', flexShrink: 0 }} />
+                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--amber)' }}>PASS — skipping window</span>
+              </div>
+              <div style={{ fontSize: 8, color: 'var(--text-muted)' }}>
+                {nextCycleIn > 0 ? `Next window in ${mins}:${String(secs).padStart(2, '0')}` : 'Waiting for next window…'}
+              </div>
+            </div>
+          ) : agentPhase === 'order_failed' ? (
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+                <div style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--red)', flexShrink: 0 }} />
+                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--red)' }}>Order failed — retrying</span>
+              </div>
+              <div style={{ fontSize: 8, color: 'var(--text-muted)' }}>
+                {nextCycleIn > 0 ? `Retry in ${mins}:${String(secs).padStart(2, '0')}` : 'Retrying…'}
+              </div>
+            </div>
+          ) : agentPhase === 'monitoring' && lastPollAt ? (
             <>
               <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 4 }}>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
@@ -279,15 +316,18 @@ export default function AgentAllowancePanel({
               </div>
               <div style={{ fontSize: 8, color: 'var(--text-muted)' }}>
                 {Math.abs(currentD ?? 0) >= confidenceThreshold
-                  ? '⚡ Threshold crossed — firing pipeline'
-                  : `${((1 - Math.abs(currentD ?? 0) / confidenceThreshold) * 100).toFixed(0)}% to threshold · live · updates every 2s`}
+                  ? '⚡ Signal strong — launching pipeline'
+                  : `${((1 - Math.abs(currentD ?? 0) / confidenceThreshold) * 100).toFixed(0)}% to threshold · live`}
               </div>
             </>
           ) : (
+            /* waiting / idle / unknown */
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <div style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--border)', flexShrink: 0 }} />
               <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                {nextCycleIn > 0 ? `Starts in ${mins}:${String(secs).padStart(2, '0')}` : 'Waiting for window…'}
+                {nextCycleIn > 0
+                  ? `Next window in ${mins}:${String(secs).padStart(2, '0')}`
+                  : agentPhase === 'waiting' ? 'Waiting for valid window…' : 'Monitoring…'}
               </span>
             </div>
           )}
