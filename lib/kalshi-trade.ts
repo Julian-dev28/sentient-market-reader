@@ -7,6 +7,7 @@
 
 import { buildKalshiHeaders } from './kalshi-auth'
 import type { KalshiBalance, KalshiPosition, KalshiOrder, KalshiFill } from './types'
+import { normalizeKalshiPosition, normalizeKalshiOrder, normalizeKalshiFill } from './types'
 
 const KALSHI_BASE = 'https://api.elections.kalshi.com/trade-api/v2'
 
@@ -214,7 +215,7 @@ export async function getPositions(): Promise<PositionsResult> {
     if (!res.ok) {
       return { ok: false, error: extractError(body, res.status), status: res.status, positions: [], orders: [] }
     }
-    return { ok: true, positions: (body.market_positions ?? []) as KalshiPosition[], orders: [] }
+    return { ok: true, positions: (body.market_positions ?? []).map(normalizeKalshiPosition) as KalshiPosition[], orders: [] }
   } catch (err) {
     return { ok: false, error: String(err), positions: [], orders: [] }
   }
@@ -228,7 +229,7 @@ export async function getFills(limit = 20): Promise<{ ok: boolean; fills: Kalshi
     const res = await fetch(`${KALSHI_BASE}/portfolio/fills?limit=${limit}`, { headers, cache: 'no-store' })
     const body = await res.json().catch(() => null)
     if (!res.ok) return { ok: false, fills: [], error: extractError(body, res.status) }
-    return { ok: true, fills: (body.fills ?? []) as KalshiFill[] }
+    return { ok: true, fills: (body.fills ?? []).map(normalizeKalshiFill) as KalshiFill[] }
   } catch (err) {
     return { ok: false, fills: [], error: String(err) }
   }
@@ -245,7 +246,7 @@ export async function getOrders(status?: string): Promise<{ ok: boolean; orders:
     if (!res.ok) {
       return { ok: false, orders: [], error: extractError(body, res.status) }
     }
-    return { ok: true, orders: (body.orders ?? []) as KalshiOrder[] }
+    return { ok: true, orders: (body.orders ?? []).map(normalizeKalshiOrder) as KalshiOrder[] }
   } catch (err) {
     return { ok: false, orders: [], error: String(err) }
   }

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { buildKalshiHeaders } from '@/lib/kalshi-auth'
+import { normalizeKalshiMarket } from '@/lib/types'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -27,7 +28,7 @@ function getCurrentEventTicker(): string {
 /** A market is still tradeable: window hasn't closed and prices are live (not 0 or 100 = settled extremes) */
 function isTradeable(m: { yes_ask: number; close_time?: string }): boolean {
   if (m.close_time && new Date(m.close_time).getTime() <= Date.now()) return false
-  return m.yes_ask > 1 && m.yes_ask < 99
+  return m.yes_ask > 0 && m.yes_ask < 100
 }
 
 export async function GET() {
@@ -41,7 +42,7 @@ export async function GET() {
     })
     if (res.ok) {
       const data = await res.json()
-      const active = (data.markets ?? []).filter(isTradeable)
+      const active = (data.markets ?? []).map(normalizeKalshiMarket).filter(isTradeable)
       if (active.length > 0) return NextResponse.json({ ...data, markets: active })
     }
   } catch { /* fall through */ }
@@ -55,7 +56,7 @@ export async function GET() {
     })
     if (res.ok) {
       const data = await res.json()
-      const active = (data.markets ?? []).filter(isTradeable)
+      const active = (data.markets ?? []).map(normalizeKalshiMarket).filter(isTradeable)
       if (active.length > 0) return NextResponse.json({ ...data, markets: active })
     }
   } catch { /* fall through */ }

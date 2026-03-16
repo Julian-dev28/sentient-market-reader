@@ -73,6 +73,8 @@ export default function AgentPage() {
               lastPollAt={engine.lastPollAt}
               strikePrice={engine.strikePrice}
               gkVol={engine.gkVol}
+              agentPhase={engine.agentPhase}
+              windowCloseAt={engine.windowCloseAt}
               onStart={handleStart}
               onStop={engine.stopAgent}
               onSetAllowance={engine.setAllowanceAmount}

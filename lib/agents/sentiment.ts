@@ -93,7 +93,7 @@ export async function runSentiment(
   ].join('\n') : null
 
   // Pre-compute quantitative signals — deterministic math done before the LLM call
-  const quant     = computeQuantSignals(candles, liveCandles, null, quote.price, strikePrice, distanceFromStrikePct, minutesUntilExpiry)
+  const quant     = computeQuantSignals(candles, liveCandles, orderbook, quote.price, strikePrice, distanceFromStrikePct, minutesUntilExpiry)
   const quantBrief = formatQuantBrief(quant, quote.price, distanceFromStrikePct, minutesUntilExpiry)
 
   const distUSD = Math.abs(distanceFromStrikePct / 100) * quote.price
@@ -245,7 +245,17 @@ ${prevContext}`] : []),
     else if (quant.rsiDivergence.type === 'bearish') { score -= 0.15; signals.push('RSI bearish divergence') }
   }
 
-  // 12. Efficiency ratio — dampen signals in choppy market
+  // 12. Kalshi orderbook imbalance (pressure-weighted YES vs NO depth)
+  if (quant.obImbalance) {
+    const pw = quant.obImbalance.pressureWeighted
+    if      (pw >  0.30) { score += 0.15; signals.push('OB strong YES pressure') }
+    else if (pw >  0.12) { score += 0.08; signals.push('OB mild YES pressure') }
+    else if (pw < -0.30) { score -= 0.15; signals.push('OB strong NO pressure') }
+    else if (pw < -0.12) { score -= 0.08; signals.push('OB mild NO pressure') }
+    else                 { signals.push('OB balanced') }
+  }
+
+  // 13. Efficiency ratio — dampen signals in choppy market
   if (quant.efficiencyRatio !== null && quant.efficiencyRatio < 0.3) {
     score *= 0.5
     signals.push('Choppy regime — signals dampened')

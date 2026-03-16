@@ -23,6 +23,32 @@ export interface KalshiMarket {
   no_sub_title?: string
   rules_primary?: string
   market_type?: string
+  // New API dollar fields (Kalshi v2 uses these instead of cent integers)
+  yes_ask_dollars?: number
+  yes_bid_dollars?: number
+  no_ask_dollars?: number
+  no_bid_dollars?: number
+}
+
+/**
+ * Normalize a raw Kalshi API market object.
+ * The v2 API now returns `yes_ask_dollars` (float USD) instead of `yes_ask` (int cents).
+ * This converts dollar fields → cent fields so all downstream code stays consistent.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function normalizeKalshiMarket(m: any): KalshiMarket {
+  const toC = (dollars: number | undefined, cents: number | undefined): number => {
+    if (cents && cents > 0) return cents
+    if (dollars !== undefined && dollars >= 0) return Math.round(dollars * 100)
+    return 0
+  }
+  return {
+    ...m,
+    yes_ask: toC(m.yes_ask_dollars, m.yes_ask),
+    yes_bid: toC(m.yes_bid_dollars, m.yes_bid),
+    no_ask:  toC(m.no_ask_dollars,  m.no_ask),
+    no_bid:  toC(m.no_bid_dollars,  m.no_bid),
+  }
 }
 
 export interface KalshiOrderbookLevel {
@@ -162,7 +188,7 @@ export interface KalshiBalance {
 
 export interface KalshiPosition {
   ticker: string
-  position: number        // positive = YES, negative = NO
+  position: number        // positive = YES, negative = NO (contracts)
   realized_pnl: number    // cents
   market_exposure: number // cents
   fees_paid: number       // cents
@@ -197,6 +223,66 @@ export interface KalshiFill {
   is_taker: boolean
   created_time: string
   fee_cost: string        // dollar string e.g. "0.01"
+}
+
+/** Normalize raw Kalshi API position — new API uses _fp / _dollars suffixes */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function normalizeKalshiPosition(p: any): KalshiPosition {
+  const fp  = (v: unknown) => parseFloat(String(v ?? 0)) || 0
+  const toC = (dollars: unknown, cents: unknown) =>
+    (cents !== undefined && cents !== null && fp(cents) !== 0) ? fp(cents) : Math.round(fp(dollars) * 100)
+  return {
+    ticker:              p.ticker ?? p.market_ticker ?? '',
+    position:            fp(p.position_fp ?? p.position),
+    realized_pnl:        toC(p.realized_pnl_dollars, p.realized_pnl),
+    market_exposure:     toC(p.market_exposure_dollars, p.market_exposure),
+    fees_paid:           toC(p.fees_paid_dollars, p.fees_paid),
+    resting_orders_count: fp(p.resting_orders_count),
+  }
+}
+
+/** Normalize raw Kalshi API order */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function normalizeKalshiOrder(o: any): KalshiOrder {
+  const fp  = (v: unknown) => parseFloat(String(v ?? 0)) || 0
+  const toC = (dollars: unknown, cents: unknown) =>
+    (cents !== undefined && cents !== null && fp(cents) !== 0) ? fp(cents) : Math.round(fp(dollars) * 100)
+  return {
+    order_id:        o.order_id ?? '',
+    ticker:          o.ticker ?? o.market_ticker ?? '',
+    side:            o.side,
+    action:          o.action,
+    count:           fp(o.count_fp ?? o.count),
+    fill_count:      fp(o.fill_count_fp ?? o.fill_count),
+    remaining_count: fp(o.remaining_count_fp ?? o.remaining_count),
+    initial_count:   fp(o.initial_count_fp ?? o.initial_count ?? o.count_fp ?? o.count),
+    yes_price:       toC(o.yes_price_dollars, o.yes_price),
+    no_price:        toC(o.no_price_dollars,  o.no_price),
+    status:          o.status,
+    created_time:    o.created_time ?? '',
+    client_order_id: o.client_order_id,
+  }
+}
+
+/** Normalize raw Kalshi API fill */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function normalizeKalshiFill(f: any): KalshiFill {
+  const fp  = (v: unknown) => parseFloat(String(v ?? 0)) || 0
+  const toC = (dollars: unknown, cents: unknown) =>
+    (cents !== undefined && cents !== null && fp(cents) !== 0) ? fp(cents) : Math.round(fp(dollars) * 100)
+  return {
+    fill_id:      f.fill_id ?? f.trade_id ?? '',
+    order_id:     f.order_id ?? '',
+    ticker:       f.ticker ?? f.market_ticker ?? '',
+    side:         f.side,
+    action:       f.action,
+    count:        fp(f.count_fp ?? f.count),
+    yes_price:    toC(f.yes_price_dollars, f.yes_price),
+    no_price:     toC(f.no_price_dollars,  f.no_price),
+    is_taker:     f.is_taker ?? false,
+    created_time: f.created_time ?? '',
+    fee_cost:     f.fee_cost ?? '0',
+  }
 }
 
 // ─── Trade Log ─────────────────────────────────────────────────────────────

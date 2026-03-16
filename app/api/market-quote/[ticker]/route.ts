@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { buildKalshiHeaders } from '@/lib/kalshi-auth'
+import { normalizeKalshiMarket } from '@/lib/types'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -38,7 +39,8 @@ export async function GET(
     }
     const data = await res.json()
     // Kalshi returns { market: {...} } for single-market endpoint
-    return NextResponse.json({ market: data.market ?? data })
+    const raw = data.market ?? data
+    return NextResponse.json({ market: normalizeKalshiMarket(raw) })
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 500 })
   }
