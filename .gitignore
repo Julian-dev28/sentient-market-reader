@@ -52,3 +52,6 @@ timesfm/
 *.pyc
 # Kalshi UI-uploaded credentials (never commit)
 .kalshi-credentials.json
+
+# Persistent trade log (local algo data, not for VCS)
+data/trade-log.json

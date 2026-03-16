@@ -353,6 +353,7 @@ export interface AgentTrade {
   cost: number            // dollars deployed for this slice
   marketTicker: string
   strikePrice: number
+  btcPriceAtEntry?: number
   expiresAt: string
   enteredAt: string
   status: 'open' | 'won' | 'lost'
@@ -361,6 +362,7 @@ export interface AgentTrade {
   pModel: number
   pMarket: number
   edge: number
+  signals?: TradeSignals  // full signal vector for calibration/attribution
   liveOrderId?: string
   liveMode?: boolean
   orderError?: string     // set if live order placement failed
