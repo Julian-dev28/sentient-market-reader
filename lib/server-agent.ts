@@ -508,8 +508,10 @@ class ServerAgent extends EventEmitter {
     this.agentPhase      = this.strikePrice > 0 ? 'monitoring' : 'bootstrap'
     this.pushState()
 
+    let pollInFlight = false
     const check = async () => {
-      if (!this.active || this.isRunning || this.windowBetPlaced) return
+      if (!this.active || this.isRunning || this.windowBetPlaced || pollInFlight) return
+      pollInFlight = true
 
       const minutesLeft = (closeMs - Date.now()) / 60_000
       if (minutesLeft < MIN_MINUTES_LEFT) {
@@ -530,6 +532,7 @@ class ServerAgent extends EventEmitter {
       // Bootstrap: no strike yet → run pipeline once to get market data
       if (this.strikePrice <= 0) {
         this.stopDPoller()
+        pollInFlight = false
         await this.runCycle()
         return
       }
@@ -565,11 +568,13 @@ class ServerAgent extends EventEmitter {
         }
       } catch (e) {
         console.error('[ServerAgent] d-poller error:', e)
+      } finally {
+        pollInFlight = false
       }
     }
 
     check()
-    this.pollerInterval = setInterval(check, 2_000)
+    this.pollerInterval = setInterval(check, 500)  // 500ms — detect d-trigger within half a second
   }
 
   private scheduleNextRun() {
