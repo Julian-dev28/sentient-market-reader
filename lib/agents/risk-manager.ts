@@ -104,8 +104,10 @@ export function runRiskManager(
   }
 
   // ── Portfolio-proportional Half-Kelly sizing ──────────────────────────────
-  // Standard Kelly: f* = (b·p − q) / b  where b = net odds, q = 1 − p
-  const b = limitPrice > 0 ? (100 - limitPrice) / limitPrice : 1
+  // Standard Kelly: f* = (b·p − q) / b  where b = net odds after fees, q = 1 − p
+  // Kalshi charges 7% of net profit on winning trades — b must reflect after-fee payout
+  const KALSHI_FEE = 0.07
+  const b = limitPrice > 0 ? (100 - limitPrice) * (1 - KALSHI_FEE) / limitPrice : 1
   const kellyFraction = Math.max(0, (b * pModel - (1 - pModel)) / b)
 
   // Volatility scalar: high-vol → smaller size. Clamped [0.30, 1.50].
@@ -131,11 +133,12 @@ export function runRiskManager(
     rejectionReason = `Kelly fraction zero at ${limitPrice}¢ — negative expected value at this price`
   }
 
-  // Expected profit too small to cover fees
-  const expectedProfit = costPerContract > 0 ? (1 - costPerContract) * positionSize : 0
+  // Net expected profit after Kalshi 7% fee — must clear the minimum threshold
+  const grossProfit  = costPerContract > 0 ? (1 - costPerContract) * positionSize : 0
+  const expectedProfit = grossProfit * (1 - KALSHI_FEE)
   if (approved && expectedProfit < RISK_PARAMS.minExpectedProfit) {
     approved = false
-    rejectionReason = `Expected profit $${expectedProfit.toFixed(2)} < minimum $${RISK_PARAMS.minExpectedProfit} — fee killer`
+    rejectionReason = `Net profit after fees $${expectedProfit.toFixed(2)} < minimum $${RISK_PARAMS.minExpectedProfit}`
   }
 
   const maxLoss          = approved ? costPerContract * positionSize : 0
