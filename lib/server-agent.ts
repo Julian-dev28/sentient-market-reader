@@ -35,6 +35,7 @@ const MAX_MINUTES_LEFT       = 12
 const POST_WINDOW_BUFFER_MS  = 30_000
 const MIN_FAST_ENTRY_PRICE   = 78   // ¢ — sweet spot is 78-99¢ (94-100% win rate)
 const MAX_FAST_ENTRY_PRICE   = 99   // ¢ — no hard upper cap; high prices = high win rate
+const KALSHI_FEE_RATE        = 0.07 // 7% of net profit on winning trades
 
 // ── Normal CDF approximation (Abramowitz & Stegun) ───────────────────────────
 function normalCDF(x: number): number {
@@ -383,8 +384,9 @@ class ServerAgent extends EventEmitter {
       }
 
       // Kelly sizing: pModel = N(|d|), half-Kelly of bankroll
+      // b = net odds per $1 at risk — must use after-fee profit since Kalshi takes 7% of wins
       const pModel    = normalCDF(Math.abs(d))
-      const b         = (100 - askPrice) / askPrice
+      const b         = (100 - askPrice) * (1 - KALSHI_FEE_RATE) / askPrice
       const kellyFrac = Math.max(0, (b * pModel - (1 - pModel)) / b)
       if (kellyFrac <= 0) {
         console.log(`[ServerAgent] Fast-path: Kelly=0 at ${askPrice}¢ — skip`)
@@ -994,7 +996,9 @@ class ServerAgent extends EventEmitter {
             const { market } = await res.json()
             if (market?.result === 'yes' || market?.result === 'no') {
               const win = t.side === market.result
-              return { ...t, status: (win ? 'won' : 'lost') as 'won' | 'lost', settlementPrice: pf.currentPrice, pnl: win ? t.contracts - t.cost : -t.cost }
+              const grossProfit = t.contracts - t.cost
+              const pnl = win ? grossProfit * (1 - KALSHI_FEE_RATE) : -t.cost
+              return { ...t, status: (win ? 'won' : 'lost') as 'won' | 'lost', settlementPrice: pf.currentPrice, pnl }
             }
           }
         } catch {}
@@ -1012,8 +1016,9 @@ class ServerAgent extends EventEmitter {
       if (this.kellyMode && justSettled.length > 0) {
         for (const t of justSettled) {
           if (t.status === 'won') {
-            // Return cost + profit: contracts payout
-            this.bankroll += t.contracts  // full payout (cost already deducted at bet time)
+            // Net payout = gross payout minus Kalshi 7% fee on profit
+            const grossProfit = t.contracts - t.cost
+            this.bankroll += t.cost + grossProfit * (1 - KALSHI_FEE_RATE)
           }
           // On loss, cost was already deducted at bet time — nothing extra to do
         }
