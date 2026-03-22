@@ -396,6 +396,12 @@ class ServerAgent extends EventEmitter {
       const contracts        = Math.max(1, Math.min(Math.round(halfKellyCapital / (askPrice / 100)), 500))
       const cost             = contracts * (askPrice / 100)
       if (cost < 1) return
+      // Net expected profit after 7% Kalshi fee — must clear $2 minimum (fee-killer guard)
+      const expectedProfit = (1 - askPrice / 100) * contracts * (1 - KALSHI_FEE_RATE)
+      if (expectedProfit < 2.00) {
+        console.log(`[ServerAgent] Fast-path: net profit $${expectedProfit.toFixed(2)} < $2.00 minimum — skip`)
+        return
+      }
 
       console.log(`[ServerAgent] ⚡ Fast-path: ${side.toUpperCase()} ${contracts}× @ ${askPrice}¢ | d=${d.toFixed(3)} pModel=${(pModel*100).toFixed(1)}% Kelly=${(kellyFrac*100).toFixed(1)}%`)
 
