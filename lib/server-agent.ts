@@ -538,7 +538,7 @@ class ServerAgent extends EventEmitter {
       }
 
       this.pipeline = result
-      await this.processResult(result)
+      await this.processResult(result, wasBootstrap)
 
     } catch (err) {
       console.error('[ServerAgent] runCycle error:', err)
@@ -601,7 +601,7 @@ class ServerAgent extends EventEmitter {
 
   // ── Process pipeline result & place order ──────────────────────────────────
 
-  private async processResult(data: PipelineState) {
+  private async processResult(data: PipelineState, isBootstrap: boolean) {
     const exec  = data.agents.execution.output
     const md    = data.agents.marketDiscovery.output
     const pf    = data.agents.priceFeed.output
@@ -619,6 +619,21 @@ class ServerAgent extends EventEmitter {
     if (evTicker && evTicker !== this.windowKey) {
       this.windowKey       = evTicker
       this.windowBetPlaced = false
+    }
+
+    // If this is a bootstrap run, only place a bet if d-score already crosses threshold.
+    // Otherwise skip betting and let the d-poller watch for a real signal.
+    // This prevents the majority of low-confidence trades that cause losses.
+    if (isBootstrap) {
+      const distPct    = pf.distanceFromStrikePct / 100
+      const gkV        = prob.gkVol15m ?? this.gkVol
+      const candlesLeft = Math.max(0.01, md.minutesUntilExpiry / 15)
+      const d = Math.abs(Math.log(1 + distPct) / (Math.max(0.0001, gkV) * Math.sqrt(candlesLeft)))
+      if (d < CONFIDENCE_THRESHOLD) {
+        console.log(`[ServerAgent] Bootstrap: d=${d.toFixed(3)} < ${CONFIDENCE_THRESHOLD} — skip bet, watching for signal`)
+        return
+      }
+      console.log(`[ServerAgent] Bootstrap: d=${d.toFixed(3)} >= ${CONFIDENCE_THRESHOLD} — betting immediately`)
     }
 
     // Place bet
@@ -663,28 +678,54 @@ class ServerAgent extends EventEmitter {
       let orderErrorMsg: string | undefined
 
       try {
-        const res = await placeOrder({
+        // IOC at liveLimitPrice + 3¢ — sweeps the book at current market price.
+        // Kalshi fills at the best available ask (not necessarily at our ceiling).
+        // If the order doesn't fill (book empty / price moved > 3¢), retry once at +8¢.
+        const ioPrice = (price: number) => Math.min(99, price + 3)
+        let res = await placeOrder({
           ticker:  exec.marketTicker,
           side:    exec.side,
           count:   contracts,
-          yesPrice: exec.side === 'yes'
-            ? Math.min(99, liveLimitPrice + 2)
-            : undefined,
-          noPrice: exec.side === 'no'
-            ? Math.min(99, liveLimitPrice + 2)
-            : undefined,
+          yesPrice: exec.side === 'yes' ? ioPrice(liveLimitPrice) : undefined,
+          noPrice:  exec.side === 'no'  ? ioPrice(liveLimitPrice) : undefined,
           clientOrderId: `agent-${data.cycleId}-${Date.now()}`,
+          ioc: true,
         })
-        if (res.ok) {
-          liveOrderId = res.order?.order_id
+
+        // If IOC cancelled (0 fills) — price moved, retry once with wider sweep
+        if (res.ok && res.order && (res.order.fill_count ?? 0) === 0) {
+          console.log(`[ServerAgent] IOC unfilled — price moved, retrying with +8¢ ceiling`)
+          const retryPrice = (price: number) => Math.min(99, price + 8)
+          res = await placeOrder({
+            ticker:  exec.marketTicker,
+            side:    exec.side,
+            count:   contracts,
+            yesPrice: exec.side === 'yes' ? retryPrice(liveLimitPrice) : undefined,
+            noPrice:  exec.side === 'no'  ? retryPrice(liveLimitPrice) : undefined,
+            clientOrderId: `agent-${data.cycleId}-retry-${Date.now()}`,
+            ioc: true,
+          })
+        }
+
+        // IOC: only count as filled if fill_count > 0
+        const filled = res.ok && res.order && (res.order.fill_count ?? 0) > 0
+        if (filled) {
+          liveOrderId = res.order!.order_id
+          const actualFillCount = res.order!.fill_count ?? contracts
+          console.log(`[ServerAgent] IOC filled ${actualFillCount} contracts`)
           // Immediately place a GTC limit-sell at 99¢ to take profit if price spikes
-          limitSellOrder({ ticker: exec.marketTicker, side: exec.side, count: contracts })
+          limitSellOrder({ ticker: exec.marketTicker, side: exec.side, count: actualFillCount })
             .then(sr => {
               if (!sr.ok) console.warn(`[ServerAgent] limit-sell failed: ${sr.error}`)
               else console.log(`[ServerAgent] ✓ Limit-sell placed @ 99¢ on ${exec.marketTicker}`)
             })
             .catch(e => console.warn('[ServerAgent] limit-sell error:', e))
-        } else { orderErrorMsg = res.error ?? 'Order failed' }
+        } else if (!res.ok) {
+          orderErrorMsg = res.error ?? 'Order failed'
+        } else {
+          // IOC returned ok but fill_count = 0 after both attempts — book was empty
+          orderErrorMsg = 'IOC unfilled — no liquidity at this price'
+        }
       } catch (e) {
         orderErrorMsg = String(e)
       }

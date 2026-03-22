@@ -41,6 +41,7 @@ export interface PlaceOrderParams {
   yesPrice?: number       // limit price in cents for YES side
   noPrice?: number        // limit price in cents for NO side
   clientOrderId?: string
+  ioc?: boolean           // immediate_or_cancel — fills at market or cancels instantly
 }
 
 export interface PlaceOrderResult {
@@ -58,7 +59,7 @@ export async function placeOrder(params: PlaceOrderParams): Promise<PlaceOrderRe
     count: params.count,
     ...(params.yesPrice !== undefined ? { yes_price: params.yesPrice } : {}),
     ...(params.noPrice  !== undefined ? { no_price:  params.noPrice  } : {}),
-    time_in_force: 'good_till_canceled',  // rests at ask price until filled
+    time_in_force: params.ioc ? 'immediate_or_cancel' : 'good_till_canceled',
     ...(params.clientOrderId ? { client_order_id: params.clientOrderId } : {}),
   }
 
