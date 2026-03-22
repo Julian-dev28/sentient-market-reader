@@ -657,6 +657,20 @@ class ServerAgent extends EventEmitter {
         }
       }
 
+      // Last-resort fallback: fetch the specific ticker we know is active
+      if (!markets.length && this.currentMarketTicker) {
+        const tkPath = `/trade-api/v2/markets/${encodeURIComponent(this.currentMarketTicker)}`
+        const tkRes  = await fetch(
+          `https://api.elections.kalshi.com${tkPath}`,
+          { headers: { ...buildKalshiHeaders('GET', tkPath), Accept: 'application/json' }, cache: 'no-store' }
+        ).catch(() => null)
+        if (tkRes?.ok) {
+          const d = await tkRes.json()
+          const m = normalizeKalshiMarket(d.market ?? d)
+          if (isTradeable(m)) markets = [m]
+        }
+      }
+
       if (!markets.length) throw new Error('No active KXBTC15M markets — trading hours ~11:30 AM–midnight ET')
 
       // ── Fetch BTC price ────────────────────────────────────────────────────
@@ -758,6 +772,8 @@ class ServerAgent extends EventEmitter {
           const retryMs    = 5 * 60_000
           this.nextRunAt   = Date.now() + retryMs
           this.nextCycleIn = Math.round(retryMs / 1000)
+          // Clear 'pipeline'/'bootstrap' so UI doesn't freeze — respect bet_placed if order already in
+          this.agentPhase  = this.windowBetPlaced ? 'bet_placed' : 'waiting'
           console.log('[ServerAgent] Pipeline error — retrying in 5 min')
           this.schedule(() => this.scheduleNextRun(), retryMs)
         } else if (failed && minutesLeft >= MIN_MINUTES_LEFT) {
