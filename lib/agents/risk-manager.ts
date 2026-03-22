@@ -31,7 +31,8 @@ const RISK_PARAMS = {
   minMinutesLeft:    3,    // skip if < 3 min left (too late to size)
   maxMinutesLeft:   12,    // skip if > 12 min left (signal not yet settled)
   minDistancePct:   0.02,  // skip near-strike noise (|dist| < 0.02% → ~50/50)
-  baseContractSize: 100,   // floor position size (contracts)
+  minEntryPrice:    63,    // ¢ — reject if market price < 63¢ (model has no edge at near-50/50 prices)
+  minExpectedProfit: 2.00, // $ — reject if max possible win < $2 (fee-killer)
   maxContractSize:  500,   // ceiling position size (contracts)
   maxTradePct:      10,    // % of portfolio — max capital at risk per trade
 }
@@ -97,6 +98,9 @@ export function runRiskManager(
   } else if (sessionState.tradeCount >= RISK_PARAMS.maxTradesPerDay) {
     approved = false
     rejectionReason = `Daily trade count cap reached (${RISK_PARAMS.maxTradesPerDay})`
+  } else if (limitPrice < RISK_PARAMS.minEntryPrice) {
+    approved = false
+    rejectionReason = `Entry price ${limitPrice}¢ below min ${RISK_PARAMS.minEntryPrice}¢ — model has no edge at near-50/50 prices`
   }
 
   // ── Portfolio-proportional Half-Kelly sizing ──────────────────────────────
@@ -119,7 +123,21 @@ export function runRiskManager(
   const tradeBudget      = Math.min(halfKellyCapital, maxTradeCapital)
   const costPerContract  = limitPrice / 100   // $ per contract
   const budgetContracts  = costPerContract > 0 ? Math.round(tradeBudget / costPerContract) : 0
-  const positionSize     = Math.max(RISK_PARAMS.baseContractSize, Math.min(budgetContracts, RISK_PARAMS.maxContractSize))
+  const positionSize     = Math.min(budgetContracts, RISK_PARAMS.maxContractSize)
+
+  // Kelly says no edge at this price — reject rather than force a position
+  if (approved && positionSize <= 0) {
+    approved = false
+    rejectionReason = `Kelly fraction zero at ${limitPrice}¢ — negative expected value at this price`
+  }
+
+  // Expected profit too small to cover fees
+  const expectedProfit = costPerContract > 0 ? (1 - costPerContract) * positionSize : 0
+  if (approved && expectedProfit < RISK_PARAMS.minExpectedProfit) {
+    approved = false
+    rejectionReason = `Expected profit $${expectedProfit.toFixed(2)} < minimum $${RISK_PARAMS.minExpectedProfit} — fee killer`
+  }
+
   const maxLoss          = approved ? costPerContract * positionSize : 0
   const pctOfPortfolio   = portfolioValue > 0 ? (maxLoss / portfolioValue) * 100 : 0
 
@@ -177,6 +195,9 @@ export async function runRomaRiskManager(
   if (sessionState.tradeCount >= RISK_PARAMS.maxTradesPerDay) {
     return buildRejected('Daily trade count cap reached', drawdownPct, start)
   }
+  if (limitPrice < RISK_PARAMS.minEntryPrice) {
+    return buildRejected(`Entry price ${limitPrice}¢ below min ${RISK_PARAMS.minEntryPrice}¢ — model has no edge at near-50/50 prices`, drawdownPct, start)
+  }
 
   const costPerContract  = limitPrice / 100
   const maxBudget        = Math.min(maxTradeCapital, portfolioValue * 0.10)
@@ -229,7 +250,7 @@ export async function runRomaRiskManager(
     })
 
     const approved     = extracted.approved
-    const positionSize = Math.max(RISK_PARAMS.baseContractSize, Math.min(Math.round(extracted.positionSize), RISK_PARAMS.maxContractSize))
+    const positionSize = Math.min(Math.round(extracted.positionSize), RISK_PARAMS.maxContractSize)
     const maxLoss      = approved ? (limitPrice / 100) * positionSize : 0
 
     return {
