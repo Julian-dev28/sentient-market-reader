@@ -120,7 +120,8 @@ class ServerAgent extends EventEmitter {
   private allowance        = 100
   private initialAllowance = 100
   private isRunning        = false
-  private windowKey:   string | null = null
+  private windowKey:           string | null = null
+  private currentMarketTicker: string        = ''   // full ticker from bootstrap (e.g. KXBTC15M-25MAR221445-T84000)
   private windowBetPlaced = false
   private currentD     = 0
   private lastPollAt:  number | null = null
@@ -345,18 +346,34 @@ class ServerAgent extends EventEmitter {
     const side: 'yes' | 'no' = d > 0 ? 'yes' : 'no'
 
     try {
-      // Fetch current Kalshi quote for this event window
-      const path = '/trade-api/v2/markets'
-      const url  = `https://api.elections.kalshi.com${path}?event_ticker=${encodeURIComponent(this.windowKey)}&limit=10`
-      const res  = await fetch(url, {
-        headers: { ...buildKalshiHeaders('GET', path), Accept: 'application/json' },
-        cache: 'no-store',
-        signal: AbortSignal.timeout(5_000),
-      })
-      if (!res.ok) return
-      const data    = await res.json()
-      const markets = ((data.markets ?? []) as unknown[]).map(m => normalizeKalshiMarket(m as KalshiMarket))
-      const market  = markets.find(m => (side === 'yes' ? m.yes_ask : m.no_ask) > 0)
+      // Fetch a fresh quote using the exact market ticker from bootstrap (most precise).
+      // Falls back to event_ticker query if we don't have a stored ticker yet.
+      let market: KalshiMarket | undefined
+      if (this.currentMarketTicker) {
+        const path = `/trade-api/v2/markets/${encodeURIComponent(this.currentMarketTicker)}`
+        const res  = await fetch(`https://api.elections.kalshi.com${path}`, {
+          headers: { ...buildKalshiHeaders('GET', path), Accept: 'application/json' },
+          cache: 'no-store',
+          signal: AbortSignal.timeout(5_000),
+        })
+        if (res.ok) {
+          const data = await res.json()
+          market = normalizeKalshiMarket(data.market ?? data)
+        }
+      }
+      if (!market && this.windowKey) {
+        // Fallback: query by event_ticker and pick the one with liquidity on our side
+        const path = '/trade-api/v2/markets'
+        const res  = await fetch(`https://api.elections.kalshi.com${path}?event_ticker=${encodeURIComponent(this.windowKey)}&limit=10`, {
+          headers: { ...buildKalshiHeaders('GET', path), Accept: 'application/json' },
+          cache: 'no-store',
+          signal: AbortSignal.timeout(5_000),
+        })
+        if (!res.ok) return
+        const data    = await res.json()
+        const markets = ((data.markets ?? []) as unknown[]).map(m => normalizeKalshiMarket(m as KalshiMarket))
+        market = markets.find(m => (side === 'yes' ? m.yes_ask : m.no_ask) > 0)
+      }
       if (!market) return
 
       const askPrice = side === 'yes' ? market.yes_ask : market.no_ask
@@ -415,6 +432,8 @@ class ServerAgent extends EventEmitter {
       }
 
       // Order filled — record trade and mark window done
+      const actualFilled = orderRes.order!.fill_count ?? contracts
+      const actualCost   = actualFilled * (askPrice / 100)
       this.windowBetPlaced = true
       this.agentPhase      = 'bet_placed'
       this.orderError      = null
@@ -427,8 +446,8 @@ class ServerAgent extends EventEmitter {
         sliceNum:        1,
         side,
         limitPrice:      askPrice,
-        contracts,
-        cost,
+        contracts:       actualFilled,
+        cost:            actualCost,
         marketTicker:    market.ticker,
         strikePrice:     this.strikePrice,
         btcPriceAtEntry: undefined,
@@ -458,14 +477,14 @@ class ServerAgent extends EventEmitter {
       appendTrade(trade)
 
       if (this.kellyMode) {
-        this.bankroll = Math.max(1, this.bankroll - cost)
+        this.bankroll = Math.max(1, this.bankroll - actualCost)
       }
 
-      console.log(`[ServerAgent] ✓ Fast-path filled — ${side.toUpperCase()} ${contracts}× @ ${askPrice}¢ on ${evTicker}`)
+      console.log(`[ServerAgent] ✓ Fast-path filled — ${side.toUpperCase()} ${actualFilled}× @ ${askPrice}¢ on ${evTicker}`)
       this.pushState()
 
       // Place limit-sell at 99¢ to lock in profit when contract resolves
-      limitSellOrder({ ticker: market.ticker, side, count: contracts })
+      limitSellOrder({ ticker: market.ticker, side, count: actualFilled })
         .then(sr => {
           if (!sr.ok) console.warn(`[ServerAgent] fast-path limit-sell failed: ${sr.error}`)
           else console.log(`[ServerAgent] ✓ Fast-path limit-sell @ 99¢ on ${market.ticker}`)
@@ -775,8 +794,9 @@ class ServerAgent extends EventEmitter {
       ?? md.activeMarket?.ticker.split('-').slice(0, 2).join('-')
       ?? null
 
-    if (md.strikePrice > 0)                        this.strikePrice = md.strikePrice
-    if (prob.gkVol15m && prob.gkVol15m > 0)        this.gkVol       = prob.gkVol15m
+    if (md.strikePrice > 0)                        this.strikePrice          = md.strikePrice
+    if (prob.gkVol15m && prob.gkVol15m > 0)        this.gkVol                = prob.gkVol15m
+    if (md.activeMarket?.ticker)                   this.currentMarketTicker  = md.activeMarket.ticker
 
     if (evTicker && evTicker !== this.windowKey) {
       this.windowKey       = evTicker
@@ -840,17 +860,13 @@ class ServerAgent extends EventEmitter {
       let orderErrorMsg: string | undefined
       let iocUnfilled   = false   // IOC with no fill — skip window, don't retry
 
-      // Skip bets above 90¢ — no liquidity, tiny profit, known orderbook dead zone
-      if (liveLimitPrice > 90) {
-        iocUnfilled  = true
-        orderErrorMsg = `Skipped — price ${liveLimitPrice}¢ > 90¢ cap (no liquidity)`
-        console.log(`[ServerAgent] ${orderErrorMsg}`)
-      } else {
+      {
         try {
           // IOC at liveLimitPrice + 3¢ — sweeps the book at current market price.
           // Kalshi fills at the best available ask (not necessarily at our ceiling).
           // If the order doesn't fill (book empty / price moved > 3¢), retry once at +5¢.
-          const ioPrice = (price: number) => Math.min(90, price + 3)
+          // No upper price cap — data shows 90-99¢ has 100% win rate.
+          const ioPrice = (price: number) => Math.min(99, price + 3)
           let res = await placeOrder({
             ticker:  exec.marketTicker,
             side:    exec.side,
@@ -867,7 +883,7 @@ class ServerAgent extends EventEmitter {
 
           if (!wasFilled(res) && res.ok) {
             console.log(`[ServerAgent] IOC unfilled — retrying with +5¢ ceiling`)
-            const retryPrice = (price: number) => Math.min(90, price + 5)
+            const retryPrice = (price: number) => Math.min(99, price + 5)
             res = await placeOrder({
               ticker:  exec.marketTicker,
               side:    exec.side,
