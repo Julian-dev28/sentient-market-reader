@@ -707,8 +707,9 @@ class ServerAgent extends EventEmitter {
           })
         }
 
-        // IOC: only count as filled if fill_count > 0
-        const filled = res.ok && res.order && (res.order.fill_count ?? 0) > 0
+        // IOC: filled if fill_count > 0 OR status is executed (Kalshi may normalize differently)
+        const filled = res.ok && res.order &&
+          ((res.order.fill_count ?? 0) > 0 || res.order.status === 'executed')
         if (filled) {
           liveOrderId = res.order!.order_id
           const actualFillCount = res.order!.fill_count ?? contracts

@@ -79,7 +79,7 @@ export async function placeOrder(params: PlaceOrderParams): Promise<PlaceOrderRe
     if (!res.ok) {
       return { ok: false, error: extractError(data, res.status) }
     }
-    return { ok: true, order: data.order as KalshiOrder }
+    return { ok: true, order: normalizeKalshiOrder(data.order) }
   } catch (err) {
     return { ok: false, error: String(err) }
   }
@@ -116,7 +116,7 @@ export async function sellOrder(params: SellOrderParams): Promise<PlaceOrderResu
     })
     const data = await res.json()
     if (!res.ok) return { ok: false, error: extractError(data, res.status) }
-    return { ok: true, order: data.order as KalshiOrder }
+    return { ok: true, order: normalizeKalshiOrder(data.order) }
   } catch (err) {
     return { ok: false, error: String(err) }
   }
@@ -146,7 +146,7 @@ export async function limitSellOrder(params: SellOrderParams): Promise<PlaceOrde
     })
     const data = await res.json()
     if (!res.ok) return { ok: false, error: extractError(data, res.status) }
-    return { ok: true, order: data.order as KalshiOrder }
+    return { ok: true, order: normalizeKalshiOrder(data.order) }
   } catch (err) {
     return { ok: false, error: String(err) }
   }
