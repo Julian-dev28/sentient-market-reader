@@ -676,59 +676,68 @@ class ServerAgent extends EventEmitter {
 
       let liveOrderId: string | undefined
       let orderErrorMsg: string | undefined
+      let iocUnfilled   = false   // IOC with no fill — skip window, don't retry
 
-      try {
-        // IOC at liveLimitPrice + 3¢ — sweeps the book at current market price.
-        // Kalshi fills at the best available ask (not necessarily at our ceiling).
-        // If the order doesn't fill (book empty / price moved > 3¢), retry once at +8¢.
-        const ioPrice = (price: number) => Math.min(99, price + 3)
-        let res = await placeOrder({
-          ticker:  exec.marketTicker,
-          side:    exec.side,
-          count:   contracts,
-          yesPrice: exec.side === 'yes' ? ioPrice(liveLimitPrice) : undefined,
-          noPrice:  exec.side === 'no'  ? ioPrice(liveLimitPrice) : undefined,
-          clientOrderId: `agent-${data.cycleId}-${Date.now()}`,
-          ioc: true,
-        })
-
-        // If IOC cancelled (0 fills) — price moved, retry once with wider sweep
-        if (res.ok && res.order && (res.order.fill_count ?? 0) === 0) {
-          console.log(`[ServerAgent] IOC unfilled — price moved, retrying with +8¢ ceiling`)
-          const retryPrice = (price: number) => Math.min(99, price + 8)
-          res = await placeOrder({
+      // Skip bets above 90¢ — no liquidity, tiny profit, known orderbook dead zone
+      if (liveLimitPrice > 90) {
+        iocUnfilled  = true
+        orderErrorMsg = `Skipped — price ${liveLimitPrice}¢ > 90¢ cap (no liquidity)`
+        console.log(`[ServerAgent] ${orderErrorMsg}`)
+      } else {
+        try {
+          // IOC at liveLimitPrice + 3¢ — sweeps the book at current market price.
+          // Kalshi fills at the best available ask (not necessarily at our ceiling).
+          // If the order doesn't fill (book empty / price moved > 3¢), retry once at +5¢.
+          const ioPrice = (price: number) => Math.min(90, price + 3)
+          let res = await placeOrder({
             ticker:  exec.marketTicker,
             side:    exec.side,
             count:   contracts,
-            yesPrice: exec.side === 'yes' ? retryPrice(liveLimitPrice) : undefined,
-            noPrice:  exec.side === 'no'  ? retryPrice(liveLimitPrice) : undefined,
-            clientOrderId: `agent-${data.cycleId}-retry-${Date.now()}`,
+            yesPrice: exec.side === 'yes' ? ioPrice(liveLimitPrice) : undefined,
+            noPrice:  exec.side === 'no'  ? ioPrice(liveLimitPrice) : undefined,
+            clientOrderId: `agent-${data.cycleId}-${Date.now()}`,
             ioc: true,
           })
-        }
 
-        // IOC: filled if fill_count > 0 OR status is executed (Kalshi may normalize differently)
-        const filled = res.ok && res.order &&
-          ((res.order.fill_count ?? 0) > 0 || res.order.status === 'executed')
-        if (filled) {
-          liveOrderId = res.order!.order_id
-          const actualFillCount = res.order!.fill_count ?? contracts
-          console.log(`[ServerAgent] IOC filled ${actualFillCount} contracts`)
-          // Immediately place a GTC limit-sell at 99¢ to take profit if price spikes
-          limitSellOrder({ ticker: exec.marketTicker, side: exec.side, count: actualFillCount })
-            .then(sr => {
-              if (!sr.ok) console.warn(`[ServerAgent] limit-sell failed: ${sr.error}`)
-              else console.log(`[ServerAgent] ✓ Limit-sell placed @ 99¢ on ${exec.marketTicker}`)
+          // If IOC cancelled (0 fills) — price moved, retry once with wider sweep
+          const wasFilled = (r: typeof res) =>
+            r.ok && r.order && ((r.order.fill_count ?? 0) > 0 || r.order.status === 'executed')
+
+          if (!wasFilled(res) && res.ok) {
+            console.log(`[ServerAgent] IOC unfilled — retrying with +5¢ ceiling`)
+            const retryPrice = (price: number) => Math.min(90, price + 5)
+            res = await placeOrder({
+              ticker:  exec.marketTicker,
+              side:    exec.side,
+              count:   contracts,
+              yesPrice: exec.side === 'yes' ? retryPrice(liveLimitPrice) : undefined,
+              noPrice:  exec.side === 'no'  ? retryPrice(liveLimitPrice) : undefined,
+              clientOrderId: `agent-${data.cycleId}-retry-${Date.now()}`,
+              ioc: true,
             })
-            .catch(e => console.warn('[ServerAgent] limit-sell error:', e))
-        } else if (!res.ok) {
-          orderErrorMsg = res.error ?? 'Order failed'
-        } else {
-          // IOC returned ok but fill_count = 0 after both attempts — book was empty
-          orderErrorMsg = 'IOC unfilled — no liquidity at this price'
+          }
+
+          if (wasFilled(res)) {
+            liveOrderId = res.order!.order_id
+            const actualFillCount = res.order!.fill_count ?? contracts
+            console.log(`[ServerAgent] IOC filled ${actualFillCount} contracts`)
+            limitSellOrder({ ticker: exec.marketTicker, side: exec.side, count: actualFillCount })
+              .then(sr => {
+                if (!sr.ok) console.warn(`[ServerAgent] limit-sell failed: ${sr.error}`)
+                else console.log(`[ServerAgent] ✓ Limit-sell placed @ 99¢ on ${exec.marketTicker}`)
+              })
+              .catch(e => console.warn('[ServerAgent] limit-sell error:', e))
+          } else if (!res.ok) {
+            orderErrorMsg = res.error ?? 'Order failed'
+          } else {
+            // Both IOC attempts returned 0 fills — no liquidity, skip this window
+            iocUnfilled   = true
+            orderErrorMsg = 'IOC unfilled — no liquidity, skipping window'
+            console.warn(`[ServerAgent] ${orderErrorMsg}`)
+          }
+        } catch (e) {
+          orderErrorMsg = String(e)
         }
-      } catch (e) {
-        orderErrorMsg = String(e)
       }
 
       const trade: AgentTrade = {
@@ -777,6 +786,11 @@ class ServerAgent extends EventEmitter {
           this.bankroll = Math.max(1, this.bankroll - cost) // reserve the bet
         }
         console.log(`[ServerAgent] ✓ Bet placed — ${exec.side.toUpperCase()} ${contracts}× @ ${liveLimitPrice}¢ on ${evTicker}`)
+      } else if (iocUnfilled) {
+        // No liquidity or price cap — skip this window, don't retry (would just loop)
+        this.orderError  = orderErrorMsg ?? 'Skipped — no fill'
+        this.agentPhase  = 'pass_skipped'
+        console.log(`[ServerAgent] Skipping window — ${this.orderError}`)
       } else if (orderErrorMsg) {
         this.orderFailed = true
         this.orderError  = orderErrorMsg
