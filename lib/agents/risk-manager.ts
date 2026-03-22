@@ -31,7 +31,7 @@ const RISK_PARAMS = {
   minMinutesLeft:    3,    // skip if < 3 min left (too late to size)
   maxMinutesLeft:   12,    // skip if > 12 min left (signal not yet settled)
   minDistancePct:   0.02,  // skip near-strike noise (|dist| < 0.02% → ~50/50)
-  minEntryPrice:    63,    // ¢ — reject if market price < 63¢ (model has no edge at near-50/50 prices)
+  minEntryPrice:    78,    // ¢ — reject if market price < 78¢ (sweet spot is 80-95¢, below = no edge)
   minExpectedProfit: 2.00, // $ — reject if max possible win < $2 (fee-killer)
   maxContractSize:  500,   // ceiling position size (contracts)
   maxTradePct:      10,    // % of portfolio — max capital at risk per trade
@@ -204,7 +204,7 @@ export async function runRomaRiskManager(
 
   const goal =
     `You are a quantitative risk manager for a Kalshi BTC 15-min prediction market trading system. ` +
-    `Assess whether this trade should be approved and recommend a position size (in contracts, ${RISK_PARAMS.baseContractSize}–${RISK_PARAMS.maxContractSize}). ` +
+    `Assess whether this trade should be approved and recommend a position size (in contracts, ${1}–${RISK_PARAMS.maxContractSize}). ` +
     `Consider: edge quality, time pressure, session health, portfolio exposure, and overall risk. ` +
     `Be conservative — only approve trades with genuine statistical edge. ` +
     `Never risk more than ${RISK_PARAMS.maxTradePct}% of the portfolio on a single trade.`
@@ -220,7 +220,7 @@ export async function runRomaRiskManager(
     `Trades today: ${sessionState.tradeCount} / ${RISK_PARAMS.maxTradesPerDay}`,
     `Current drawdown: ${drawdownPct.toFixed(1)}% (max: ${RISK_PARAMS.maxDrawdownPct}%)`,
     `Sentiment signals: ${sentimentSignals.join(' | ')}`,
-    `Contract range: ${RISK_PARAMS.baseContractSize}–${RISK_PARAMS.maxContractSize}`,
+    `Contract range: ${1}–${RISK_PARAMS.maxContractSize}`,
   ].join('\n')
 
   try {
@@ -241,7 +241,7 @@ export async function runRomaRiskManager(
       schema: {
         properties: {
           approved:     { type: 'boolean', description: 'true = approve the trade, false = reject' },
-          positionSize: { type: 'number',  description: `Number of contracts to trade, ${RISK_PARAMS.baseContractSize}–${RISK_PARAMS.maxContractSize}` },
+          positionSize: { type: 'number',  description: `Number of contracts to trade, ${1}–${RISK_PARAMS.maxContractSize}` },
           reasoning:    { type: 'string',  description: 'One sentence explanation of the decision' },
         },
         required: ['approved', 'positionSize', 'reasoning'],

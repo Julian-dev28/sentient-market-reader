@@ -30,9 +30,19 @@ export type { AgentStateSnapshot }
 
 // ── Constants ────────────────────────────────────────────────────────────────
 const TARGET_MINUTES_BEFORE_CLOSE = 10
-const MIN_MINUTES_LEFT  = 3
-const MAX_MINUTES_LEFT  = 12
-const POST_WINDOW_BUFFER_MS = 30_000
+const MIN_MINUTES_LEFT       = 3
+const MAX_MINUTES_LEFT       = 12
+const POST_WINDOW_BUFFER_MS  = 30_000
+const MIN_FAST_ENTRY_PRICE   = 78   // ¢ — sweet spot is 78-99¢ (94-100% win rate)
+const MAX_FAST_ENTRY_PRICE   = 99   // ¢ — no hard upper cap; high prices = high win rate
+
+// ── Normal CDF approximation (Abramowitz & Stegun) ───────────────────────────
+function normalCDF(x: number): number {
+  const t = 1 / (1 + 0.3275911 * Math.abs(x))
+  const poly = t * (0.254829592 + t * (-0.284496736 + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429))))
+  const result = 1 - poly * Math.exp(-x * x)
+  return x >= 0 ? result : 1 - result
+}
 
 // ── Window timing helpers ────────────────────────────────────────────────────
 function getWindowClose(): number {
@@ -319,6 +329,154 @@ class ServerAgent extends EventEmitter {
     console.log(`[ServerAgent] Settled ${justSettled.length} trade(s) via background loop`)
   }
 
+  /**
+   * Fast-path entry: places an order in ~5s when d triggers, WITHOUT waiting
+   * for the full ROMA pipeline (~90s). Uses d-sign for direction and normalCDF(d)
+   * as the probability estimate for Kelly sizing.
+   *
+   * After this returns, the caller fires runCycle() in the background so the
+   * pipeline UI still updates — but the order is already in.
+   */
+  private async fastEntry(d: number, closeMs: number): Promise<void> {
+    if (!this.active || this.windowBetPlaced || !this.windowKey) return
+    const minutesLeft = (closeMs - Date.now()) / 60_000
+    if (minutesLeft < MIN_MINUTES_LEFT) return
+
+    const side: 'yes' | 'no' = d > 0 ? 'yes' : 'no'
+
+    try {
+      // Fetch current Kalshi quote for this event window
+      const path = '/trade-api/v2/markets'
+      const url  = `https://api.elections.kalshi.com${path}?event_ticker=${encodeURIComponent(this.windowKey)}&limit=10`
+      const res  = await fetch(url, {
+        headers: { ...buildKalshiHeaders('GET', path), Accept: 'application/json' },
+        cache: 'no-store',
+        signal: AbortSignal.timeout(5_000),
+      })
+      if (!res.ok) return
+      const data    = await res.json()
+      const markets = ((data.markets ?? []) as unknown[]).map(m => normalizeKalshiMarket(m as KalshiMarket))
+      const market  = markets.find(m => (side === 'yes' ? m.yes_ask : m.no_ask) > 0)
+      if (!market) return
+
+      const askPrice = side === 'yes' ? market.yes_ask : market.no_ask
+      if (askPrice < MIN_FAST_ENTRY_PRICE || askPrice > MAX_FAST_ENTRY_PRICE) {
+        console.log(`[ServerAgent] Fast-path: ask=${askPrice}¢ outside [${MIN_FAST_ENTRY_PRICE}, ${MAX_FAST_ENTRY_PRICE}]¢ window — skip`)
+        return
+      }
+
+      // Kelly sizing: pModel = N(|d|), half-Kelly of bankroll
+      const pModel    = normalCDF(Math.abs(d))
+      const b         = (100 - askPrice) / askPrice
+      const kellyFrac = Math.max(0, (b * pModel - (1 - pModel)) / b)
+      if (kellyFrac <= 0) {
+        console.log(`[ServerAgent] Fast-path: Kelly=0 at ${askPrice}¢ — skip`)
+        return
+      }
+      const halfKellyCapital = kellyFrac * 0.5 * this.bankroll
+      const contracts        = Math.max(1, Math.min(Math.round(halfKellyCapital / (askPrice / 100)), 500))
+      const cost             = contracts * (askPrice / 100)
+      if (cost < 1) return
+
+      console.log(`[ServerAgent] ⚡ Fast-path: ${side.toUpperCase()} ${contracts}× @ ${askPrice}¢ | d=${d.toFixed(3)} pModel=${(pModel*100).toFixed(1)}% Kelly=${(kellyFrac*100).toFixed(1)}%`)
+
+      const ioPrice  = Math.min(99, askPrice + 3)
+      const orderRes = await placeOrder({
+        ticker:   market.ticker,
+        side,
+        count:    contracts,
+        yesPrice: side === 'yes' ? ioPrice : undefined,
+        noPrice:  side === 'no'  ? ioPrice : undefined,
+        clientOrderId: `fast-${Date.now()}`,
+        ioc: true,
+      })
+
+      const wasFilled = orderRes.ok && orderRes.order &&
+        ((orderRes.order.fill_count ?? 0) > 0 || orderRes.order.status === 'executed')
+
+      if (!wasFilled) {
+        // Retry once at +5¢ sweep
+        const retryRes = await placeOrder({
+          ticker:   market.ticker,
+          side,
+          count:    contracts,
+          yesPrice: side === 'yes' ? Math.min(99, askPrice + 5) : undefined,
+          noPrice:  side === 'no'  ? Math.min(99, askPrice + 5) : undefined,
+          clientOrderId: `fast-retry-${Date.now()}`,
+          ioc: true,
+        })
+        const retryFilled = retryRes.ok && retryRes.order &&
+          ((retryRes.order.fill_count ?? 0) > 0 || retryRes.order.status === 'executed')
+        if (!retryFilled) {
+          console.log(`[ServerAgent] Fast-path: both IOC attempts unfilled — falling through to pipeline`)
+          return
+        }
+        Object.assign(orderRes, retryRes)
+      }
+
+      // Order filled — record trade and mark window done
+      this.windowBetPlaced = true
+      this.agentPhase      = 'bet_placed'
+      this.orderError      = null
+
+      const evTicker = (market as KalshiMarket & { event_ticker?: string }).event_ticker ?? this.windowKey
+      const trade: AgentTrade = {
+        id:              `fast-${Date.now()}`,
+        cycleId:         -1,
+        windowKey:       evTicker,
+        sliceNum:        1,
+        side,
+        limitPrice:      askPrice,
+        contracts,
+        cost,
+        marketTicker:    market.ticker,
+        strikePrice:     this.strikePrice,
+        btcPriceAtEntry: undefined,
+        expiresAt:       market.close_time,
+        enteredAt:       new Date().toISOString(),
+        status:          'open',
+        pModel,
+        pMarket:         askPrice / 100,
+        edge:            (pModel - askPrice / 100) * 100,
+        signals: {
+          sentimentScore:    0,
+          sentimentMomentum: 0,
+          orderbookSkew:     0,
+          sentimentLabel:    'fast_entry',
+          pLLM:              pModel,
+          confidence:        Math.abs(d) >= 1.5 ? 'high' : 'medium',
+          gkVol:             this.gkVol,
+          distancePct:       (Math.exp(this.gkVol * Math.sqrt(minutesLeft / 15) * Math.abs(d)) - 1) * 100,
+          minutesLeft,
+          aboveStrike:       d > 0,
+          priceMomentum1h:   0,
+        },
+        liveOrderId:  orderRes.order!.order_id,
+        orderError:   undefined,
+      }
+      this.trades = [...this.trades, trade]
+      appendTrade(trade)
+
+      if (this.kellyMode) {
+        this.bankroll = Math.max(1, this.bankroll - cost)
+      }
+
+      console.log(`[ServerAgent] ✓ Fast-path filled — ${side.toUpperCase()} ${contracts}× @ ${askPrice}¢ on ${evTicker}`)
+      this.pushState()
+
+      // Place limit-sell at 99¢ to lock in profit when contract resolves
+      limitSellOrder({ ticker: market.ticker, side, count: contracts })
+        .then(sr => {
+          if (!sr.ok) console.warn(`[ServerAgent] fast-path limit-sell failed: ${sr.error}`)
+          else console.log(`[ServerAgent] ✓ Fast-path limit-sell @ 99¢ on ${market.ticker}`)
+        })
+        .catch(e => console.warn('[ServerAgent] fast-path limit-sell error:', e))
+
+    } catch (e) {
+      console.error('[ServerAgent] Fast-path error:', e)
+    }
+  }
+
   private startDPoller(closeMs: number) {
     this.stopDPoller()
     // Starting fresh for a new window — clear bet flag and stale d-score display
@@ -373,8 +531,16 @@ class ServerAgent extends EventEmitter {
 
         if (Math.abs(d) >= CONFIDENCE_THRESHOLD) {
           this.stopDPoller()
-          console.log(`[ServerAgent] ⚡ d=${d.toFixed(3)} — firing pipeline`)
-          await this.runCycle()
+          console.log(`[ServerAgent] ⚡ d=${d.toFixed(3)} — fast-path entry`)
+          await this.fastEntry(d, closeMs)
+          if (this.windowBetPlaced) {
+            // Order placed — run pipeline in background for UI display only
+            this.runCycle().catch(e => console.error('[ServerAgent] background pipeline error:', e))
+          } else {
+            // Fast-path skipped/failed (price out of range, IOC unfilled) — fall through to full pipeline
+            console.log(`[ServerAgent] Fast-path skipped — running full pipeline`)
+            await this.runCycle()
+          }
         }
       } catch (e) {
         console.error('[ServerAgent] d-poller error:', e)
