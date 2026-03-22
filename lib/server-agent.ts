@@ -576,14 +576,10 @@ class ServerAgent extends EventEmitter {
             this.agentPhase = 'monitoring'
             this.startDPoller(freshClose)
           } else {
-            // Threshold-triggered PASS — skip the rest of this window entirely.
-            // Re-running in the same conditions would just PASS again.
-            const waitMs     = Math.max(POST_WINDOW_BUFFER_MS, freshClose - Date.now() + POST_WINDOW_BUFFER_MS)
-            this.agentPhase  = 'pass_skipped'
-            this.nextRunAt   = Date.now() + waitMs
-            this.nextCycleIn = Math.round(waitMs / 1000)
-            console.log(`[ServerAgent] PASS — skipping window, next cycle in ${Math.round(waitMs/1000)}s`)
-            this.schedule(() => this.scheduleNextRun(), waitMs)
+            // Threshold-triggered PASS — restart d-poller to keep watching for a signal
+            console.log(`[ServerAgent] PASS — restarting d-poller to watch for signal`)
+            this.agentPhase = 'monitoring'
+            this.startDPoller(freshClose)
           }
         } else {
           // Bet placed or window expired — wait for window to close then schedule next
