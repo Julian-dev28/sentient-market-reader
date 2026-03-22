@@ -5,7 +5,7 @@
 
 import type { PipelineState, AgentTrade, AgentStats } from './types'
 
-export const CONFIDENCE_THRESHOLD = 1.0
+export const CONFIDENCE_THRESHOLD = 1.5
 export const KELLY_FRACTION = 0.25
 
 /** What the server-side agent is currently doing */

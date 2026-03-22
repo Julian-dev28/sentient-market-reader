@@ -561,7 +561,7 @@ function AgentCard({
       position: 'relative', overflow: 'hidden',
       transition: 'background 0.35s, border-color 0.35s, box-shadow 0.35s',
       boxShadow: done ? `0 3px 20px rgba(${agent.rgb},0.13)` : 'none',
-      animation: (done || skipped) ? `cardIn 0.35s ${index * 70}ms cubic-bezier(0.34,1.56,0.64,1) both` : 'none',
+      animation: 'none',
     }}>
       {/* Top accent bar */}
       {(done || skipped) && (
@@ -592,7 +592,7 @@ function AgentCard({
           border: `1.5px solid ${(done || skipped) ? agent.border : 'var(--border)'}`,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           fontSize: 16, color: done ? agent.color : 'var(--text-light)',
-          animation: done ? 'iconLand 0.4s cubic-bezier(0.34,1.56,0.64,1) forwards' : 'none',
+          animation: 'none',
           transition: 'all 0.3s',
         }}>{agent.icon}</div>
 
@@ -611,7 +611,7 @@ function AgentCard({
           )}
         </div>
 
-        {done    && <span style={{ fontSize: 14, color: agent.color, flexShrink: 0, marginRight: 18, animation: 'tickPop 0.3s cubic-bezier(0.34,1.56,0.64,1) forwards' }}>✓</span>}
+        {done    && <span style={{ fontSize: 14, color: agent.color, flexShrink: 0, marginRight: 18 }}>✓</span>}
         {skipped && <span style={{ fontSize: 12, color: 'var(--amber)', flexShrink: 0, marginRight: 18 }}>—</span>}
       </div>
 
