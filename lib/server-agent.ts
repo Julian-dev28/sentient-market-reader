@@ -700,9 +700,15 @@ class ServerAgent extends EventEmitter {
         }).catch(() => null),
       ])
 
-      const portfolioValueCents = (balResult?.ok && balResult.data)
+      const actualBalanceCents = (balResult?.ok && balResult.data)
         ? ((balResult.data.balance ?? 0) + (balResult.data.portfolio_value ?? 0))
         : 0
+      // In Kelly mode, size against the configured bankroll (total risk budget), not just
+      // the current Kalshi balance. Real balance may be small after funding; Kelly should
+      // use the full intended deployment amount so positions are meaningfully sized.
+      const portfolioValueCents = (this.kellyMode && this.bankroll > 0)
+        ? Math.max(actualBalanceCents, Math.round(this.bankroll * 100))
+        : actualBalanceCents
 
       let candles: OHLCVCandle[] = []
       if (candleRes?.ok) { const r = await candleRes.json(); candles = Array.isArray(r) ? r.slice(1, 13) : [] }

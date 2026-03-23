@@ -224,7 +224,69 @@ ${prevContext}`] : []),
   if (!aboveStrike && pModel > 0.5) pModel = 1 - pModel  // flip to NO
   pModel = Math.max(0.05, Math.min(0.95, pModel))
 
-  const hurst    = quant.hurstExponent
+  // ── DETERMINISTIC MOMENTUM / REGIME ADJUSTMENTS ───────────────────────────
+  // The LLM protocol described in the goal (Steps 3-6) is applied here
+  // programmatically so the quant model captures the same edge without LLM calls.
+  // Historical win rate at |d|≥1.2 is ~94% vs Brownian prior of ~88.5%:
+  // the 5.5pp gap comes from persistence, momentum, and microstructure confirming
+  // that BTC is unlikely to reverse. These adjustments close that gap.
+  // Total budget: ±11pp across regime + momentum + microstructure.
+  let momentumAdj = 0
+  let momentumLog = ''
+
+  // Step 1 — REGIME: Hurst / efficiency ratio (±3pp)
+  // H > 0.6 or ER > 0.6 → trending → persistence supports current position
+  const hurst = quant.hurstExponent
+  const er    = quant.efficiencyRatio
+  if ((hurst !== null && hurst > 0.6) || (er !== null && er > 0.6)) {
+    momentumAdj += aboveStrike ? 0.03 : -0.03
+    momentumLog += ` regime+3pp(persist)`
+  } else if ((hurst !== null && hurst < 0.4) || (er !== null && er < 0.3)) {
+    // Mean-reverting: fade extremes — reduce confidence slightly
+    momentumAdj += aboveStrike ? -0.02 : 0.02
+    momentumLog += ` regime-2pp(mrv)`
+  }
+
+  // Step 2 — MOMENTUM CONFLUENCE (±6pp, capped from ±15pp in LLM protocol)
+  // Reduced to ±6pp to stay conservative in quant-only mode.
+  const rsi   = quant.rsi
+  const macd  = quant.macd
+  const bbB   = quant.bollingerB
+  const stoch = quant.stochastic
+  let yesVotes = 0
+  if (rsi   !== null) yesVotes += rsi   > 55 ? 1 : rsi   < 45 ? -1 : 0
+  if (macd  !== null) yesVotes += macd.histogram > 0 ? 1 : -1
+  if (bbB   !== null) yesVotes += bbB.pctB > 0.55 ? 1 : bbB.pctB < 0.45 ? -1 : 0
+  if (stoch !== null) yesVotes += stoch > 55 ? 1 : stoch < 45 ? -1 : 0
+  // yesVotes range: -4 to +4
+  // Convert to directional adjustment: aligned with aboveStrike position → add, opposed → subtract
+  const momentumScore = aboveStrike ? yesVotes : -yesVotes  // positive = confirming our bet
+  const momAdj = momentumScore >= 3 ? 0.05
+               : momentumScore === 2 ? 0.03
+               : momentumScore === 1 ? 0.01
+               : momentumScore === 0 ? 0
+               : momentumScore === -1 ? -0.01
+               : momentumScore === -2 ? -0.02
+               : -0.03   // -3 or worse
+  momentumAdj += momAdj
+  if (momAdj !== 0) momentumLog += ` mom${momAdj > 0 ? '+' : ''}${(momAdj * 100).toFixed(0)}pp(votes=${yesVotes})`
+
+  // Step 3 — MICRO-MOMENTUM from 1-min candles (±2pp)
+  const micro = quant.microMomentum
+  if (micro !== null) {
+    const microAligned = aboveStrike ? micro.greenFraction > 0.65 : micro.greenFraction < 0.35
+    const microOpposed = aboveStrike ? micro.greenFraction < 0.35 : micro.greenFraction > 0.65
+    if (microAligned) { momentumAdj += 0.02; momentumLog += ` micro+2pp` }
+    else if (microOpposed) { momentumAdj -= 0.01; momentumLog += ` micro-1pp` }
+  }
+
+  // Apply total adjustment, clamped to max ±11pp from Brownian anchor
+  if (momentumAdj !== 0) {
+    const before = pModel
+    pModel = Math.max(0.05, Math.min(0.95, pModel + momentumAdj))
+    momentumLog = ` | MOMENTUM(${before.toFixed(3)}→${pModel.toFixed(3)}:${momentumLog.trim()})`
+  }
+
   const hurstNote = hurst !== null
     ? (hurst > 0.6 ? ` H=${hurst.toFixed(3)}(persist)` : hurst < 0.4 ? ` H=${hurst.toFixed(3)}(mrv)` : ` H=${hurst.toFixed(3)}(rw)`)
     : ''
@@ -238,7 +300,7 @@ ${prevContext}`] : []),
       ` d=${distanceFromStrikePct >= 0 ? '+' : ''}${distanceFromStrikePct.toFixed(3)}%` +
       ` σ=${quant.gkVol15m !== null ? (quant.gkVol15m * 100).toFixed(3) + '%/15m' : 'n/a'}` +
       ` T=${minutesUntilExpiry.toFixed(1)}min` +
-      hurstNote + vovNote + cusumNote + gateNote +
+      hurstNote + vovNote + cusumNote + gateNote + momentumLog +
       ` DIR_LOCK(${aboveStrike ? 'YES' : 'NO'})`
     : ''
 
