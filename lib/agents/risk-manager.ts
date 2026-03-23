@@ -105,9 +105,11 @@ export function runRiskManager(
   // ── Portfolio-proportional Half-Kelly sizing ──────────────────────────────
   // Standard Kelly: f* = (b·p − q) / b  where b = net odds after fees, q = 1 − p
   // Kalshi charges 7% of net profit on winning trades — b must reflect after-fee payout
+  // IMPORTANT: pModel is always P(YES). For NO trades, the win probability is 1 - pModel.
   const KALSHI_FEE = 0.07
   const b = limitPrice > 0 ? (100 - limitPrice) * (1 - KALSHI_FEE) / limitPrice : 1
-  const kellyFraction = Math.max(0, (b * pModel - (1 - pModel)) / b)
+  const pWin = recommendation === 'NO' ? (1 - pModel) : pModel
+  const kellyFraction = Math.max(0, (b * pWin - (1 - pWin)) / b)
 
   // Volatility scalar: high-vol → smaller size. Clamped [0.30, 1.50].
   const volScalar = gkVol15m && gkVol15m > 0
