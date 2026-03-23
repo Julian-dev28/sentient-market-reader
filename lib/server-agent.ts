@@ -786,10 +786,22 @@ class ServerAgent extends EventEmitter {
             this.agentPhase = 'monitoring'
             this.startDPoller(freshClose)
           } else {
-            // Threshold-triggered PASS — restart d-poller to keep watching for a signal
-            console.log(`[ServerAgent] PASS — restarting d-poller to watch for signal`)
-            this.agentPhase = 'monitoring'
-            this.startDPoller(freshClose)
+            // Threshold-triggered PASS — wait 3 min before re-enabling d-poller.
+            // Without cooldown, d is still ≥ threshold immediately after PASS (nothing changed),
+            // causing a tight loop: PASS → restart → d triggers → ROMA → PASS → repeat.
+            // 3 min lets conditions change before re-checking, and limits API call burn.
+            const passWaitMs = 3 * 60_000
+            this.agentPhase  = 'monitoring'
+            this.nextCycleIn = Math.round(passWaitMs / 1000)
+            console.log(`[ServerAgent] PASS — waiting 3 min before re-checking d-score`)
+            this.schedule(() => {
+              const { closeMs: cm, minutesLeft: ml } = getDelayMs()
+              if (this.active && !this.windowBetPlaced && ml >= MIN_MINUTES_LEFT) {
+                this.startDPoller(cm)
+              } else if (this.active && !this.windowBetPlaced) {
+                this.scheduleNextRun()
+              }
+            }, passWaitMs)
           }
         } else {
           // Bet placed or window expired — wait for window to close then schedule next
