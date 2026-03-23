@@ -564,8 +564,8 @@ class ServerAgent extends EventEmitter {
           console.log(`[ServerAgent] ⚡ d=${d.toFixed(3)} — fast-path entry`)
           await this.fastEntry(d, closeMs)
           if (this.windowBetPlaced) {
-            // Order placed — run pipeline in background for UI display only
-            this.runCycle().catch(e => console.error('[ServerAgent] background pipeline error:', e))
+            // Order placed — run pipeline in background for UI display only (background=true suppresses pipeline_start)
+            this.runCycle(true).catch(e => console.error('[ServerAgent] background pipeline error:', e))
           } else {
             // Fast-path skipped/failed (price out of range, IOC unfilled) — fall through to full pipeline
             console.log(`[ServerAgent] Fast-path skipped — running full pipeline`)
@@ -615,13 +615,14 @@ class ServerAgent extends EventEmitter {
 
   // ── Core cycle ─────────────────────────────────────────────────────────────
 
-  private async runCycle() {
+  private async runCycle(background = false) {
     if (this.isRunning) return
     this.isRunning  = true
     this.error      = null
     const wasBootstrap = this.strikePrice <= 0   // track before pipeline sets strikePrice
     this.agentPhase = wasBootstrap ? 'bootstrap' : 'pipeline'
-    this.emit('pipeline_start', {})
+    // Don't spam pipeline_start for background UI-only runs (post fast-path)
+    if (!background) this.emit('pipeline_start', {})
     this.pushState()
 
     const { closeMs } = getDelayMs()
@@ -767,13 +768,20 @@ class ServerAgent extends EventEmitter {
         this.orderFailed   = false
         this.pipelineError = false
 
-        if (pipeErr) {
+        if (pipeErr && this.windowBetPlaced) {
+          // Background pipeline failed but bet is already placed — just wait for window close normally
+          const waitMs     = Math.max(POST_WINDOW_BUFFER_MS, freshClose - Date.now() + POST_WINDOW_BUFFER_MS)
+          this.agentPhase  = 'bet_placed'
+          this.nextRunAt   = Date.now() + waitMs
+          this.nextCycleIn = Math.round(waitMs / 1000)
+          console.log('[ServerAgent] Background pipeline error (bet placed) — waiting for window close')
+          this.schedule(() => this.scheduleNextRun(), waitMs)
+        } else if (pipeErr) {
           // Pipeline failed completely (markets closed, network error, etc.) — back off 5 min
           const retryMs    = 5 * 60_000
           this.nextRunAt   = Date.now() + retryMs
           this.nextCycleIn = Math.round(retryMs / 1000)
-          // Clear 'pipeline'/'bootstrap' so UI doesn't freeze — respect bet_placed if order already in
-          this.agentPhase  = this.windowBetPlaced ? 'bet_placed' : 'waiting'
+          this.agentPhase  = 'waiting'
           console.log('[ServerAgent] Pipeline error — retrying in 5 min')
           this.schedule(() => this.scheduleNextRun(), retryMs)
         } else if (failed && minutesLeft >= MIN_MINUTES_LEFT) {
