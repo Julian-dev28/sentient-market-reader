@@ -31,10 +31,9 @@ const RISK_PARAMS = {
   minMinutesLeft:    3,    // skip if < 3 min left (too late to size)
   maxMinutesLeft:   12,    // skip if > 12 min left (signal not yet settled)
   minDistancePct:   0.02,  // skip near-strike noise (|dist| < 0.02% → ~50/50)
-  minEntryPrice:    78,    // ¢ — reject if market price < 78¢ (sweet spot is 80-95¢, below = no edge)
-  minExpectedProfit: 2.00, // $ — reject if max possible win < $2 (fee-killer)
+  minEntryPrice:    72,    // ¢ — ROMA-confirmed trades viable from 72¢ (normalCDF model no edge below ~80¢, but ROMA adds real signals)
   maxContractSize:  500,   // ceiling position size (contracts)
-  maxTradePct:      10,    // % of portfolio — max capital at risk per trade
+  maxTradePct:      25,    // % of portfolio — raised from 10% (94%+ win rate justifies larger Kelly-sized bets)
 }
 
 // Baseline 15-min Garman-Klass vol for BTC (~0.20%/candle).
@@ -115,10 +114,11 @@ export function runRiskManager(
     ? Math.max(0.30, Math.min(1.50, REFERENCE_VOL_15M / gkVol15m))
     : 1.0
 
-  // Confidence scalar: high → 100% · medium → 65% · low → 35%
+  // Confidence scalar: high → 100% · medium → 80% · low → 50%
+  // ROMA medium confidence is still a real signal — don't halve the position
   const confScalar = confidence === 'high' ? 1.00
-                   : confidence === 'low'  ? 0.35
-                   : 0.65
+                   : confidence === 'low'  ? 0.50
+                   : 0.80
 
   // Capital budget: half-Kelly fraction of portfolio, capped at maxTradeCapital
   const halfKellyCapital = kellyFraction * 0.5 * portfolioValue * volScalar * confScalar
@@ -133,12 +133,14 @@ export function runRiskManager(
     rejectionReason = `Kelly fraction zero at ${limitPrice}¢ — negative expected value at this price`
   }
 
-  // Net expected profit after Kalshi 7% fee — must clear the minimum threshold
-  const grossProfit  = costPerContract > 0 ? (1 - costPerContract) * positionSize : 0
-  const expectedProfit = grossProfit * (1 - KALSHI_FEE)
-  if (approved && expectedProfit < RISK_PARAMS.minExpectedProfit) {
+  // Net expected profit after Kalshi 7% fee — proportional floor (0.5% of portfolio, min $0.25)
+  // Flat $2 floor was blocking all trades at small bankrolls even when EV is positive
+  const minProfit        = Math.max(0.25, portfolioValue * 0.005)
+  const grossProfit      = costPerContract > 0 ? (1 - costPerContract) * positionSize : 0
+  const expectedProfit   = grossProfit * (1 - KALSHI_FEE)
+  if (approved && expectedProfit < minProfit) {
     approved = false
-    rejectionReason = `Net profit after fees $${expectedProfit.toFixed(2)} < minimum $${RISK_PARAMS.minExpectedProfit}`
+    rejectionReason = `Net profit after fees $${expectedProfit.toFixed(2)} < minimum $${minProfit.toFixed(2)} (0.5% of $${portfolioValue.toFixed(0)})`
   }
 
   const maxLoss          = approved ? costPerContract * positionSize : 0
@@ -203,7 +205,7 @@ export async function runRomaRiskManager(
   }
 
   const costPerContract  = limitPrice / 100
-  const maxBudget        = Math.min(maxTradeCapital, portfolioValue * 0.10)
+  const maxBudget        = Math.min(maxTradeCapital, portfolioValue * 0.25)
 
   const goal =
     `You are a quantitative risk manager for a Kalshi BTC 15-min prediction market trading system. ` +

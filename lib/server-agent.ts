@@ -560,17 +560,14 @@ class ServerAgent extends EventEmitter {
         this.pushState()
 
         if (Math.abs(d) >= CONFIDENCE_THRESHOLD) {
+          // d-score crossed threshold — run ROMA pipeline which:
+          //   1. Fetches fresh ROMA pModel (real edge, not normalCDF approximation)
+          //   2. Fetches live price at execution time for IOC fill
+          //   3. Sizes via full Kelly using ROMA pModel
+          // This strictly dominates the old fast-path which used normalCDF(d) ≈ market price (zero edge).
           this.stopDPoller()
-          console.log(`[ServerAgent] ⚡ d=${d.toFixed(3)} — fast-path entry`)
-          await this.fastEntry(d, closeMs)
-          if (this.windowBetPlaced) {
-            // Order placed — run pipeline in background for UI display only (background=true suppresses pipeline_start)
-            this.runCycle(true).catch(e => console.error('[ServerAgent] background pipeline error:', e))
-          } else {
-            // Fast-path skipped/failed (price out of range, IOC unfilled) — fall through to full pipeline
-            console.log(`[ServerAgent] Fast-path skipped — running full pipeline`)
-            await this.runCycle()
-          }
+          console.log(`[ServerAgent] d=${d.toFixed(3)} >= ${CONFIDENCE_THRESHOLD} — running ROMA pipeline for entry`)
+          await this.runCycle()
         }
       } catch (e) {
         console.error('[ServerAgent] d-poller error:', e)
@@ -615,14 +612,13 @@ class ServerAgent extends EventEmitter {
 
   // ── Core cycle ─────────────────────────────────────────────────────────────
 
-  private async runCycle(background = false) {
+  private async runCycle() {
     if (this.isRunning) return
     this.isRunning  = true
     this.error      = null
     const wasBootstrap = this.strikePrice <= 0   // track before pipeline sets strikePrice
     this.agentPhase = wasBootstrap ? 'bootstrap' : 'pipeline'
-    // Don't spam pipeline_start for background UI-only runs (post fast-path)
-    if (!background) this.emit('pipeline_start', {})
+    this.emit('pipeline_start', {})
     this.pushState()
 
     const { closeMs } = getDelayMs()
@@ -768,15 +764,7 @@ class ServerAgent extends EventEmitter {
         this.orderFailed   = false
         this.pipelineError = false
 
-        if (pipeErr && this.windowBetPlaced) {
-          // Background pipeline failed but bet is already placed — just wait for window close normally
-          const waitMs     = Math.max(POST_WINDOW_BUFFER_MS, freshClose - Date.now() + POST_WINDOW_BUFFER_MS)
-          this.agentPhase  = 'bet_placed'
-          this.nextRunAt   = Date.now() + waitMs
-          this.nextCycleIn = Math.round(waitMs / 1000)
-          console.log('[ServerAgent] Background pipeline error (bet placed) — waiting for window close')
-          this.schedule(() => this.scheduleNextRun(), waitMs)
-        } else if (pipeErr) {
+        if (pipeErr) {
           // Pipeline failed completely (markets closed, network error, etc.) — back off 5 min
           const retryMs    = 5 * 60_000
           this.nextRunAt   = Date.now() + retryMs
