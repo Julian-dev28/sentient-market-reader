@@ -155,6 +155,7 @@ export async function runAgentPipeline(
         portfolioValue,
         mdResult.output.minutesUntilExpiry,
         pfResult.output.distanceFromStrikePct,
+        probResult.output.volOfVol,
       )
   emit?.('risk', riskResult)
 

@@ -3,7 +3,6 @@ import { serverAgent } from '@/lib/server-agent'
 
 export const runtime = 'nodejs'
 
-export async function POST() {
-  serverAgent.stop()
-  return NextResponse.json({ ok: true, state: serverAgent.getState() })
+export async function GET() {
+  return NextResponse.json(serverAgent.getState())
 }

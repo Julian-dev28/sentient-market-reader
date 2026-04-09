@@ -92,56 +92,12 @@ export async function runSentiment(
     `Basis (perp mark vs spot index): ${derivatives.basis >= 0 ? '+' : ''}${derivatives.basis.toFixed(4)}% — ${derivatives.basis > 0.02 ? 'contango (futures premium → bullish)' : derivatives.basis < -0.02 ? 'backwardation (futures discount → bearish)' : 'flat (no meaningful futures bias)'}`,
   ].join('\n') : null
 
-  // Pre-compute quantitative signals — deterministic math done before the LLM call
-  const quant     = computeQuantSignals(candles, liveCandles, orderbook, quote.price, strikePrice, distanceFromStrikePct, minutesUntilExpiry)
-  const quantBrief = formatQuantBrief(quant, quote.price, distanceFromStrikePct, minutesUntilExpiry)
-
   const distUSD = Math.abs(distanceFromStrikePct / 100) * quote.price
   const reqVel  = minutesUntilExpiry > 0 ? distUSD / minutesUntilExpiry : 0
-  const goal =
-    `You are a BTC market direction specialist. One question: does evidence favor BTC closing ABOVE or BELOW $${strikePrice.toFixed(0)} in ${minutesUntilExpiry.toFixed(1)}min? ` +
 
-    `YOUR ROLE IS DISTINCT FROM THE QUANT MODEL — do not re-estimate Brownian/log-normal probabilities (that's handled separately). ` +
-    `Your job: assess MOMENTUM QUALITY, ORDER FLOW, and MARKET NARRATIVE. ` +
-
-    `\n\nPRIORITY HIERARCHY (strict order):` +
-
-    `\n[1] ⚡ CANDLE FLIP ALERT — if present, this is the single highest-conviction signal. Immediately override all prior trend bias. ` +
-    `A RED→GREEN flip = potential reversal to bullish; GREEN→RED = potential reversal to bearish.` +
-
-    `\n[2] REACHABILITY — ASYMMETRIC LOGIC:` +
-    ` BTC is currently ${distanceFromStrikePct >= 0 ? 'ABOVE' : 'BELOW'} strike by $${distUSD.toFixed(0)}.` +
-    (distanceFromStrikePct >= 0
-      ? ` YES wins UNLESS BTC falls $${distUSD.toFixed(0)} in ${minutesUntilExpiry.toFixed(1)}min (need -$${reqVel.toFixed(2)}/min downward). Bearish momentum only matters if it's fast enough to cover this gap.`
-      : ` YES wins ONLY IF BTC rises $${distUSD.toFixed(0)} in ${minutesUntilExpiry.toFixed(1)}min (need +$${reqVel.toFixed(2)}/min upward).`) +
-    ` Check STRIKE REACHABILITY block: ⛔ UNREACHABLE = strong conviction, ✓ ON PACE = directional signals matter more.` +
-
-    `\n[3] LIVE VELOCITY + ACCELERATION — what is price doing right now? ` +
-    `Accelerating toward strike = rising conviction. Decelerating = deteriorating setup.` +
-
-    `\n[4] VOLUME CONFIRMATION (OBV + MFI) — OBV rising on up move = smart money confirming. ` +
-    `MFI >80 = overbought with volume = bearish pressure likely. MFI <20 = oversold with volume = bullish. ` +
-    `OBV diverging from price = warning sign (price move not backed by volume).` +
-
-    `\n[5] MOMENTUM QUALITY — Efficiency Ratio >0.6 = strong trend (trust directional signals). ` +
-    `ER <0.3 = choppy/random (fade extremes, don't extrapolate). ` +
-    `RSI divergence: bullish div = price down, RSI up = hidden buying. Bearish div = hidden selling. ` +
-    `MACD acceleration (slope): positive = momentum building, negative = momentum dying. ` +
-    `3–4 oscillators (RSI/MACD/Bollinger/Stochastic) aligned = strong confirmation.` +
-
-    `\n[6] RANGE POSITION + MEAN REVERSION — Donchian(12): price at >92% of range = resistance/breakout zone. ` +
-    `Price Z-score >2σ = statistically extreme, mean reversion pressure increases. ` +
-    `1-min candle patterns: hammer=bullish reversal, shooting star=bearish reversal, doji=indecision.` +
-
-    `\n[7] REGIME — trending (H>0.6, autocorr>0.15): momentum likely continues. ` +
-    `Mean-reverting (H<0.4, autocorr<-0.15): overbought/oversold extremes tend to snap back.` +
-
-    `\n[8] DERIVATIVES — funding rate >+0.01%: crowded longs = short-term bearish pressure. ` +
-    `Negative funding: short squeeze risk = bullish. Basis contango: mild bullish bias.` +
-
-    `\n\nOUTPUT: conviction score −1.0 to +1.0 (negative=NO wins, positive=YES wins). ` +
-    `|score|>0.6 = strong conviction. |score| 0.3–0.6 = moderate. <0.3 = unclear/neutral. ` +
-    `Do NOT output a probability — output directional conviction. Be decisive.`
+  // Pre-compute quantitative signals
+  const quant      = computeQuantSignals(candles, liveCandles, orderbook, quote.price, strikePrice, distanceFromStrikePct, minutesUntilExpiry)
+  const quantBrief = formatQuantBrief(quant, quote.price, distanceFromStrikePct, minutesUntilExpiry)
 
   const context = [
     `BTC price: $${quote.price.toLocaleString('en-US', { maximumFractionDigits: 2 })}`,
@@ -205,12 +161,27 @@ ${prevContext}`] : []),
     else if (quant.stochastic < 30) { score -= 0.10; signals.push('Stoch oversold bearish') }
   }
 
-  // 6. Velocity (toward strike = bearish for holder)
+  // 6. Velocity — direction relative to whether YES or NO needs to win
+  // BTC above strike: velocity toward strike (downward) = bad for YES = bearish signal
+  // BTC below strike: velocity toward strike (upward) = good for YES = bullish signal
+  // The score is YES-relative, so moving toward strike when above = -score, when below = +score
   if (quant.velocity) {
     const vel = quant.velocity.velocityPerMin
-    const towardStrike = (distanceFromStrikePct > 0 && vel < 0) || (distanceFromStrikePct < 0 && vel > 0)
-    if (towardStrike)        { score -= 0.15; signals.push('Price moving toward strike') }
-    else if (Math.abs(vel) > 0) { score += 0.10; signals.push('Price moving away from strike') }
+    const movingDown = vel < 0
+    const aboveStrike = distanceFromStrikePct > 0
+    // Toward strike means: above + moving down, OR below + moving up
+    const towardStrike = (aboveStrike && movingDown) || (!aboveStrike && !movingDown)
+    if (towardStrike) {
+      // Toward strike when above = threatens YES (bad). Toward strike when below = helps YES (good).
+      const delta = aboveStrike ? -0.15 : +0.15
+      score += delta
+      signals.push(aboveStrike ? 'Price falling toward strike (YES at risk)' : 'Price rising toward strike (YES opportunity)')
+    } else if (Math.abs(vel) > 0) {
+      // Moving away from strike — reinforces current position
+      const delta = aboveStrike ? +0.10 : -0.10
+      score += delta
+      signals.push(aboveStrike ? 'Price moving away from strike (YES safe)' : 'Price falling away from strike (NO safe)')
+    }
   }
 
   // 7. Micro momentum (1-min candles)

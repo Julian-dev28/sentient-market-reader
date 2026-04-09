@@ -82,7 +82,7 @@ export default function Home() {
     ? parseFloat(liveMarket.yes_sub_title.replace(/[^0-9.]/g, ''))
     : 0) || liveMarket?.floor_strike || 0
 
-  const { pipeline, history, streamingAgents, isRunning, serverLocked, nextCycleIn, error, strikeFlipped, dismissStrikeFlip, runCycle, stopCycle } = usePipeline(
+  const { pipeline, history, streamingAgents, isRunning, serverLocked, nextCycleIn, error, runCycle, stopCycle } = usePipeline(
     true, botActive, aiRisk, undefined, undefined, orModel || undefined,
     liveBTCPrice || undefined, liveStrikePrice || undefined,
   )
@@ -297,64 +297,6 @@ export default function Home() {
         </div>
       )}
 
-      {/* Strike-flip popup */}
-      {strikeFlipped && (
-        <div className="animate-fade-in" style={{
-          position: 'fixed', bottom: 24, right: 24, zIndex: 1050,
-          maxWidth: 320, width: 'calc(100vw - 48px)',
-          background: 'var(--bg-card)', borderRadius: 14,
-          border: '1.5px solid rgba(212,135,44,0.55)',
-          boxShadow: '0 8px 32px rgba(0,0,0,0.28), 0 0 0 1px rgba(212,135,44,0.10)',
-          padding: '16px 18px',
-        }}>
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-            <div style={{
-              width: 36, height: 36, borderRadius: '50%', flexShrink: 0,
-              background: 'rgba(212,135,44,0.12)', border: '1.5px solid rgba(212,135,44,0.4)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 16,
-            }}>⚡</div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--text-primary)', marginBottom: 3 }}>
-                BTC crossed ${strikePrice > 0 ? strikePrice.toLocaleString(undefined, { maximumFractionDigits: 0 }) : 'strike'}
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-                Price flipped sides. Re-run the pipeline to update the analysis?
-              </div>
-            </div>
-            <button
-              onClick={dismissStrikeFlip}
-              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 14, lineHeight: 1, padding: 2, flexShrink: 0 }}
-            >✕</button>
-          </div>
-          <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
-            <button
-              onClick={() => { dismissStrikeFlip(); runCycle() }}
-              disabled={isRunning || serverLocked}
-              style={{
-                flex: 2, padding: '8px 0', borderRadius: 8, cursor: isRunning || serverLocked ? 'not-allowed' : 'pointer',
-                border: '1px solid rgba(212,135,44,0.6)',
-                background: 'linear-gradient(135deg, #b8720f 0%, var(--amber) 100%)',
-                fontSize: 12, fontWeight: 800, color: '#fff',
-                opacity: isRunning || serverLocked ? 0.5 : 1,
-                boxShadow: '0 2px 10px rgba(212,135,44,0.3)',
-              }}
-            >
-              {isRunning ? 'Running…' : 'Re-run now'}
-            </button>
-            <button
-              onClick={dismissStrikeFlip}
-              style={{
-                flex: 1, padding: '8px 0', borderRadius: 8, cursor: 'pointer',
-                border: '1px solid var(--border)', background: 'var(--bg-secondary)',
-                fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)',
-              }}
-            >
-              Dismiss
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* ── Trade alert pop-up ─────────────────────────────────────────────── */}
       {tradeAlert && (

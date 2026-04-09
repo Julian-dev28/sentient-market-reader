@@ -134,12 +134,14 @@ export interface SentimentOutput {
 export interface ProbabilityOutput {
   pModel: number         // 0.0–1.0 model's P(YES)
   pMarket: number        // 0.0–1.0 market-implied P(YES) from yes_ask
-  edge: number           // pModel - pMarket
-  edgePct: number        // edge as %
+  edge: number           // after-fee EV per contract in dollars (positive = favourable)
+  edgePct: number        // edge × 100 as % (used for minEdgePct gate in risk manager)
   recommendation: 'YES' | 'NO' | 'NO_TRADE'
   confidence: 'high' | 'medium' | 'low'
   provider: string       // e.g. "grok/grok-4-0709"
   gkVol15m?: number | null  // Garman-Klass realized vol (per-candle) — forwarded to risk manager
+  volOfVol?: number | null  // vol-of-vol: high = unstable regime → reduce position size
+  dScore?: number | null    // precise d-score from pipeline candles (used to sync currentD display)
 }
 
 export interface RiskOutput {
@@ -148,7 +150,7 @@ export interface RiskOutput {
   positionSize: number   // contracts
   maxLoss: number        // $ max loss on this trade
   dailyPnl: number       // simulated session P&L
-  drawdownPct: number
+  givebackDollars: number  // $ given back from today's peak P&L (replaces drawdownPct %)
   tradeCount: number
 }
 

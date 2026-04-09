@@ -16,33 +16,23 @@ export async function GET(
       {
         headers: { Accept: 'application/json' },
         cache: 'no-store',
+        signal: AbortSignal.timeout(5_000),
       }
     )
 
     if (!res.ok) {
-      return NextResponse.json(getMockOrderbook())
+      return NextResponse.json(
+        { error: `Kalshi orderbook ${res.status}` },
+        { status: res.status }
+      )
     }
 
     const data = await res.json()
     return NextResponse.json(data)
-  } catch {
-    return NextResponse.json(getMockOrderbook())
-  }
-}
-
-function getMockOrderbook() {
-  return {
-    orderbook: {
-      yes: [
-        { price: 52, delta: 120 },
-        { price: 51, delta: 85 },
-        { price: 50, delta: 200 },
-      ],
-      no: [
-        { price: 48, delta: 95 },
-        { price: 47, delta: 110 },
-        { price: 46, delta: 75 },
-      ],
-    },
+  } catch (e) {
+    return NextResponse.json(
+      { error: `Orderbook fetch failed: ${e instanceof Error ? e.message : String(e)}` },
+      { status: 502 }
+    )
   }
 }
