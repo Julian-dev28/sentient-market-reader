@@ -11,7 +11,7 @@ const sessionState = {
 }
 let lastResetDate = new Date().toDateString()
 
-function checkDailyReset(): void {
+export function checkDailyReset(): void {
   const today = new Date().toDateString()
   if (today !== lastResetDate) {
     lastResetDate = today

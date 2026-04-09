@@ -122,12 +122,23 @@ export async function llmToolCall<T>(opts: {
   maxTokens?: number
   provider: AIProvider
   modelOverride?: string   // overrides env-var default (e.g. from UI model picker)
+  signal?: AbortSignal     // external abort (e.g. from HTTP request disconnect)
+  timeoutMs?: number       // override default; scales with maxTokens if omitted
 }): Promise<T> {
-  const { prompt, toolName, toolDescription, schema, tier = 'fast', maxTokens = 1024, provider, modelOverride } = opts
+  const { prompt, toolName, toolDescription, schema, tier = 'fast', maxTokens = 1024, provider, modelOverride, signal: externalSignal, timeoutMs } = opts
   const model = resolveModel(tier, provider, modelOverride)
   const fullSchema = { type: 'object' as const, properties: schema.properties, required: schema.required }
 
-  const timeout = 30_000  // 30s hard cap — extraction should never take this long
+  // Scale timeout: large responses (≥1024 tokens) get 60s; small extractions get 30s
+  const timeout = timeoutMs ?? (maxTokens >= 1024 ? 60_000 : 30_000)
+  const callSignal: AbortSignal = externalSignal
+    ? (() => {
+        const ctrl = new AbortController()
+        const tid = setTimeout(() => ctrl.abort(new Error('llmToolCall timeout')), timeout)
+        externalSignal.addEventListener('abort', () => { clearTimeout(tid); ctrl.abort(externalSignal.reason) }, { once: true })
+        return ctrl.signal
+      })()
+    : AbortSignal.timeout(timeout)
 
   if (provider === 'anthropic') {
     const res = await anthropicClient().messages.create(
@@ -138,7 +149,7 @@ export async function llmToolCall<T>(opts: {
         tool_choice: { type: 'tool', name: toolName },
         messages: [{ role: 'user', content: prompt }],
       },
-      { signal: AbortSignal.timeout(timeout) },
+      { signal: callSignal },
     )
     const block = res.content.find(b => b.type === 'tool_use')
     if (!block || block.type !== 'tool_use') throw new Error(`No tool_use block from ${provider}`)
@@ -152,7 +163,7 @@ export async function llmToolCall<T>(opts: {
     try {
       const res = await huggingfaceClient().chat.completions.create(
         { model, max_tokens: maxTokens, tools: [{ type: 'function', function: { name: toolName, description: toolDescription, parameters: fullSchema } }], tool_choice: { type: 'function', function: { name: toolName } }, messages },
-        { signal: AbortSignal.timeout(timeout) },
+        { signal: callSignal },
       )
       const tc = res.choices[0]?.message?.tool_calls?.[0] as { function: { arguments: string } } | undefined
       if (tc) return JSON.parse(tc.function.arguments) as T
@@ -161,7 +172,7 @@ export async function llmToolCall<T>(opts: {
     const jsonPrompt = `${prompt}\n\nRespond ONLY with valid JSON matching this schema: ${JSON.stringify(fullSchema)}. No markdown, no explanation.`
     const fallback = await huggingfaceClient().chat.completions.create(
       { model, max_tokens: maxTokens, messages: [{ role: 'user', content: jsonPrompt }] },
-      { signal: AbortSignal.timeout(timeout) },
+      { signal: callSignal },
     )
     const raw = fallback.choices[0]?.message?.content ?? ''
     const jsonMatch = raw.match(/\{[\s\S]*\}/)
@@ -179,7 +190,7 @@ export async function llmToolCall<T>(opts: {
       tool_choice: { type: 'function', function: { name: toolName } },
       messages: [{ role: 'user', content: prompt }],
     },
-    { signal: AbortSignal.timeout(timeout) },
+    { signal: callSignal },
   )
   const toolCall = res.choices[0]?.message?.tool_calls?.[0] as { function: { arguments: string } } | undefined
   if (toolCall) return JSON.parse(toolCall.function.arguments) as T
@@ -195,7 +206,7 @@ export async function llmToolCall<T>(opts: {
   const jsonPrompt = `${prompt}\n\nRespond with ONLY a valid JSON object matching this schema, no markdown:\n${JSON.stringify(fullSchema, null, 2)}`
   const res2 = await client.chat.completions.create(
     { model, max_tokens: Math.max(maxTokens, 512), messages: [{ role: 'user', content: jsonPrompt }] },
-    { signal: AbortSignal.timeout(timeout) },
+    { signal: callSignal },
   )
   const raw2 = res2.choices[0]?.message?.content ?? ''
   const jsonMatch2 = raw2.match(/\{[\s\S]*\}/)
