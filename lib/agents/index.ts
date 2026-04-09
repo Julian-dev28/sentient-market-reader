@@ -102,6 +102,7 @@ export async function runAgentPipeline(
     orModelOverride,
     signal,
     apiKeys,
+    aiRisk,      // true = Grok-powered sentiment
   )
   emit?.('sentiment', sentResult)
 
@@ -121,6 +122,7 @@ export async function runAgentPipeline(
     orModelOverride,
     signal,
     apiKeys,
+    aiRisk,      // true = Grok-powered probability
   )
   emit?.('probability', probResult)
 
@@ -143,6 +145,9 @@ export async function runAgentPipeline(
         provider,
         romaMode,
         portfolioValue,
+        orModelOverride,
+        signal,
+        apiKeys,
       )
     : runRiskManager(
         probResult.output.edgePct,

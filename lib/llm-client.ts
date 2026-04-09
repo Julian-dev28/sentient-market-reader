@@ -26,11 +26,10 @@ export const PROVIDER_MODELS: Record<AIProvider, { model: string; label: string 
   huggingface: { model: process.env.HUGGINGFACE_MODEL ?? 'Qwen/Qwen2.5-7B-Instruct', label: 'HuggingFace' },
 }
 
-// Returns the default model for a provider.
-// The `tier` param is accepted for backwards-compatibility but ignored — model is
-// determined by the UI picker (orModelOverride) or the single env-var default.
-export function resolveModel(_tier: 'fast' | 'smart' | undefined, provider: AIProvider): string {
-  return PROVIDER_MODELS[provider].model
+// Returns the model to use for a provider.
+// `modelOverride` (from the UI picker) wins over the env-var default.
+export function resolveModel(_tier: 'fast' | 'smart' | undefined, provider: AIProvider, modelOverride?: string): string {
+  return modelOverride ?? PROVIDER_MODELS[provider].model
 }
 
 // ── Singleton clients ────────────────────────────────────────────────────────
@@ -88,9 +87,10 @@ export async function llmChat(opts: {
   tier?: 'fast' | 'smart'
   maxTokens?: number
   provider: AIProvider
+  modelOverride?: string   // overrides env-var default (e.g. from UI model picker)
 }): Promise<string> {
-  const { prompt, system, tier = 'fast', maxTokens = 512, provider } = opts
-  const model = resolveModel(tier, provider)
+  const { prompt, system, tier = 'fast', maxTokens = 512, provider, modelOverride } = opts
+  const model = resolveModel(tier, provider, modelOverride)
 
   if (provider === 'anthropic') {
     const res = await anthropicClient().messages.create({
@@ -121,9 +121,10 @@ export async function llmToolCall<T>(opts: {
   tier?: 'fast' | 'smart'
   maxTokens?: number
   provider: AIProvider
+  modelOverride?: string   // overrides env-var default (e.g. from UI model picker)
 }): Promise<T> {
-  const { prompt, toolName, toolDescription, schema, tier = 'fast', maxTokens = 1024, provider } = opts
-  const model = resolveModel(tier, provider)
+  const { prompt, toolName, toolDescription, schema, tier = 'fast', maxTokens = 1024, provider, modelOverride } = opts
+  const model = resolveModel(tier, provider, modelOverride)
   const fullSchema = { type: 'object' as const, properties: schema.properties, required: schema.required }
 
   const timeout = 30_000  // 30s hard cap — extraction should never take this long

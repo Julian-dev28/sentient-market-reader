@@ -43,7 +43,7 @@ export default function PipelineHistory({ history }: Props) {
       </button>
 
       {open && <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        {history.map(cycle => {
+        {history.map((cycle, idx) => {
           const prob = cycle.agents.probability.output
           const sent = cycle.agents.sentiment.output
           const exec = cycle.agents.execution.output
@@ -57,7 +57,7 @@ export default function PipelineHistory({ history }: Props) {
 
           return (
             <div
-              key={cycle.cycleId}
+              key={cycle.cycleStartedAt ?? `cycle-${idx}`}
               style={{
                 borderRadius: 10,
                 border: '1px solid var(--border)',
