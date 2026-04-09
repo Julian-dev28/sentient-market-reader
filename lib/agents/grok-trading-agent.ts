@@ -16,7 +16,7 @@ import type {
 } from '../types'
 import { llmToolCall } from '../llm-client'
 import { computeQuantSignals, formatQuantBrief } from '../indicators'
-import { getSessionState } from './risk-manager'
+import { getSessionState, checkDailyReset } from './risk-manager'
 
 // ── Session risk constants (same as deterministic manager) ────────────────────
 const MAX_DAILY_TRADES = 48
@@ -83,7 +83,8 @@ export async function runGrokTradingAgent(
 }> {
   const start = Date.now()
 
-  // ── Hard circuit breakers — enforced before Grok runs ────────────────────
+  // ── Midnight reset + circuit breakers ────────────────────────────────────
+  checkDailyReset()
   const session = getSessionState()
   const dailyLossLimit = sessionDailyLossLimit(portfolioValue)
   const ticker = market?.ticker ?? ''
@@ -183,6 +184,7 @@ export async function runGrokTradingAgent(
       modelOverride: orModelOverride,
       tier:          'fast',
       maxTokens:     2048,
+      signal,
       toolName:      'trade_decision',
       toolDescription: 'Make a complete trade decision for this BTC 15-min Kalshi binary window',
       schema: {
@@ -194,14 +196,21 @@ export async function runGrokTradingAgent(
           contracts:       { type: 'number', description: 'Number of contracts for primary position. 0 if PASS.' },
           limitPrice:      { type: 'number', description: 'Limit price in cents (¢) to submit the primary order at. Use ask for aggressive fill, mid for passive.' },
           hedge: {
-            type: 'object',
-            description: 'Optional hedge leg — opposing side to reduce variance. null if no hedge.',
-            properties: {
-              action:     { type: 'string', enum: ['BUY_YES', 'BUY_NO'] },
-              contracts:  { type: 'number', description: 'Hedge contract count (typically 20-40% of primary).' },
-              limitPrice: { type: 'number', description: 'Hedge limit price in cents.' },
-              rationale:  { type: 'string', description: 'Why this hedge improves EV.' },
-            },
+            anyOf: [
+              {
+                type: 'object',
+                description: 'Hedge leg — opposing side to reduce variance.',
+                properties: {
+                  action:     { type: 'string', enum: ['BUY_YES', 'BUY_NO'] },
+                  contracts:  { type: 'number', description: 'Hedge contract count (typically 20-40% of primary).' },
+                  limitPrice: { type: 'number', description: 'Hedge limit price in cents.' },
+                  rationale:  { type: 'string', description: 'Why this hedge improves EV.' },
+                },
+                required: ['action', 'contracts', 'limitPrice', 'rationale'],
+              },
+              { type: 'null' },
+            ],
+            description: 'Optional hedge leg, or null if no hedge.',
           },
           key_signals: { type: 'array', items: { type: 'string' }, description: 'Top 3-5 signals driving this decision, most important first.' },
           reasoning:   { type: 'string', description: 'Full trade rationale: probability assessment, edge source, sizing logic, and hedge rationale if any.' },
@@ -219,8 +228,10 @@ export async function runGrokTradingAgent(
   const pModel     = Math.max(0.05, Math.min(0.95, decision.pModel ?? 0.5))
   const sentScore  = Math.max(-1, Math.min(1, decision.sentiment_score ?? 0))
   const action     = decision.action ?? 'PASS'
-  const contracts  = Math.max(0, Math.round(decision.contracts ?? 0))
   const limitPrice = Math.max(1, Math.min(99, Math.round(decision.limitPrice ?? (action === 'BUY_NO' ? noAsk : yesAsk))))
+  // Hard cap: can't buy more contracts than portfolio can afford
+  const maxAffordable = action === 'BUY_NO' ? maxContractsNo : maxContractsYes
+  const contracts  = Math.min(Math.max(0, Math.round(decision.contracts ?? 0)), maxAffordable)
   const approved   = action !== 'PASS' && contracts > 0
 
   const pMarket    = yesAsk / 100
