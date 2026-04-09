@@ -32,6 +32,7 @@ import { runSentiment } from './sentiment'
 import { runProbabilityModel } from './probability-model'
 import { runRiskManager, runRomaRiskManager } from './risk-manager'
 import { runExecution } from './execution'
+import { runGrokTradingAgent } from './grok-trading-agent'
 
 let cycleCounter = 0
 
@@ -82,6 +83,58 @@ export async function runAgentPipeline(
   // ── Stage 2: Price Feed ────────────────────────────────────────────────
   const pfResult = runPriceFeed(enrichedQuote, mdResult.output.strikePrice)
   emit?.('priceFeed', pfResult)
+
+  // ── AI mode: single Grok agent replaces stages 3-6 ────────────────────────
+  // Grok receives the full market picture and makes ALL decisions with full
+  // capital authority: direction, probability, sizing, optional hedge.
+  if (aiRisk) {
+    const grok = await runGrokTradingAgent(
+      enrichedQuote,
+      mdResult.output.strikePrice,
+      pfResult.output.distanceFromStrikePct,
+      mdResult.output.minutesUntilExpiry,
+      mdResult.output.activeMarket,
+      orderbook,
+      portfolioValue,
+      candles,
+      liveCandles,
+      derivatives ?? undefined,
+      orModelOverride,
+      signal,
+      prevContext,
+    )
+    emit?.('sentiment',   grok.sentiment)
+    emit?.('probability', grok.probability)
+    emit?.('risk',        grok.risk)
+    emit?.('execution',   grok.execution)
+
+    setLastAnalysis({
+      pModel:         grok.probability.output.pModel,
+      pMarket:        grok.probability.output.pMarket,
+      edge:           grok.probability.output.edge,
+      recommendation: grok.probability.output.recommendation,
+      sentimentScore: grok.sentiment.output.score,
+      sentimentLabel: grok.sentiment.output.label,
+      btcPrice:       enrichedQuote.price,
+      strikePrice:    mdResult.output.strikePrice,
+      completedAt:    new Date().toISOString(),
+    })
+
+    return {
+      cycleId,
+      cycleStartedAt,
+      cycleCompletedAt: new Date().toISOString(),
+      status: 'completed',
+      agents: {
+        marketDiscovery: mdResult as AgentResult<MarketDiscoveryOutput>,
+        priceFeed:       pfResult as AgentResult<PriceFeedOutput>,
+        sentiment:       grok.sentiment   as AgentResult<SentimentOutput>,
+        probability:     grok.probability as AgentResult<ProbabilityOutput>,
+        risk:            grok.risk        as AgentResult<RiskOutput>,
+        execution:       grok.execution   as AgentResult<ExecutionOutput>,
+      },
+    }
+  }
 
   // ── Stage 3: Sentiment — price + orderbook ──────────────────────────────
   const sentResult = await runSentiment(
