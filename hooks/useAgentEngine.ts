@@ -19,7 +19,7 @@ const DEFAULT_STATE: AgentStateSnapshot = {
   active:           false,
   allowance:        100,
   initialAllowance: 100,
-  bankroll:         400,
+  bankroll:         0,
   kellyMode:        false,
   isRunning:        false,
   windowKey:        null,
@@ -46,17 +46,31 @@ export function useAgentEngine(orModel?: string) {
   const [streamingAgents, setStreamingAgents] = useState<PartialPipelineAgents>({})
   const esRef = useRef<EventSource | null>(null)
 
+  // ── Hydrate state immediately on mount (no SSE delay) ───────────────────
+  useEffect(() => {
+    fetch('/api/agent/state')
+      .then(r => r.json())
+      .then(s => setServerState(s))
+      .catch(() => {})
+  }, [])
+
   // ── Subscribe to SSE stream ──────────────────────────────────────────────
   useEffect(() => {
+    let destroyed = false
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+
     function connect() {
+      if (destroyed) return
       const es = new EventSource('/api/agent/stream')
       esRef.current = es
 
       es.addEventListener('state', (e: MessageEvent) => {
+        if (destroyed) return
         try { setServerState(JSON.parse(e.data)) } catch {}
       })
 
       es.addEventListener('agent', (e: MessageEvent) => {
+        if (destroyed) return
         try {
           const { key, result } = JSON.parse(e.data)
           setStreamingAgents(prev => ({ ...prev, [key]: result }))
@@ -64,18 +78,21 @@ export function useAgentEngine(orModel?: string) {
       })
 
       es.addEventListener('pipeline_start', () => {
-        setStreamingAgents({})
+        if (!destroyed) setStreamingAgents({})
       })
 
       es.onerror = () => {
         es.close()
-        // Reconnect after 3s if connection drops
-        setTimeout(connect, 3_000)
+        if (!destroyed) {
+          reconnectTimer = setTimeout(connect, 3_000)
+        }
       }
     }
 
     connect()
     return () => {
+      destroyed = true
+      if (reconnectTimer) clearTimeout(reconnectTimer)
       esRef.current?.close()
       esRef.current = null
     }
@@ -83,16 +100,30 @@ export function useAgentEngine(orModel?: string) {
 
   // ── Actions (call server API routes) ────────────────────────────────────
 
-  const startAgent = useCallback(async (allowance: number, kellyMode?: boolean, bankroll?: number, kellyPct?: number) => {
-    await fetch('/api/agent/start', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ allowance, orModel, kellyMode, bankroll, kellyPct }),
-    })
+  const startAgent = useCallback(async (allowance: number, kellyMode?: boolean, bankroll?: number, kellyPct?: number): Promise<{ ok: boolean; error?: string }> => {
+    try {
+      const res = await fetch('/api/agent/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ allowance, orModel, kellyMode, bankroll, kellyPct }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        return { ok: false, error: data.error ?? `HTTP ${res.status}` }
+      }
+      // Apply state directly from response — don't wait for SSE which may be mid-reconnect
+      const data = await res.json().catch(() => null)
+      if (data?.state) setServerState(data.state)
+      return { ok: true }
+    } catch (e) {
+      return { ok: false, error: String(e) }
+    }
   }, [orModel])
 
   const stopAgent = useCallback(async () => {
-    await fetch('/api/agent/stop', { method: 'POST' })
+    const res = await fetch('/api/agent/stop', { method: 'POST' })
+    const data = await res.json().catch(() => null)
+    if (data?.state) setServerState(data.state)
   }, [])
 
   const setAllowanceAmount = useCallback(async (amount: number, kellyMode?: boolean, bankroll?: number) => {

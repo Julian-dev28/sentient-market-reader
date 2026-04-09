@@ -1,49 +1,6 @@
 import type { AgentResult, ProbabilityOutput, KalshiMarket, OHLCVCandle, DerivativesSignal } from '../types'
-import { llmToolCall, type AIProvider } from '../llm-client'
-import { callPythonRoma, formatRomaTrace } from '../roma/python-client'
-import { computeQuantSignals, formatQuantBrief, normalCDF, logOpinionPool } from '../indicators'
-
-/** Format last N 15-min candles as compact context for the LLM.
- *  Input: newest-first [ts, low, high, open, close, volume]
- *  Output: candle flip/streak alert at the top + oldest-first table.
- */
-function formatCandles(candles: OHLCVCandle[]): string {
-  if (!candles.length) return ''
-  const ordered = [...candles].reverse() // oldest first
-  const lines = ordered.map((c, i) => {
-    const [, low, high, open, close, vol] = c
-    const chg    = close - open
-    const chgPct = ((chg / open) * 100).toFixed(2)
-    const dir    = chg >= 0 ? '▲' : '▼'
-    const minsAgo = (candles.length - i) * 15
-    return `  [−${String(minsAgo).padStart(3)}m]  O:${open.toFixed(0)}  H:${high.toFixed(0)}  L:${low.toFixed(0)}  C:${close.toFixed(0)}  Vol:${vol.toFixed(1)}  ${dir}${chgPct}%`
-  })
-
-  // Candle flip / streak analysis (candles are newest-first; [3]=open [4]=close)
-  const dirs = candles.slice(0, 8).map(c => (c[4] >= c[3] ? 'GREEN' : 'RED'))
-  let flipNote = ''
-  if (dirs.length >= 2) {
-    if (dirs[0] !== dirs[1]) {
-      let priorStreak = 1
-      for (let i = 2; i < dirs.length; i++) {
-        if (dirs[i] === dirs[1]) priorStreak++; else break
-      }
-      const direction = dirs[0] === 'GREEN'
-        ? `RED→GREEN FLIP (potential bullish reversal)`
-        : `GREEN→RED FLIP (potential bearish reversal)`
-      flipNote = `⚡ CANDLE FLIP ALERT: Most recent candle is a ${direction} after a ${priorStreak}-candle ${dirs[1]} streak. This is a high-priority reversal signal — override prior directional bias. Do not extrapolate the previous trend.`
-    } else {
-      let streak = 1
-      for (let i = 1; i < dirs.length; i++) {
-        if (dirs[i] === dirs[0]) streak++; else break
-      }
-      const cont = dirs[0] === 'GREEN' ? 'bullish continuation' : 'bearish continuation'
-      flipNote = `Candle streak: ${streak} consecutive ${dirs[0]} candles — ${cont}.`
-    }
-  }
-
-  return `${flipNote}\nLast ${candles.length} × 15-min BTC candles (oldest → newest):\n${lines.join('\n')}`
-}
+import type { AIProvider } from '../llm-client'
+import { computeQuantSignals, formatQuantBrief } from '../indicators'
 
 export async function runProbabilityModel(
   sentimentScore: number | null,    // null when running in parallel with sentiment agent
@@ -65,106 +22,27 @@ export async function runProbabilityModel(
 ): Promise<AgentResult<ProbabilityOutput>> {
   const start = Date.now()
 
-  const pMarket  = market ? market.yes_ask / 100 : 0.5
-  const noAsk    = market ? market.no_ask  / 100 : 0.5  // cost of NO  — used for NO  edge
-  const spread   = market ? (market.yes_ask - market.yes_bid) / 100 : 0.05
-  const distSign = distanceFromStrikePct >= 0 ? '+' : ''
+  const pMarket = market ? market.yes_ask / 100 : 0.5
+  const noAsk   = market ? market.no_ask  / 100 : 0.5  // cost of NO — used for NO edge
 
   // Reconstruct spot from market price + distance (prob model doesn't receive spot directly)
   const strikePrice = market?.floor_strike ?? 0
   const spotApprox  = strikePrice > 0 ? strikePrice * (1 + distanceFromStrikePct / 100) : 0
 
-  // Pre-compute full quant signal suite — no LLM math burden
+  // Pre-compute quant signal suite
   const quant      = computeQuantSignals(candles, liveCandles, null, spotApprox, strikePrice, distanceFromStrikePct, minutesUntilExpiry)
   const quantBrief = formatQuantBrief(quant, spotApprox, distanceFromStrikePct, minutesUntilExpiry)
 
-  // Format derivatives signal
-  const derivativesBlock = derivatives ? [
-    `Bybit perp funding rate: ${(derivatives.fundingRate * 100).toFixed(4)}%/8h — ${derivatives.fundingRate > 0.0001 ? 'positive (crowded longs → bearish pressure)' : derivatives.fundingRate < -0.0001 ? 'negative (crowded shorts → bullish pressure)' : 'neutral'}`,
-    `Basis: ${derivatives.basis >= 0 ? '+' : ''}${derivatives.basis.toFixed(4)}% — ${derivatives.basis > 0.02 ? 'contango (bullish)' : derivatives.basis < -0.02 ? 'backwardation (bearish)' : 'flat'}`,
-  ].join('\n') : null
-
-  const context = [
-    sentimentScore !== null
-      ? `SentimentAgent score: ${sentimentScore.toFixed(4)} (−1=strongly bearish → +1=strongly bullish)`
-      : `SentimentAgent score: (running in parallel — use quant signals and market data only)`,
-    sentimentSignals?.length
-      ? `Key sentiment signals: ${sentimentSignals.join(' | ')}`
-      : null,
-    `BTC vs strike: ${distSign}${distanceFromStrikePct.toFixed(4)}% — ${distanceFromStrikePct >= 0 ? 'ABOVE' : 'BELOW'} strike`,
-    `Minutes until expiry: ${minutesUntilExpiry.toFixed(2)}`,
-    (() => {
-      const distUSD = Math.abs(distanceFromStrikePct / 100) * spotApprox
-      const reqVel  = minutesUntilExpiry > 0 ? distUSD / minutesUntilExpiry : 0
-      const curVel  = quant.velocity?.velocityPerMin ?? null
-      const toward  = curVel !== null
-        ? (distanceFromStrikePct < 0 && curVel > 0) || (distanceFromStrikePct > 0 && curVel < 0)
-        : null
-      const ratio   = curVel !== null && reqVel > 0 ? Math.abs(curVel) / reqVel : null
-      return `REACHABILITY: BTC must move $${distUSD.toFixed(0)} in ${minutesUntilExpiry.toFixed(1)}min — need ±$${reqVel.toFixed(2)}/min` +
-        (curVel !== null
-          ? ` | current ${curVel >= 0 ? '+' : ''}$${curVel.toFixed(2)}/min (${(ratio! * 100).toFixed(0)}% of needed, moving ${toward ? 'TOWARD' : 'AWAY FROM'} strike)` +
-            (!toward || ratio! < 0.4 ? ' — ⛔ STRIKE UNREACHABLE' : ratio! < 0.75 ? ' — ⚠ BELOW PACE' : ' — ✓ ON PACE')
-          : ' | velocity unknown')
-    })(),
-    `Market-implied P(YES): ${(pMarket * 100).toFixed(1)}% — Kalshi crowd (secondary reference only)`,
-    `Bid-ask spread: ${(spread * 100).toFixed(1)}¢`,
-    `
-${quantBrief}`,
-    derivativesBlock,
-    ...(candles?.length ? [`
-${formatCandles(candles)}`] : []),
-    ...(prevContext ? [`
-Previous cycle analysis:
-${prevContext}`] : []),
-  ].filter(Boolean).join('\n')
-
-  const goal =
-    `Estimate P(BTC closes ABOVE strike at window expiry). Output one number: P(YES) ∈ [0.05, 0.95]. ` +
-    `The QUANTITATIVE SIGNALS block has pre-computed calibrated values — DO NOT recompute, synthesize them. ` +
-    `\n\nDECISION PROTOCOL (apply in strict order):` +
-
-    `\n\nSTEP 1 — ANCHOR on physics priors:` +
-    ` Use Cornish-Fisher P(YES) as your starting estimate (best: uses σ + skew + kurtosis).` +
-    ` Fallback chain if unavailable: Fat-tail (Student-t) → Log-normal (GK σ) → Brownian motion.` +
-    ` Do not deviate >15pp without clear evidence from steps below.` +
-
-    `\n\nSTEP 2 — REACHABILITY GATE (HARD OVERRIDE — highest priority):` +
-    ` CRITICAL ASYMMETRY: The question is NOT "will BTC go up?" — it is "will BTC be ABOVE strike at expiry?"` +
-    ` BTC ABOVE strike: YES wins by default unless BTC FALLS to strike. For NO to win, BTC must DROP $${(Math.abs(distanceFromStrikePct / 100) * spotApprox).toFixed(0)} in ${minutesUntilExpiry.toFixed(1)}min.` +
-    ` BTC BELOW strike: YES wins only if BTC RISES to strike. For YES to win, BTC must CLIMB $${(Math.abs(distanceFromStrikePct / 100) * spotApprox).toFixed(0)} in ${minutesUntilExpiry.toFixed(1)}min.` +
-    ` Check REACHABILITY block. If "⛔ STRIKE UNREACHABLE" or velocity < 55% of required:` +
-    `   BTC BELOW strike → P(YES) = 0.05–0.18 (can't reach). BTC ABOVE strike → P(YES) = 0.82–0.95 (can't fall far enough).` +
-    ` BEARISH SIGNALS DON'T OVERRIDE THIS: if BTC is $300 above strike, even a -0.8 bearish sentiment` +
-    ` score is irrelevant unless velocity analysis shows BTC can actually fall $300 in the time remaining.` +
-    ` This gate overrides ALL other signals — physics cannot be wished away.` +
-
-    `\n\nSTEP 3 — JUMP / STRUCTURAL BREAK:` +
-    ` If "⚡ CUSUM JUMP ALERT" appears OR BiPower JR > 0.3:` +
-    `   Diffusion models (Brownian/LN) are unreliable. Shift 25pp in jump direction.` +
-    `   Discount physics priors 40% — trust velocity + recent candle momentum instead.` +
-    `   ⚡ CANDLE FLIP ALERT = highest-conviction reversal signal, override prior trend immediately.` +
-
-    `\n\nSTEP 4 — REGIME (±5pp):` +
-    ` Trending (H>0.6 or autocorr>0.15): push 5pp in current momentum direction.` +
-    ` Mean-reverting (H<0.4 or autocorr<-0.15): fade extremes, pull 3pp toward 50%.` +
-
-    `\n\nSTEP 5 — MOMENTUM CONFLUENCE (±15pp total budget):` +
-    ` Score each indicator: RSI>55=YES, RSI<45=NO; MACD hist>0=YES; Bollinger %B>0.55=YES; Stoch>55=YES.` +
-    ` 4 YES → +12pp | 3 YES → +6pp | 2 YES → 0pp | 1 YES → -6pp | 0 YES → -12pp.` +
-
-    `\n\nSTEP 6 — ORDERBOOK MICROSTRUCTURE (±5pp):` +
-    ` Pressure-weighted imbalance >+20% → +4pp. <-20% → -4pp.` +
-
-    `\n\nOUTPUT: Start at Cornish-Fisher anchor. Apply gates (override) then adjustments (modify).` +
-    ` Clamp to [0.05, 0.95]. Recommendation is automatic: P≥0.50 → YES, P<0.50 → NO.` +
-    ` Time remaining: ${minutesUntilExpiry.toFixed(1)}min. BTC is ${distanceFromStrikePct >= 0 ? 'ABOVE' : 'BELOW'} strike by ${Math.abs(distanceFromStrikePct).toFixed(3)}%.`
-
-  // ── Pure quant mode — no LLM call ────────────────────────────────────────────
-  // ROMA solve skipped. pModel derives entirely from physics priors (GK vol,
-  // Brownian, fat-tail Student-t, Cornish-Fisher) via Logarithmic Opinion Pool.
-  // Backtested 54.8% accuracy over 1000 windows — LLM blending reduced this.
+  // ── Pure quant model — no LLM call ───────────────────────────────────────────
+  // Strategy: Brownian motion physics anchor + direction lock + hard reachability gate.
+  // Empirical validation (2,690 live fills + 787-trade backtest):
+  //   - RSI/MACD/Hurst momentum adjustments are NOISE (MACD opposed = +9.5pp vs aligned = +6.2pp)
+  //   - Edge exists ONLY in d ∈ [1.0, 1.2]: +5.5pp live margin (Z=2.33, p<0.01)
+  //   - d < 1.0: Kalshi correct-prices, no alpha. d > 1.2: Kalshi overprices fat-tail reversal.
+  //   - Removing momentum adjustments cut MaxDD 22.9% → 13.3% with +0.8pp WR gain.
   const agentLabel = 'ProbabilityModelAgent (quant)'
+
+  void quantBrief  // computed but available in reasoning string below
 
   // ── Logarithmic Opinion Pool of physics priors ────────────────────────────
   const pBrownian = quant.brownianPrior?.pQuant ?? null
@@ -172,6 +50,47 @@ ${prevContext}`] : []),
   const pFatTail  = quant.fatTailBinary?.pYesFat ?? null
   const pSkewAdj  = quant.skewAdjBinary?.pYesSkewAdj ?? null
   const pOB       = quant.obImpliedProb ?? null
+
+  // ── D-score gate (empirically calibrated from 2,690 live trades) ───────────
+  // Live data + backtest analysis (2,690 real fills):
+  //   |d| < 1.0  → Kalshi correctly prices; no alpha (-4pp to -15pp margin)
+  //   |d| 1.0-1.2 → ONLY real edge zone: +5.5pp margin, 87.4% wr on real fills
+  //   |d| 1.2-1.5 → Kalshi overprices fat-tail reversal risk: -1.1pp margin (lose after fees)
+  //   |d| > 1.5  → Worse: -3.9pp margin
+  // Entry window: 3-9 min left only. 9-12min = 69.5% wr (reversal risk); 3-9min = 95.7% wr.
+  // d formula: log(spot/strike) / (σ_15m × √(T_candles))
+  const D_MIN_THRESHOLD = 1.0
+  const D_MAX_THRESHOLD = 1.2
+  const dScore = (spotApprox > 0 && strikePrice > 0 && quant.gkVol15m && quant.gkVol15m > 0 && minutesUntilExpiry > 0)
+    ? Math.log(spotApprox / strikePrice) / (quant.gkVol15m * Math.sqrt(minutesUntilExpiry / 15))
+    : null
+  const dAbs = dScore !== null ? Math.abs(dScore) : null
+
+  if (dAbs !== null && (dAbs < D_MIN_THRESHOLD || dAbs > D_MAX_THRESHOLD)) {
+    const reason = dAbs < D_MIN_THRESHOLD
+      ? `|d|=${dAbs.toFixed(3)} < ${D_MIN_THRESHOLD} — Kalshi correctly prices near-strike; no alpha`
+      : `|d|=${dAbs.toFixed(3)} > ${D_MAX_THRESHOLD} — BTC only ${(Math.abs(distanceFromStrikePct)).toFixed(3)}% from strike with ${minutesUntilExpiry.toFixed(1)}min left; Brownian model overstates edge, Kalshi prices fat-tail reversal risk`
+    return {
+      agentName: agentLabel,
+      status: 'done',
+      output: {
+        pModel: pMarket,   // outside edge zone: best estimate IS the market price (Kalshi correct-prices this)
+        pMarket,
+        edge: 0,
+        edgePct: 0,
+        recommendation: 'NO_TRADE' as const,
+        confidence: 'low' as const,
+        provider: 'quant',
+        gkVol15m: quant.gkVol15m,
+        volOfVol: quant.volOfVol,
+        dScore,
+      },
+      reasoning: `NO_TRADE: d=${dScore!.toFixed(3)} — ${reason}. ` +
+        `Edge zone confirmed by 2,690-trade empirical analysis: |d|∈[1.0,1.2] only (3-9min window).`,
+      durationMs: Date.now() - start,
+      timestamp: new Date().toISOString(),
+    }
+  }
 
   // ── Pure Brownian reachability model ─────────────────────────────────────
   // The answer to "will BTC be above strike at expiry?" is one formula:
@@ -224,94 +143,42 @@ ${prevContext}`] : []),
   if (!aboveStrike && pModel > 0.5) pModel = 1 - pModel  // flip to NO
   pModel = Math.max(0.05, Math.min(0.95, pModel))
 
-  // ── DETERMINISTIC MOMENTUM / REGIME ADJUSTMENTS ───────────────────────────
-  // The LLM protocol described in the goal (Steps 3-6) is applied here
-  // programmatically so the quant model captures the same edge without LLM calls.
-  // Historical win rate at |d|≥1.2 is ~94% vs Brownian prior of ~88.5%:
-  // the 5.5pp gap comes from persistence, momentum, and microstructure confirming
-  // that BTC is unlikely to reverse. These adjustments close that gap.
-  // Total budget: ±11pp across regime + momentum + microstructure.
-  let momentumAdj = 0
-  let momentumLog = ''
-
-  // Step 1 — REGIME: Hurst / efficiency ratio (±3pp)
-  // H > 0.6 or ER > 0.6 → trending → persistence supports current position
+  // ── NO MOMENTUM/REGIME ADJUSTMENTS ──────────────────────────────────────────
+  // Empirical analysis of 787 backtest trades shows RSI/MACD/Hurst/VoV adjustments
+  // add NOISE, not signal. Specifically: MACD opposed to our bet = +9.5pp margin
+  // vs MACD aligned = +6.2pp. The adjustments were directionally incorrect.
+  // The d-gate + direction lock + Brownian anchor is the complete model.
+  // Signals retained for reasoning display only — not used in sizing.
   const hurst = quant.hurstExponent
-  const er    = quant.efficiencyRatio
-  if ((hurst !== null && hurst > 0.6) || (er !== null && er > 0.6)) {
-    momentumAdj += aboveStrike ? 0.03 : -0.03
-    momentumLog += ` regime+3pp(persist)`
-  } else if ((hurst !== null && hurst < 0.4) || (er !== null && er < 0.3)) {
-    // Mean-reverting: fade extremes — reduce confidence slightly
-    momentumAdj += aboveStrike ? -0.02 : 0.02
-    momentumLog += ` regime-2pp(mrv)`
-  }
+  const vov   = quant.volOfVol
 
-  // Step 2 — MOMENTUM CONFLUENCE (±6pp, capped from ±15pp in LLM protocol)
-  // Reduced to ±6pp to stay conservative in quant-only mode.
-  const rsi   = quant.rsi
-  const macd  = quant.macd
-  const bbB   = quant.bollingerB
-  const stoch = quant.stochastic
-  let yesVotes = 0
-  if (rsi   !== null) yesVotes += rsi   > 55 ? 1 : rsi   < 45 ? -1 : 0
-  if (macd  !== null) yesVotes += macd.histogram > 0 ? 1 : -1
-  if (bbB   !== null) yesVotes += bbB.pctB > 0.55 ? 1 : bbB.pctB < 0.45 ? -1 : 0
-  if (stoch !== null) yesVotes += stoch > 55 ? 1 : stoch < 45 ? -1 : 0
-  // yesVotes range: -4 to +4
-  // Convert to directional adjustment: aligned with aboveStrike position → add, opposed → subtract
-  const momentumScore = aboveStrike ? yesVotes : -yesVotes  // positive = confirming our bet
-  const momAdj = momentumScore >= 3 ? 0.05
-               : momentumScore === 2 ? 0.03
-               : momentumScore === 1 ? 0.01
-               : momentumScore === 0 ? 0
-               : momentumScore === -1 ? -0.01
-               : momentumScore === -2 ? -0.02
-               : -0.03   // -3 or worse
-  momentumAdj += momAdj
-  if (momAdj !== 0) momentumLog += ` mom${momAdj > 0 ? '+' : ''}${(momAdj * 100).toFixed(0)}pp(votes=${yesVotes})`
-
-  // Step 3 — MICRO-MOMENTUM from 1-min candles (±2pp)
-  const micro = quant.microMomentum
-  if (micro !== null) {
-    const microAligned = aboveStrike ? micro.greenFraction > 0.65 : micro.greenFraction < 0.35
-    const microOpposed = aboveStrike ? micro.greenFraction < 0.35 : micro.greenFraction > 0.65
-    if (microAligned) { momentumAdj += 0.02; momentumLog += ` micro+2pp` }
-    else if (microOpposed) { momentumAdj -= 0.01; momentumLog += ` micro-1pp` }
-  }
-
-  // Apply total adjustment, clamped to max ±11pp from Brownian anchor
-  if (momentumAdj !== 0) {
-    const before = pModel
-    pModel = Math.max(0.05, Math.min(0.95, pModel + momentumAdj))
-    momentumLog = ` | MOMENTUM(${before.toFixed(3)}→${pModel.toFixed(3)}:${momentumLog.trim()})`
-  }
-
-  const hurstNote = hurst !== null
-    ? (hurst > 0.6 ? ` H=${hurst.toFixed(3)}(persist)` : hurst < 0.4 ? ` H=${hurst.toFixed(3)}(mrv)` : ` H=${hurst.toFixed(3)}(rw)`)
-    : ''
-  const vov     = quant.volOfVol
-  const vovNote  = vov !== null && vov > 1.0 ? ` VoV=${vov.toFixed(2)}(unstable)` : ''
-  const cusumNote = quant.cusum?.jumpDetected ? ` JUMP(${quant.cusum.direction})` : ''
+  const hurstNote  = hurst !== null ? ` H=${hurst.toFixed(3)}` : ''
+  const vovNote    = vov !== null && vov > 1.0 ? ` VoV=${vov.toFixed(2)}` : ''
+  const cusumNote  = quant.cusum?.jumpDetected ? ` JUMP(${quant.cusum.direction})` : ''
 
   const quantBlendNote = pQuantCombined !== null
     ? ` | P_brow=${pBrownian !== null ? (pBrownian * 100).toFixed(1) + '%' : 'n/a'}` +
       ` P_CF=${pSkewAdj !== null ? (pSkewAdj * 100).toFixed(1) + '%' : 'n/a'}` +
-      ` d=${distanceFromStrikePct >= 0 ? '+' : ''}${distanceFromStrikePct.toFixed(3)}%` +
+      ` d=${dScore !== null ? dScore.toFixed(3) : distanceFromStrikePct >= 0 ? '+' : ''}${dScore === null ? distanceFromStrikePct.toFixed(3) + '%' : ''}` +
       ` σ=${quant.gkVol15m !== null ? (quant.gkVol15m * 100).toFixed(3) + '%/15m' : 'n/a'}` +
       ` T=${minutesUntilExpiry.toFixed(1)}min` +
-      hurstNote + vovNote + cusumNote + gateNote + momentumLog +
+      hurstNote + vovNote + cusumNote + gateNote +
       ` DIR_LOCK(${aboveStrike ? 'YES' : 'NO'})`
     : ''
 
   // Direction is locked to current BTC position — recommendation always matches
   const recommendation: ProbabilityOutput['recommendation'] = aboveStrike ? 'YES' : 'NO'
-  const edge    = recommendation === 'YES' ? pModel - pMarket : (1 - pModel) - noAsk
-  const edgePct = edge * 100
+  // Edge = after-fee EV per dollar risked.
+  // Maker fee formula: 0.0175 × P × (1-P) per contract (pre-ceiling approx).
+  const entryPrice = recommendation === 'YES' ? pMarket : noAsk   // price we'd pay (0-1)
+  const feePerC    = 0.0175 * entryPrice * (1 - entryPrice)
+  const pWin       = recommendation === 'YES' ? pModel : (1 - pModel)
+  const netWin     = (1 - entryPrice) - feePerC
+  const netLoss    = -entryPrice - feePerC
+  const edge       = pWin * netWin + (1 - pWin) * netLoss   // EV per contract
+  const edgePct    = edge * 100
   const edgeAbs = Math.abs(pModel - 0.5)
   const confidence: ProbabilityOutput['confidence'] = edgeAbs >= 0.15 ? 'high' : edgeAbs >= 0.07 ? 'medium' : 'low'
-
-  void normalCDF
 
   return {
     agentName: agentLabel,
@@ -322,6 +189,8 @@ ${prevContext}`] : []),
       confidence,
       provider: 'quant',
       gkVol15m: quant.gkVol15m,
+      volOfVol: quant.volOfVol,
+      dScore,
     },
     reasoning: 'Quant-only probability model' + quantBlendNote + '\n\nP(final)=' + (pModel * 100).toFixed(1) + '% vs P(market)=' + (pMarket * 100).toFixed(1) + '% — edge: ' + (edgePct >= 0 ? '+' : '') + edgePct.toFixed(1) + '%. Rec: ' + recommendation + ' (' + confidence + ')',
     durationMs: Date.now() - start,

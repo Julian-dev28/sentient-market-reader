@@ -12,6 +12,7 @@ export default function AgentPage() {
   const [orModel] = useState('')
   const engine    = useAgentEngine(orModel || undefined)
   const [kalshiBalance, setKalshiBalance] = useState<number>(0)
+  const [startError, setStartError] = useState<string | null>(null)
 
   // Fetch real Kalshi balance on mount to use as default bankroll
   useEffect(() => {
@@ -25,10 +26,12 @@ export default function AgentPage() {
       .catch(() => {})
   }, [])
 
-  function handleStart(kellyMode: boolean, bankroll: number, kellyPct: number) {
+  async function handleStart(kellyMode: boolean, bankroll: number, kellyPct: number) {
+    setStartError(null)
     const frac = kellyPct / 100
-    const allowance = kellyMode ? Math.max(1, bankroll * frac) : engine.allowance
-    engine.startAgent(allowance, kellyMode, kellyMode ? bankroll : undefined, kellyMode ? frac : undefined)
+    const allowance = kellyMode ? Math.max(1, bankroll * frac) : Math.max(1, engine.allowance)
+    const result = await engine.startAgent(allowance, kellyMode, kellyMode ? bankroll : undefined, kellyMode ? frac : undefined)
+    if (!result.ok) setStartError(result.error ?? 'Start failed')
   }
 
   return (
@@ -59,9 +62,9 @@ export default function AgentPage() {
           }}>
             Full-deploy · 1 bet / window
           </span>
-          {engine.error && (
+          {(engine.error || startError) && (
             <span style={{ fontSize: 9, color: 'var(--red)', background: 'var(--red-pale)', padding: '2px 8px', borderRadius: 6, border: '1px solid var(--red)' }}>
-              {engine.error}
+              {startError ?? engine.error}
             </span>
           )}
         </div>

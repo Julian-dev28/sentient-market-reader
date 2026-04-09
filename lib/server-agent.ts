@@ -15,7 +15,7 @@ import { runAgentPipeline } from './agents'
 import { buildKalshiHeaders } from './kalshi-auth'
 import { getBalance, placeOrder, limitSellOrder } from './kalshi-trade'
 import { tryLockPipeline, releasePipelineLock } from './pipeline-lock'
-import { appendTrade, updateTrade } from './trade-log'
+import { appendTrade, updateTrade, readTradeLog, clearTradeLog, saveAgentConfig, loadAgentConfig } from './trade-log'
 import type {
   PipelineState, AgentTrade, AgentStats,
   KalshiMarket, KalshiOrderbook, BTCQuote, OHLCVCandle, DerivativesSignal,
@@ -23,6 +23,7 @@ import type {
 import { normalizeKalshiMarket } from './types'
 import type { AIProvider } from './llm-client'
 import { CONFIDENCE_THRESHOLD, KELLY_FRACTION } from './agent-shared'
+import { recordTradeResult } from './agents/risk-manager'
 import type { AgentStateSnapshot, AgentPhase } from './agent-shared'
 
 export { CONFIDENCE_THRESHOLD }
@@ -31,11 +32,22 @@ export type { AgentStateSnapshot }
 // ── Constants ────────────────────────────────────────────────────────────────
 const TARGET_MINUTES_BEFORE_CLOSE = 10
 const MIN_MINUTES_LEFT       = 3
-const MAX_MINUTES_LEFT       = 12
+const MAX_MINUTES_LEFT       = 9   // live fills: 9-12min window 69.5% wr; 3-9min = 95.7% wr
 const POST_WINDOW_BUFFER_MS  = 30_000
 const MIN_FAST_ENTRY_PRICE   = 78   // ¢ — sweet spot is 78-99¢ (94-100% win rate)
 const MAX_FAST_ENTRY_PRICE   = 99   // ¢ — no hard upper cap; high prices = high win rate
-const KALSHI_FEE_RATE        = 0.07 // 7% of net profit on winning trades
+// Edge zone bounds (empirically validated from 2,690 live fills):
+//   |d| < 1.0: Kalshi correctly prices — no alpha
+//   |d| 1.0–1.2: +5.5pp margin (87.4% wr, 95.7% in 3-9min) — ONLY edge zone
+//   |d| > 1.2: Kalshi overprices fat-tail reversal — negative margin
+const D_MAX_THRESHOLD = 1.2
+
+// Kalshi maker fee: ceil(0.0175 × C × P × (1-P)) — agent places resting limit orders
+const MAKER_FEE_RATE = 0.0175
+const kalshiFee = (contracts: number, priceCents: number): number => {
+  const p = priceCents / 100
+  return Math.ceil(MAKER_FEE_RATE * contracts * p * (1 - p) * 100) / 100
+}
 
 // ── Normal CDF approximation (Abramowitz & Stegun) ───────────────────────────
 function normalCDF(x: number): number {
@@ -129,7 +141,7 @@ class ServerAgent extends EventEmitter {
   private nextCycleIn  = 0
   private error:       string | null = null
   private orderError:  string | null = null
-  private trades:      AgentTrade[]  = []
+  private trades:      AgentTrade[]  = readTradeLog()  // persists across HMR/restarts
   private pipeline:    PipelineState | null = null
 
   private autoTimeout:       NodeJS.Timeout | null = null
@@ -148,6 +160,26 @@ class ServerAgent extends EventEmitter {
   private agentPhase: AgentPhase = 'idle'
   private windowCloseAt = 0
 
+  // ── Config persistence ─────────────────────────────────────────────────────
+
+  private saveConfig() {
+    saveAgentConfig({
+      active:    this.active,
+      allowance: this.allowance,
+      kellyMode: this.kellyMode,
+      bankroll:  this.bankroll,
+      kellyPct:  this.kellyPct,
+      orModel:   this.orModel,
+    })
+  }
+
+  private restoreConfig() {
+    const cfg = loadAgentConfig()
+    if (!cfg?.active) return
+    console.log(`[ServerAgent] Restoring from disk — kellyMode=${cfg.kellyMode} bankroll=$${cfg.bankroll} allowance=$${cfg.allowance}`)
+    this.start(cfg.allowance, cfg.orModel, cfg.kellyMode, cfg.bankroll, cfg.kellyPct)
+  }
+
   // ── Public API ─────────────────────────────────────────────────────────────
 
   start(allowance: number, orModel?: string, kellyMode = false, bankroll?: number, kellyPct = 0.25) {
@@ -165,7 +197,7 @@ class ServerAgent extends EventEmitter {
     }
     this.kellyMode        = kellyMode
     this.kellyPct         = kellyPct
-    this.bankroll         = kellyMode && bankroll && bankroll > 0 ? bankroll : allowance / kellyPct
+    this.bankroll         = kellyMode && bankroll && bankroll > 0 ? bankroll : 0
     this.allowance        = kellyMode ? Math.max(1, this.bankroll * kellyPct) : allowance
     this.initialAllowance = this.allowance
     this.orModel          = orModel
@@ -176,6 +208,7 @@ class ServerAgent extends EventEmitter {
     this.startCountdown()
     this.startSettlementLoop()
     this.scheduleNextRun()
+    this.saveConfig()
     this.pushState()
     console.log(`[ServerAgent] Started — ${kellyMode ? `Kelly ${kellyPct*100}% bankroll=$${this.bankroll} allowance=$${this.allowance.toFixed(2)}` : `fixed allowance=$${allowance}`}`)
   }
@@ -185,6 +218,7 @@ class ServerAgent extends EventEmitter {
     this.isRunning  = false
     this.agentPhase = 'idle'
     this.clearTimers()
+    this.saveConfig()
     this.pushState()
     console.log('[ServerAgent] Stopped')
   }
@@ -197,6 +231,7 @@ class ServerAgent extends EventEmitter {
     } else if (!this.kellyMode) {
       this.allowance = Math.max(0, amount)
     }
+    this.saveConfig()
     this.pushState()
   }
 
@@ -204,6 +239,7 @@ class ServerAgent extends EventEmitter {
     this.trades          = []
     this.windowKey       = null
     this.windowBetPlaced = false
+    clearTradeLog()
     this.pushState()
   }
 
@@ -301,7 +337,8 @@ class ServerAgent extends EventEmitter {
           const { market } = await res.json()
           if (market?.result === 'yes' || market?.result === 'no') {
             const win = t.side === market.result
-            return { ...t, status: (win ? 'won' : 'lost') as 'won' | 'lost', pnl: win ? t.contracts - t.cost : -t.cost }
+            const fee = kalshiFee(t.contracts, t.limitPrice ?? Math.round(t.cost / t.contracts * 100))
+            return { ...t, status: (win ? 'won' : 'lost') as 'won' | 'lost', pnl: win ? t.contracts - t.cost - fee : -t.cost - fee }
           }
         }
       } catch {}
@@ -313,17 +350,21 @@ class ServerAgent extends EventEmitter {
 
     this.trades = this.trades.map(t => settled.find(s => s.id === t.id) ?? t)
 
-    // Persist settlement updates to disk log
+    // Persist settlement updates to disk log + update session risk state
     for (const t of justSettled) {
       updateTrade(t.id, { status: t.status, pnl: t.pnl, settlementPrice: t.settlementPrice })
+      if (t.pnl != null) recordTradeResult(t.pnl)
     }
 
     if (this.kellyMode) {
       for (const t of justSettled) {
-        if (t.status === 'won') this.bankroll += t.contracts
+        const fee = kalshiFee(t.contracts, t.limitPrice ?? Math.round(t.cost / t.contracts * 100))
+        if (t.status === 'won') this.bankroll += t.contracts - fee  // $1/contract payout minus maker fee
+        else                    this.bankroll -= fee                 // fee paid on losses too
       }
       this.bankroll  = Math.max(1, this.bankroll)
       this.allowance = Math.max(1, Math.round(this.bankroll * this.kellyPct * 100) / 100)
+      this.saveConfig()
       console.log(`[ServerAgent] Kelly update — bankroll=$${this.bankroll.toFixed(2)} → allowance=$${this.allowance.toFixed(2)}`)
     }
 
@@ -383,21 +424,30 @@ class ServerAgent extends EventEmitter {
         return
       }
 
-      // Kelly sizing: pModel = N(|d|), half-Kelly of bankroll
-      // b = net odds per $1 at risk — must use after-fee profit since Kalshi takes 7% of wins
-      const pModel    = normalCDF(Math.abs(d))
-      const b         = (100 - askPrice) * (1 - KALSHI_FEE_RATE) / askPrice
-      const kellyFrac = Math.max(0, (b * pModel - (1 - pModel)) / b)
+      // Kelly sizing using correct maker fee: ceil(0.0175 × C × P × (1-P))
+      const pModel       = normalCDF(Math.abs(d))
+      const p_d          = askPrice / 100
+      const feePerC      = MAKER_FEE_RATE * p_d * (1 - p_d)           // per-contract approx (pre-ceiling)
+      const netWinPerC   = (1 - p_d) - feePerC
+      const totalCostPerC = p_d + feePerC
+      const b            = netWinPerC / totalCostPerC
+      const pWin      = side === 'yes' ? pModel : (1 - pModel)
+      const kellyFrac = Math.max(0, (b * pWin - (1 - pWin)) / b)
       if (kellyFrac <= 0) {
         console.log(`[ServerAgent] Fast-path: Kelly=0 at ${askPrice}¢ — skip`)
         return
       }
-      const halfKellyCapital = kellyFrac * 0.5 * this.bankroll
-      const contracts        = Math.max(1, Math.min(Math.round(halfKellyCapital / (askPrice / 100)), 500))
-      const cost             = contracts * (askPrice / 100)
+      // After-fee EV gate — must clear minEdgePct (6%) same as main pipeline
+      const edgePct = (pWin * netWinPerC + (1 - pWin) * (-p_d - feePerC)) * 100
+      if (edgePct < 6) {
+        console.log(`[ServerAgent] Fast-path: edge ${edgePct.toFixed(2)}% < 6% — skip`)
+        return
+      }
+      const halfKellyCapital = kellyFrac * 0.25 * this.bankroll  // quarter-Kelly, matches main pipeline
+      const contracts        = Math.max(1, Math.min(Math.round(halfKellyCapital / totalCostPerC), 500))
+      const cost             = contracts * totalCostPerC
       if (cost < 1) return
-      // Net expected profit after 7% Kalshi fee — must clear $2 minimum (fee-killer guard)
-      const expectedProfit = (1 - askPrice / 100) * contracts * (1 - KALSHI_FEE_RATE)
+      const expectedProfit = netWinPerC * contracts
       if (expectedProfit < 2.00) {
         console.log(`[ServerAgent] Fast-path: net profit $${expectedProfit.toFixed(2)} < $2.00 minimum — skip`)
         return
@@ -464,14 +514,14 @@ class ServerAgent extends EventEmitter {
         status:          'open',
         pModel,
         pMarket:         askPrice / 100,
-        edge:            (pModel - askPrice / 100) * 100,
+        edge:            edgePct,
         signals: {
           sentimentScore:    0,
           sentimentMomentum: 0,
           orderbookSkew:     0,
           sentimentLabel:    'fast_entry',
           pLLM:              pModel,
-          confidence:        Math.abs(d) >= 1.5 ? 'high' : 'medium',
+          confidence:        Math.abs(d) >= 1.1 ? 'high' : 'medium',  // midpoint of [1.0,1.2] edge zone
           gkVol:             this.gkVol,
           distancePct:       (Math.exp(this.gkVol * Math.sqrt(minutesLeft / 15) * Math.abs(d)) - 1) * 100,
           minutesLeft,
@@ -559,15 +609,21 @@ class ServerAgent extends EventEmitter {
         this.lastPollAt = Date.now()
         this.pushState()
 
-        if (Math.abs(d) >= CONFIDENCE_THRESHOLD) {
-          // d-score crossed threshold — run ROMA pipeline which:
-          //   1. Fetches fresh ROMA pModel (real edge, not normalCDF approximation)
-          //   2. Fetches live price at execution time for IOC fill
-          //   3. Sizes via full Kelly using ROMA pModel
-          // This strictly dominates the old fast-path which used normalCDF(d) ≈ market price (zero edge).
+        const dAbs = Math.abs(d)
+        if (dAbs >= CONFIDENCE_THRESHOLD && dAbs <= D_MAX_THRESHOLD) {
+          // d in [1.0, 1.2]: confirmed edge zone — run ROMA pipeline for entry.
+          // Pipeline uses live candles for a more precise d-score; this poller d is
+          // an approximation using stale gkVol from bootstrap. If the pipeline's
+          // precise d differs slightly and falls outside [1.0,1.2], it will return
+          // NO_TRADE correctly. Only trigger here when poller confirms we're in zone.
           this.stopDPoller()
-          console.log(`[ServerAgent] d=${d.toFixed(3)} >= ${CONFIDENCE_THRESHOLD} — running ROMA pipeline for entry`)
+          console.log(`[ServerAgent] d=${d.toFixed(3)} in [${CONFIDENCE_THRESHOLD},${D_MAX_THRESHOLD}] — running ROMA pipeline for entry`)
           await this.runCycle()
+        } else if (dAbs > D_MAX_THRESHOLD) {
+          // d > 1.2: Kalshi overprices fat-tail reversal risk — no alpha.
+          // Keep polling: as T shrinks d grows (same distance, less time), but BTC
+          // could also move toward strike and bring |d| back into range.
+          console.log(`[ServerAgent] d=${d.toFixed(3)} > ${D_MAX_THRESHOLD} — outside edge zone, watching`)
         }
       } catch (e) {
         console.error('[ServerAgent] d-poller error:', e)
@@ -840,6 +896,8 @@ class ServerAgent extends EventEmitter {
     if (md.strikePrice > 0)                        this.strikePrice          = md.strikePrice
     if (prob.gkVol15m && prob.gkVol15m > 0)        this.gkVol                = prob.gkVol15m
     if (md.activeMarket?.ticker)                   this.currentMarketTicker  = md.activeMarket.ticker
+    // Sync currentD to the pipeline's precise d-score (candle-based) so UI is consistent
+    if (prob.dScore !== undefined && prob.dScore !== null) this.currentD = prob.dScore
 
     if (evTicker && evTicker !== this.windowKey) {
       this.windowKey       = evTicker
@@ -854,11 +912,14 @@ class ServerAgent extends EventEmitter {
       const gkV        = prob.gkVol15m ?? this.gkVol
       const candlesLeft = Math.max(0.01, md.minutesUntilExpiry / 15)
       const d = Math.abs(Math.log(1 + distPct) / (Math.max(0.0001, gkV) * Math.sqrt(candlesLeft)))
-      if (d < CONFIDENCE_THRESHOLD) {
-        console.log(`[ServerAgent] Bootstrap: d=${d.toFixed(3)} < ${CONFIDENCE_THRESHOLD} — skip bet, watching for signal`)
+      if (d < CONFIDENCE_THRESHOLD || d > D_MAX_THRESHOLD) {
+        const reason = d < CONFIDENCE_THRESHOLD
+          ? `d=${d.toFixed(3)} < ${CONFIDENCE_THRESHOLD} (too close to strike, no alpha)`
+          : `d=${d.toFixed(3)} > ${D_MAX_THRESHOLD} (fat-tail zone, Kalshi overprices reversal risk)`
+        console.log(`[ServerAgent] Bootstrap: ${reason} — skip bet, starting d-poller`)
         return
       }
-      console.log(`[ServerAgent] Bootstrap: d=${d.toFixed(3)} >= ${CONFIDENCE_THRESHOLD} — betting immediately`)
+      console.log(`[ServerAgent] Bootstrap: d=${d.toFixed(3)} in [${CONFIDENCE_THRESHOLD},${D_MAX_THRESHOLD}] — betting immediately`)
     }
 
     // Place bet
@@ -1037,8 +1098,8 @@ class ServerAgent extends EventEmitter {
             const { market } = await res.json()
             if (market?.result === 'yes' || market?.result === 'no') {
               const win = t.side === market.result
-              const grossProfit = t.contracts - t.cost
-              const pnl = win ? grossProfit * (1 - KALSHI_FEE_RATE) : -t.cost
+              const fee = kalshiFee(t.contracts, t.limitPrice ?? Math.round(t.cost / t.contracts * 100))
+              const pnl = win ? (t.contracts - t.cost) - fee : -t.cost - fee
               return { ...t, status: (win ? 'won' : 'lost') as 'won' | 'lost', settlementPrice: pf.currentPrice, pnl }
             }
           }
@@ -1048,23 +1109,24 @@ class ServerAgent extends EventEmitter {
       const justSettled = settled.filter(s => s.status !== 'open')
       this.trades = this.trades.map(t => settled.find(s => s.id === t.id) ?? t)
 
-      // Persist settlement updates to disk log
+      // Persist settlement updates to disk log + update session risk state
       for (const t of justSettled) {
         updateTrade(t.id, { status: t.status, pnl: t.pnl, settlementPrice: t.settlementPrice })
+        if (t.pnl != null) recordTradeResult(t.pnl)
       }
 
       // Kelly: update bankroll from settlement and recalculate allowance
       if (this.kellyMode && justSettled.length > 0) {
         for (const t of justSettled) {
           if (t.status === 'won') {
-            // Net payout = gross payout minus Kalshi 7% fee on profit
-            const grossProfit = t.contracts - t.cost
-            this.bankroll += t.cost + grossProfit * (1 - KALSHI_FEE_RATE)
+            const fee = kalshiFee(t.contracts, t.limitPrice ?? Math.round(t.cost / t.contracts * 100))
+            this.bankroll += t.contracts - fee   // receive $1/contract, pay maker fee
           }
-          // On loss, cost was already deducted at bet time — nothing extra to do
+          // On loss, cost + fee already deducted at bet time — nothing extra to do
         }
         this.bankroll  = Math.max(1, this.bankroll)
         this.allowance = Math.max(1, Math.round(this.bankroll * this.kellyPct * 100) / 100)
+        this.saveConfig()
         console.log(`[ServerAgent] Kelly update — bankroll=$${this.bankroll.toFixed(2)} → allowance=$${this.allowance.toFixed(2)}`)
       }
     }
@@ -1073,3 +1135,7 @@ class ServerAgent extends EventEmitter {
 
 // Module-level singleton — persists for the lifetime of the Node.js process
 export const serverAgent = new ServerAgent()
+
+// Auto-restore agent state after server restart / Next.js HMR
+// Runs once after module load — gives Node a tick to finish wiring up routes first
+setImmediate(() => { serverAgent['restoreConfig']() })

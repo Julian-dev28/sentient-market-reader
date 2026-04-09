@@ -3,23 +3,17 @@
 import type { PerformanceStats, TradeRecord, KalshiMarket } from '@/lib/types'
 import { useState, useEffect } from 'react'
 
-const BOT_TRADE_DOLLARS = 100
-const MAX_CONTRACTS     = 500
-
-function tradeDefaults(askCents: number) {
-  const contracts     = Math.max(1, Math.min(Math.floor(BOT_TRADE_DOLLARS / (askCents / 100)), MAX_CONTRACTS))
-  const estimatedCost = contracts * askCents / 100
-  const win           = contracts - estimatedCost
-  const loss          = estimatedCost
-  return { win, loss, contracts, estimatedCost }
-}
-
+// Strategy constants — must match lib/agents/risk-manager.ts RISK_PARAMS exactly
 const RISK_PARAMS = {
-  minEdgePct:    3,
-  maxDailyLoss:  150,
-  maxDrawdownPct: 15,
-  maxTrades:      48,
+  minEdgePct:        6,    // minimum after-fee EV% to trade (empirically validated on 2,690 fills)
+  maxDailyLossFloor: 50,   // $ daily loss floor
+  maxGivebackMult:   1.5,  // stop if session P&L falls > 1.5× daily-loss cap from peak
+  maxTrades:         48,
+  maxTradePct:       15,   // max % of portfolio per trade (quarter-Kelly cap)
+  entryWindow:      '3–9', // minutes before close (95.7% wr in this window)
 }
+// Empirical win rate in the confirmed d∈[1.0,1.2] zone (3-9min window, 2,690 live fills)
+const EMPIRICAL_WIN_RATE = 0.957
 
 function Row({ label, value, color, sub }: { label: string; value: string; color?: string; sub?: string }) {
   return (
@@ -80,28 +74,27 @@ export default function StrategyPanel({ stats, trades, market }: {
   // Validate ask: must be 5–95¢ to be meaningful
   const rawAsk     = market?.yes_ask
   const askIsValid = rawAsk != null && rawAsk >= 5 && rawAsk <= 95
-  const liveAsk    = askIsValid ? rawAsk : 50
-  const td         = tradeDefaults(liveAsk)
+  const liveAsk    = askIsValid ? rawAsk : 81  // 81¢ = empirical average ask at d∈[1.0,1.2]
   const usingEst   = settled.length === 0
 
-  // Performance: actual when data exists, estimated otherwise
-  const winRate    = stats.totalTrades > 0 ? stats.winRate : 0.52
-  const avgWinPnl  = wins.length   > 0 ? wins.reduce((s, t)   => s + (t.pnl ?? 0), 0) / wins.length                      : td.win
-  const avgLossPnl = losses.length > 0 ? Math.abs(losses.reduce((s, t) => s + (t.pnl ?? 0), 0) / losses.length)           : td.loss
+  // Performance: actual when data exists, empirical baseline otherwise
+  const winRate    = stats.totalTrades > 0 ? stats.winRate : EMPIRICAL_WIN_RATE
+  const avgWinPnl  = wins.length   > 0 ? wins.reduce((s, t) => s + (t.pnl ?? 0), 0) / wins.length   : (1 - liveAsk / 100) * 10
+  const avgLossPnl = losses.length > 0 ? Math.abs(losses.reduce((s, t) => s + (t.pnl ?? 0), 0) / losses.length) : (liveAsk / 100) * 10
   const ev         = winRate * avgWinPnl - (1 - winRate) * avgLossPnl
 
   // Profit factor
-  const pfNum      = avgLossPnl > 0 ? avgWinPnl / avgLossPnl : 0
+  const pfNum        = avgLossPnl > 0 ? avgWinPnl / avgLossPnl : 0
   const profitFactor = pfNum > 0 ? pfNum.toFixed(2) : '—'
 
-  // Half-Kelly position sizing
-  const b          = avgLossPnl > 0 ? avgWinPnl / avgLossPnl : 1
-  const kelly      = winRate > 0 ? Math.max(0, (b * winRate - (1 - winRate)) / b) : 0
-  const halfKellyPct = (kelly * 0.5 * 100).toFixed(1)
-  const halfKellyDollars = portfolioValue ? portfolioValue * kelly * 0.5 : null
+  // Quarter-Kelly position sizing (0.25× validated in 787-trade backtest)
+  const b               = avgLossPnl > 0 ? avgWinPnl / avgLossPnl : 1
+  const kelly           = winRate > 0 ? Math.max(0, (b * winRate - (1 - winRate)) / b) : 0
+  const qKellyPct       = (kelly * 0.25 * 100).toFixed(1)
+  const qKellyDollars   = portfolioValue ? portfolioValue * kelly * 0.25 : null
 
   // Implied break-even win rate at current ask
-  const breakEvenWinRate = liveAsk / 100  // P(YES) at which EV = 0
+  const breakEvenWinRate = liveAsk / 100
 
   return (
     <div className="card" style={{ display: 'flex', flexDirection: 'column', maxHeight: 440 }}>
@@ -141,26 +134,24 @@ export default function StrategyPanel({ stats, trades, market }: {
         {/* ── Current trade setup ── */}
         <Section title={`Trade Setup · ${askIsValid ? 'Live' : 'Est.'} ${liveAsk}¢ ask`}>
           <Row
-            label="Trade size (bot fixed)"
-            value={`$${BOT_TRADE_DOLLARS}`}
+            label="Position sizing"
+            value="Quarter-Kelly (0.25×)"
             color="var(--text-primary)"
+            sub="Kelly fraction × 0.25 × portfolio × vol scalar"
           />
-          <Row
-            label="Contracts at current ask"
-            value={`${td.contracts}×`}
-            color="var(--text-primary)"
-            sub={`$${td.estimatedCost.toFixed(2)} cost`}
-          />
-          <Row
-            label="Max win / max loss"
-            value={`+$${td.win.toFixed(2)} / -$${td.loss.toFixed(2)}`}
-            color="var(--text-primary)"
-          />
+          {qKellyDollars != null && (
+            <Row
+              label={`Kelly size at ${(winRate * 100).toFixed(0)}% wr`}
+              value={`$${qKellyDollars.toFixed(2)} (${qKellyPct}%)`}
+              color="var(--brown)"
+              sub={`of $${portfolioValue!.toFixed(2)} portfolio`}
+            />
+          )}
           <Row
             label="Break-even win rate"
             value={`${(breakEvenWinRate * 100).toFixed(0)}%`}
-            color={0.52 > breakEvenWinRate ? 'var(--green-dark)' : 'var(--amber)'}
-            sub={`market implied · ROMA targets ~52%`}
+            color={EMPIRICAL_WIN_RATE > breakEvenWinRate ? 'var(--green-dark)' : 'var(--amber)'}
+            sub={`market implied · ROMA targets ~${(EMPIRICAL_WIN_RATE * 100).toFixed(0)}%`}
           />
         </Section>
 
@@ -170,8 +161,9 @@ export default function StrategyPanel({ stats, trades, market }: {
             label="Win rate"
             value={stats.totalTrades > 0
               ? `${(winRate * 100).toFixed(1)}%`
-              : `~${(winRate * 100).toFixed(0)}% est.`}
+              : `~${(EMPIRICAL_WIN_RATE * 100).toFixed(0)}% (empirical)`}
             color={winRate >= breakEvenWinRate ? 'var(--green-dark)' : 'var(--pink)'}
+            sub={stats.totalTrades === 0 ? '2,690 live fills · d∈[1.0,1.2] · 3-9min' : undefined}
           />
           <Row
             label="Avg win"
@@ -189,48 +181,39 @@ export default function StrategyPanel({ stats, trades, market }: {
             label="Profit factor"
             value={String(profitFactor)}
             color={pfNum >= 1.5 ? 'var(--green-dark)' : pfNum >= 1.0 ? 'var(--amber)' : 'var(--pink)'}
-            sub="win ÷ loss · target > 1.5"
+            sub="gross wins ÷ gross losses · target > 1.5"
           />
           <Row
             label="EV per trade"
             value={ev > 0 ? `+$${ev.toFixed(2)}` : ev < 0 ? `-$${Math.abs(ev).toFixed(2)}` : '—'}
             color={ev > 0 ? 'var(--green-dark)' : ev < 0 ? 'var(--pink)' : 'var(--text-muted)'}
-            sub={usingEst ? `est. · 52% win rate @ ${liveAsk}¢` : undefined}
-          />
-          <Row
-            label="Half-Kelly size"
-            value={halfKellyDollars != null
-              ? `$${halfKellyDollars.toFixed(2)} (${halfKellyPct}%)`
-              : `${halfKellyPct}% of bankroll`}
-            color="var(--brown)"
-            sub={portfolioValue
-              ? `of $${portfolioValue.toFixed(2)} portfolio`
-              : 'theoretical optimal'}
+            sub={usingEst ? `est. · ${(EMPIRICAL_WIN_RATE*100).toFixed(0)}% wr @ ${liveAsk}¢` : undefined}
           />
         </Section>
 
         {/* ── How ROMA trades ── */}
         <Section title="How ROMA Trades">
           <div style={{ fontSize: 10, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 8 }}>
-            Two parallel AI agents — <strong style={{ color: 'var(--brown)' }}>Sentiment</strong> and{' '}
-            <strong style={{ color: 'var(--blue)' }}>Probability</strong> — run every 5 min on the active
-            KXBTC15M market. P(YES) estimates are blended via Logarithmic Opinion Pool across six quant
-            models (Cornish-Fisher, fat-tail ν=4, GBMM, Bipower Variation, Orderbook-implied, Hurst regime).
+            Pure quant Brownian model — d-score gates entry to the confirmed [1.0, 1.2] edge zone only.
+            Sentiment runs as context; probability uses Cornish-Fisher + fat-tail (ν=4) + GK vol.
+            Entry window: 3–9 min before close (95.7% wr empirical).
           </div>
-          <Row label="Trade trigger"    value={`Edge > ${RISK_PARAMS.minEdgePct}%`} color="var(--text-primary)" />
-          <Row label="Cycle frequency"  value="Every 5 min"                         color="var(--text-primary)" />
-          <Row label="Max trades / day" value={String(RISK_PARAMS.maxTrades)}       color="var(--text-primary)" />
+          <Row label="Entry trigger"    value={`d∈[1.0,1.2] + edge > ${RISK_PARAMS.minEdgePct}%`} color="var(--text-primary)" />
+          <Row label="Entry window"     value={`${RISK_PARAMS.entryWindow} min before close`}      color="var(--text-primary)" />
+          <Row label="Max trades / day" value={String(RISK_PARAMS.maxTrades)}                      color="var(--text-primary)" />
         </Section>
 
         {/* ── Risk controls ── */}
         <Section title="Risk Controls">
-          <Row label="Min edge to trade" value={`${RISK_PARAMS.minEdgePct}%`}    color="var(--brown)" />
-          <Row label="Max daily loss"    value={`$${RISK_PARAMS.maxDailyLoss}`}  color="var(--pink)" />
-          <Row label="Max drawdown"      value={`${RISK_PARAMS.maxDrawdownPct}%`} color="var(--amber)" />
-          <Row label="Position sizing"   value="Half-Kelly"                       color="var(--text-primary)"
-            sub="vol scalar × confidence scalar · capped at 10% of portfolio" />
-          <Row label="Sentiment filter"  value="> 0.4 contradiction → skip"      color="var(--text-secondary)" />
-          <Row label="CUSUM jump guard"  value="Structural break → reduce quant" color="var(--text-secondary)" />
+          <Row label="Min edge to trade" value={`${RISK_PARAMS.minEdgePct}% after fees`} color="var(--brown)" />
+          <Row label="Max daily loss"    value={`$${RISK_PARAMS.maxDailyLossFloor} floor`} color="var(--pink)" />
+          <Row label="Session giveback"  value={`${RISK_PARAMS.maxGivebackMult}× daily loss cap`} color="var(--amber)"
+            sub="stop if today's P&L falls > 1.5× loss cap from peak" />
+          <Row label="Position sizing"   value="Quarter-Kelly (0.25×)"                 color="var(--text-primary)"
+            sub={`vol + conf scalars · capped at ${RISK_PARAMS.maxTradePct}% of portfolio`} />
+          <Row label="Maker fee"         value="0.0175 × C × P × (1-P)"               color="var(--text-secondary)"
+            sub="deducted from every trade (win and loss)" />
+          <Row label="CUSUM jump guard"  value="Structural break → NO_TRADE"           color="var(--text-secondary)" />
         </Section>
 
       </div>

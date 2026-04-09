@@ -32,14 +32,11 @@ export function usePipeline(
   // Always start at default to match SSR — corrected from localStorage in useEffect below
   const [nextCycleIn, setNextCycleIn] = useState(CYCLE_INTERVAL_MS / 1000)
   const [error, setError]           = useState<string | null>(null)
-  const [strikeFlipped, setStrikeFlipped] = useState(false)  // true briefly when BTC crosses strike
   const lastCycleRef                = useRef<number>(0)
   const countdownRef                = useRef<ReturnType<typeof setInterval> | null>(null)
   const autoIntervalRef             = useRef<ReturnType<typeof setInterval> | null>(null)
   const runCycleRef                 = useRef<(() => Promise<void>) | null>(null)
   const abortRef                    = useRef<AbortController | null>(null)
-  const prevBtcSideRef              = useRef<'above' | 'below' | null>(null)
-  const lastFlipMsRef               = useRef<number>(0)
 
   // Restore persisted state after mount — must be useEffect (not useState init)
   // so SSR and client both start with the same values and hydration passes.
@@ -249,30 +246,11 @@ export function usePipeline(
     }
   }, [autoTrade])
 
-  // ── Strike-flip detection ────────────────────────────────────────────────────
-  // When BTC crosses the strike price, notify the user so they can decide whether
-  // to re-run the pipeline. 60s cooldown prevents thrashing near the strike level.
-  useEffect(() => {
-    if (!btcPrice || !strikePrice || strikePrice <= 0) return
-    const side: 'above' | 'below' = btcPrice >= strikePrice ? 'above' : 'below'
-    const prev = prevBtcSideRef.current
-    prevBtcSideRef.current = side
-    if (prev === null || prev === side) return  // first read or no flip
-
-    const now = Date.now()
-    if (now - lastFlipMsRef.current < 60_000) return  // 60s cooldown
-    lastFlipMsRef.current = now
-
-    setStrikeFlipped(true)
-  }, [btcPrice, strikePrice])  // eslint-disable-line react-hooks/exhaustive-deps
-
   // Countdown timer
   useEffect(() => {
     countdownRef.current = setInterval(() => setNextCycleIn(prev => Math.max(0, prev - 1)), 1000)
     return () => { if (countdownRef.current) clearInterval(countdownRef.current) }
   }, [])
 
-  const dismissStrikeFlip = useCallback(() => setStrikeFlipped(false), [])
-
-  return { pipeline, history, streamingAgents, isRunning, serverLocked, nextCycleIn, error, strikeFlipped, dismissStrikeFlip, runCycle, stopCycle }
+  return { pipeline, history, streamingAgents, isRunning, serverLocked, nextCycleIn, error, runCycle, stopCycle }
 }

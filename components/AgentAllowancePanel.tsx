@@ -36,7 +36,7 @@ export default function AgentAllowancePanel({
   const [editingBankroll, setEditingBankroll] = useState(false)
   const [editVal, setEditVal] = useState('')
   const [localKelly, setLocalKelly] = useState(kellyMode)
-  const [localBankroll, setLocalBankroll] = useState(bankroll || 400)
+  const [localBankroll, setLocalBankroll] = useState(defaultBankroll || bankroll || 400)
   const [kellyPct, setKellyPct] = useState(20)
   const [liveD, setLiveD] = useState<number | undefined>(serverD)
   const liveDRef = useRef<number | undefined>(serverD)
@@ -81,10 +81,6 @@ export default function AgentAllowancePanel({
   const accentDark = active ? 'var(--green-dark)' : 'var(--blue-dark)'
   const accentPale = active ? 'var(--green-pale)' : 'var(--blue-pale)'
   const accentBdr  = active ? '#164030'           : '#243850'
-
-  const perTrade = localKelly
-    ? Math.max(1, (localBankroll * kellyPct) / 100)
-    : allowance
 
   return (
     <div className="card bracket-card" style={{
@@ -304,7 +300,7 @@ export default function AgentAllowancePanel({
                   }}>
                     {currentD !== undefined ? (currentD >= 0 ? '+' : '') + currentD.toFixed(3) : '—'}
                   </span>
-                  <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>/ {currentD !== undefined && currentD < 0 ? '-' : ''}{confidenceThreshold}</span>
+                  <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>/ {confidenceThreshold}</span>
                 </div>
               </div>
               <div style={{ height: 4, borderRadius: 2, background: 'var(--border)', overflow: 'hidden', marginBottom: 4 }}>

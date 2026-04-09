@@ -12,7 +12,8 @@ export async function GET(req: NextRequest) {
   const maxLlm   = Math.max(1, Math.min(50, parseInt(sp.get('maxLlm') ?? '20', 10) || 20))
 
   // Build Python URL with query params
-  const pyUrl = new URL('http://localhost:8001/backtest')
+  const pyBase = process.env.PYTHON_SERVICE_URL ?? 'http://localhost:8001'
+  const pyUrl = new URL(`${pyBase}/backtest`)
   pyUrl.searchParams.set('days', String(days))
   if (provider) pyUrl.searchParams.set('provider', provider)
   pyUrl.searchParams.set('roma_mode', romaMode)
