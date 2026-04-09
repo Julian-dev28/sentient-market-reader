@@ -15,62 +15,45 @@ export default function Home() {
   const [botActive, setBotActive]           = useState(false)
   const [showBotWarning, setShowBotWarning] = useState(false)
   const [showLateWarning, setShowLateWarning] = useState(false)
-  const [aiRisk, setAiRisk]                 = useState(false)
-  const [orModel, setOrModel]               = useState<string>('')
-  const [showSettings, setShowSettings]     = useState(false)
-  const [orModels, setOrModels]             = useState<{ id: string; name: string }[]>([])
-  const [orModelsLoading, setOrModelsLoading] = useState(false)
-  const [orModelSearch, setOrModelSearch]   = useState('')
-  const [orModelOpen, setOrModelOpen]       = useState(false)
-  const [orModelCat, setOrModelCat]         = useState<'all'|'fast'|'balanced'|'reasoning'|'large'|'favorites'>('all')
-  const [orFavorites, setOrFavorites]       = useState<string[]>([])
-  const orModelRef                          = useRef<HTMLDivElement>(null)
+  // analysisMode: 'quant' = pure math (no LLM); 'ai' = Grok-enhanced analysis
+  const [analysisMode, setAnalysisMode]   = useState<'quant' | 'ai'>('quant')
+  const [orModel, setOrModel]             = useState<string>('grok-3')
+  const [showSettings, setShowSettings]   = useState(false)
+  const [grokMenuOpen, setGrokMenuOpen]   = useState(false)
+  const grokMenuRef                       = useRef<HTMLDivElement>(null)
+
+  const aiRisk = analysisMode === 'ai'  // derived — AI mode enables ROMA risk manager
 
   // Sync from localStorage after hydration
   useEffect(() => {
-    const om = localStorage.getItem('sentient-or-model')
-    if (om) setOrModel(om)
-    const fav = localStorage.getItem('sentient-or-favorites')
-    if (fav) try { setOrFavorites(JSON.parse(fav)) } catch {}
+    const saved = localStorage.getItem('sentient-grok-model')
+    if (saved) setOrModel(saved)
+    const mode = localStorage.getItem('sentient-analysis-mode')
+    if (mode === 'quant' || mode === 'ai') setAnalysisMode(mode)
   }, [])
 
-  function toggleFavorite(id: string) {
-    setOrFavorites(prev => {
-      const next = prev.includes(id) ? prev.filter(f => f !== id) : [...prev, id]
-      localStorage.setItem('sentient-or-favorites', JSON.stringify(next))
-      return next
-    })
-  }
-
-  function handleOrModelChange(m: string) {
+  function handleGrokModelChange(m: string) {
     setOrModel(m)
-    if (m) localStorage.setItem('sentient-or-model', m)
-    else localStorage.removeItem('sentient-or-model')
+    localStorage.setItem('sentient-grok-model', m)
+    setGrokMenuOpen(false)
   }
 
-  // Fetch OpenRouter model list on mount (non-blocking)
-  useEffect(() => {
-    if (orModels.length > 0 || orModelsLoading) return
-    setOrModelsLoading(true)
-    fetch('/api/openrouter-models')
-      .then(r => r.json())
-      .then(d => { if (d.models?.length) setOrModels(d.models) })
-      .catch(() => {})
-      .finally(() => setOrModelsLoading(false))
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  function handleAnalysisModeChange(mode: 'quant' | 'ai') {
+    setAnalysisMode(mode)
+    localStorage.setItem('sentient-analysis-mode', mode)
+  }
 
-  // Close model dropdown on outside click
+  // Close Grok dropdown on outside click
   useEffect(() => {
-    if (!orModelOpen) return
+    if (!grokMenuOpen) return
     function handleClick(e: MouseEvent) {
-      if (orModelRef.current && !orModelRef.current.contains(e.target as Node)) {
-        setOrModelOpen(false)
+      if (grokMenuRef.current && !grokMenuRef.current.contains(e.target as Node)) {
+        setGrokMenuOpen(false)
       }
     }
     document.addEventListener('mousedown', handleClick)
     return () => document.removeEventListener('mousedown', handleClick)
-  }, [orModelOpen])
+  }, [grokMenuOpen])
 
   // ── Market tick — runs BEFORE usePipeline so btcPrice/strikePrice are available
   // for strike-flip detection. useMarketTick auto-discovers the active market when
@@ -83,7 +66,8 @@ export default function Home() {
     : 0) || liveMarket?.floor_strike || 0
 
   const { pipeline, history, streamingAgents, isRunning, serverLocked, nextCycleIn, error, runCycle, stopCycle } = usePipeline(
-    true, botActive, aiRisk, undefined, undefined, orModel || undefined,
+    true, botActive, aiRisk, undefined, undefined,
+    analysisMode === 'ai' ? (orModel || 'grok-3') : undefined,  // only pass model in AI mode
     liveBTCPrice || undefined, liveStrikePrice || undefined,
   )
 
@@ -486,175 +470,90 @@ export default function Home() {
           {/* ─── CENTER ─── */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
 
-            {/* ── Control bar: model picker + gear + run + expiry ── */}
+            {/* ── Control bar: mode toggle + model picker (AI only) + gear + run + expiry ── */}
             <div style={{ position: 'relative' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
 
-                {/* Model picker — searchable OpenRouter model dropdown */}
-                <div ref={orModelRef} style={{ position: 'relative', flex: 1, minWidth: 0 }}>
-                  <button
-                    onClick={() => { setOrModelOpen(v => !v); setOrModelSearch('') }}
-                    style={{
-                      width: '100%', textAlign: 'left', cursor: 'pointer',
-                      padding: '6px 12px', borderRadius: 8,
-                      border: orModel ? '1px solid var(--blue)' : '1px solid var(--border)',
-                      background: orModel ? 'rgba(74,127,165,0.08)' : 'var(--bg-secondary)',
-                      color: orModel ? 'var(--blue-dark)' : 'var(--text-muted)',
-                      display: 'flex', alignItems: 'center', gap: 8,
-                    }}
-                  >
-                    <span style={{ fontSize: 9, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--text-muted)', flexShrink: 0 }}>Model</span>
-                    <span style={{ fontSize: 12, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
-                      {orModelsLoading && !orModel
-                        ? 'Loading…'
-                        : orModel
-                          ? (orModels.find(m => m.id === orModel)?.name ?? orModel)
-                          : 'Select model (OpenRouter)'}
-                    </span>
-                    {orModel && (
-                      <span
-                        onClick={e => { e.stopPropagation(); handleOrModelChange('') }}
-                        title="Clear model"
-                        style={{ fontSize: 11, color: 'var(--text-muted)', flexShrink: 0, lineHeight: 1, cursor: 'pointer' }}
-                      >✕</span>
-                    )}
-                    <span style={{ fontSize: 10, opacity: 0.4, flexShrink: 0 }}>{orModelOpen ? '▲' : '▼'}</span>
-                  </button>
+                {/* QUANT | AI mode toggle */}
+                <div style={{ display: 'flex', borderRadius: 8, border: '1px solid var(--border)', overflow: 'hidden', flexShrink: 0 }}>
+                  {(['quant', 'ai'] as const).map(mode => (
+                    <button
+                      key={mode}
+                      onClick={() => handleAnalysisModeChange(mode)}
+                      style={{
+                        padding: '6px 14px', cursor: 'pointer', border: 'none',
+                        fontSize: 11, fontWeight: 800, letterSpacing: '0.05em', textTransform: 'uppercase',
+                        background: analysisMode === mode
+                          ? (mode === 'ai' ? 'var(--blue)' : 'var(--brown)')
+                          : 'var(--bg-secondary)',
+                        color: analysisMode === mode ? '#fff' : 'var(--text-muted)',
+                        transition: 'all 0.15s',
+                      }}
+                    >
+                      {mode === 'quant' ? '∑ Quant' : '✦ AI'}
+                    </button>
+                  ))}
+                </div>
 
-                  {orModelOpen && (
-                    <div className="animate-fade-in" style={{
-                      position: 'absolute', top: '100%', left: 0, marginTop: 4, zIndex: 200,
-                      background: 'var(--bg-card)', border: '1px solid var(--border)',
-                      borderRadius: 10, boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
-                      width: '100%', minWidth: 300, display: 'flex', flexDirection: 'column',
-                    }}>
-                      {/* Search */}
-                      <div style={{ padding: '8px 10px 6px', borderBottom: '1px solid var(--border)' }}>
-                        <input
-                          autoFocus
-                          placeholder={orModelsLoading ? 'Loading models…' : `Search ${orModels.length} models…`}
-                          value={orModelSearch}
-                          onChange={e => setOrModelSearch(e.target.value)}
-                          style={{
-                            width: '100%', boxSizing: 'border-box',
-                            padding: '5px 8px', borderRadius: 6, fontSize: 11,
-                            border: '1px solid var(--border)', background: 'var(--bg-secondary)',
-                            color: 'var(--text-primary)', outline: 'none',
-                          }}
-                        />
-                        {/* Category chips */}
-                        <div style={{ display: 'flex', gap: 5, marginTop: 7, flexWrap: 'wrap' }}>
-                          {([
-                            { id: 'all',       label: 'All' },
-                            { id: 'favorites', label: '★ Favs' },
-                            { id: 'fast',      label: 'Fast' },
-                            { id: 'balanced',  label: 'Balanced' },
-                            { id: 'reasoning', label: 'Reasoning' },
-                            { id: 'large',     label: 'Large' },
-                          ] as const).map(cat => (
-                            <button key={cat.id} onClick={() => setOrModelCat(cat.id)}
+                {/* Grok model picker — only visible in AI mode */}
+                {analysisMode === 'ai' && (() => {
+                  const GROK_MODELS = [
+                    { id: 'grok-3',           label: 'xAI: Grok 3',           sub: 'Most capable' },
+                    { id: 'grok-3-fast',      label: 'xAI: Grok 3 Fast',      sub: 'Faster · good quality' },
+                    { id: 'grok-3-mini',      label: 'xAI: Grok 3 Mini',      sub: 'Compact reasoning' },
+                    { id: 'grok-3-mini-fast', label: 'xAI: Grok 3 Mini Fast', sub: 'Fastest · lowest cost' },
+                  ]
+                  const selected = GROK_MODELS.find(m => m.id === orModel) ?? GROK_MODELS[0]
+                  return (
+                    <div ref={grokMenuRef} style={{ position: 'relative', flex: 1, minWidth: 0 }}>
+                      <button
+                        onClick={() => setGrokMenuOpen(v => !v)}
+                        style={{
+                          width: '100%', textAlign: 'left', cursor: 'pointer',
+                          padding: '6px 12px', borderRadius: 8,
+                          border: '1px solid var(--blue)',
+                          background: 'rgba(74,127,165,0.08)',
+                          color: 'var(--blue-dark)',
+                          display: 'flex', alignItems: 'center', gap: 8,
+                        }}
+                      >
+                        <span style={{ fontSize: 9, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--text-muted)', flexShrink: 0 }}>Model</span>
+                        <span style={{ fontSize: 12, fontWeight: 600, flex: 1 }}>{selected.label}</span>
+                        <span style={{ fontSize: 10, opacity: 0.4, flexShrink: 0 }}>{grokMenuOpen ? '▲' : '▼'}</span>
+                      </button>
+
+                      {grokMenuOpen && (
+                        <div className="animate-fade-in" style={{
+                          position: 'absolute', top: '100%', left: 0, marginTop: 4, zIndex: 200,
+                          background: 'var(--bg-card)', border: '1px solid var(--border)',
+                          borderRadius: 10, boxShadow: '0 8px 32px rgba(0,0,0,0.18)',
+                          width: '100%', minWidth: 240,
+                        }}>
+                          <div style={{ padding: '5px 12px 3px', fontSize: 9, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                            xAI · Grok
+                          </div>
+                          {GROK_MODELS.map(m => (
+                            <div
+                              key={m.id}
+                              onClick={() => handleGrokModelChange(m.id)}
                               style={{
-                                padding: '3px 9px', borderRadius: 20, fontSize: 10, fontWeight: 700,
-                                cursor: 'pointer', border: 'none',
-                                background: orModelCat === cat.id ? (cat.id === 'favorites' ? 'var(--amber)' : 'var(--blue)') : 'var(--bg-secondary)',
-                                color: orModelCat === cat.id ? '#fff' : 'var(--text-muted)',
-                                transition: 'all 0.12s',
-                              }}>
-                              {cat.label}
-                            </button>
+                                padding: '7px 14px', cursor: 'pointer',
+                                background: orModel === m.id ? 'rgba(74,127,165,0.1)' : 'transparent',
+                                borderLeft: orModel === m.id ? '2px solid var(--blue)' : '2px solid transparent',
+                                transition: 'background 0.1s',
+                              }}
+                              onMouseEnter={e => { if (orModel !== m.id) (e.currentTarget as HTMLElement).style.background = 'var(--bg-secondary)' }}
+                              onMouseLeave={e => { if (orModel !== m.id) (e.currentTarget as HTMLElement).style.background = 'transparent' }}
+                            >
+                              <div style={{ fontSize: 12, fontWeight: orModel === m.id ? 700 : 500, color: orModel === m.id ? 'var(--blue-dark)' : 'var(--text-primary)' }}>{m.label}</div>
+                              <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 1 }}>{m.sub}</div>
+                            </div>
                           ))}
                         </div>
-                      </div>
-
-                      {/* Results */}
-                      <div style={{ maxHeight: 280, overflowY: 'auto' }}>
-                        {orModelCat === 'all' && orModelSearch === '' && (
-                          <div
-                            onClick={() => { handleOrModelChange(''); setOrModelOpen(false) }}
-                            style={{
-                              padding: '7px 12px', fontSize: 11, cursor: 'pointer',
-                              color: !orModel ? 'var(--blue-dark)' : 'var(--text-muted)',
-                              background: !orModel ? 'rgba(74,127,165,0.1)' : 'transparent',
-                              fontWeight: !orModel ? 700 : 400,
-                            }}
-                          >
-                            auto (env default)
-                          </div>
-                        )}
-                        {(() => {
-                          const q = orModelSearch.toLowerCase()
-
-                          function catMatch(id: string, name: string): boolean {
-                            if (orModelCat === 'favorites') return orFavorites.includes(id)
-                            if (orModelCat === 'all') return true
-                            const s = (id + ' ' + name).toLowerCase()
-                            if (orModelCat === 'fast')
-                              return /flash|mini|haiku|scout|fast|lite|small|1\.5b|3b|7b|8b/.test(s)
-                            if (orModelCat === 'reasoning')
-                              return /\br1\b|o3|o4|thinking|qwq|\breasonin|\bdeepseek-r/.test(s)
-                            if (orModelCat === 'large')
-                              return /opus|gpt-4o[^-m]|gpt-4\.5|qwen3-max|\bmax\b|mistral-large|maverick|70b|72b|90b|123b|180b|671b|405b/.test(s)
-                            if (orModelCat === 'balanced')
-                              return !/flash|mini|haiku|scout|fast|lite|small|1\.5b|3b|7b|8b|\br1\b|o3|o4|thinking|qwq|opus|gpt-4o[^-m]|gpt-4\.5|qwen3-max|\bmax\b|mistral-large|maverick|70b|72b|90b|123b|180b|671b|405b/.test(s)
-                            return true
-                          }
-
-                          const filtered = orModels.filter(m =>
-                            catMatch(m.id, m.name) &&
-                            (q === '' || m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q))
-                          )
-                          if (!filtered.length && !orModelsLoading) {
-                            return <div style={{ padding: '10px 12px', fontSize: 11, color: 'var(--text-muted)' }}>
-                              {orModelCat === 'favorites' ? 'No favorites yet — click ★ on any model' : 'No models found'}
-                            </div>
-                          }
-                          const groups: Record<string, typeof filtered> = {}
-                          for (const m of filtered) {
-                            const p = m.id.split('/')[0]
-                            if (!groups[p]) groups[p] = []
-                            groups[p].push(m)
-                          }
-                          return Object.entries(groups).sort(([a], [b]) => a.localeCompare(b)).map(([provider, models]) => (
-                            <div key={provider}>
-                              <div style={{ padding: '5px 12px 2px', fontSize: 9, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                                {provider}
-                              </div>
-                              {models.map(m => (
-                                <div
-                                  key={m.id}
-                                  onClick={() => { handleOrModelChange(m.id); setOrModelOpen(false) }}
-                                  style={{
-                                    padding: '6px 12px 6px 18px', fontSize: 11, cursor: 'pointer',
-                                    color: orModel === m.id ? 'var(--blue-dark)' : 'var(--text-secondary)',
-                                    background: orModel === m.id ? 'rgba(74,127,165,0.1)' : 'transparent',
-                                    fontWeight: orModel === m.id ? 700 : 400,
-                                    display: 'flex', alignItems: 'center', gap: 6,
-                                  }}
-                                  onMouseEnter={e => { if (orModel !== m.id) (e.currentTarget as HTMLElement).style.background = 'var(--bg-secondary)' }}
-                                  onMouseLeave={e => { if (orModel !== m.id) (e.currentTarget as HTMLElement).style.background = orModel === m.id ? 'rgba(74,127,165,0.1)' : 'transparent' }}
-                                >
-                                  <span style={{ flex: 1 }}>{m.name}</span>
-                                  <span
-                                    onClick={e => { e.stopPropagation(); toggleFavorite(m.id) }}
-                                    title={orFavorites.includes(m.id) ? 'Remove from favorites' : 'Add to favorites'}
-                                    style={{
-                                      fontSize: 13, lineHeight: 1, flexShrink: 0,
-                                      color: orFavorites.includes(m.id) ? 'var(--amber)' : 'var(--border)',
-                                      cursor: 'pointer', transition: 'color 0.12s',
-                                      padding: '0 2px',
-                                    }}
-                                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = 'var(--amber)' }}
-                                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = orFavorites.includes(m.id) ? 'var(--amber)' : 'var(--border)' }}
-                                  >★</span>
-                                </div>
-                              ))}
-                            </div>
-                          ))
-                        })()}
-                      </div>
+                      )}
                     </div>
-                  )}
-                </div>
+                  )
+                })()}
 
                 {/* Settings gear */}
                 <button
@@ -724,23 +623,24 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* Settings dropdown — AI Risk + stage token-budget overrides */}
+              {/* Settings dropdown */}
               {showSettings && (
                 <div className="animate-fade-in" style={{
                   position: 'absolute', top: '100%', left: 0, marginTop: 6, zIndex: 50,
                   background: 'var(--bg-card)', border: '1px solid var(--border)',
-                  borderRadius: 12, padding: '14px 16px',
-                  display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
+                  borderRadius: 12, padding: '12px 16px',
                   boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+                  minWidth: 200,
                 }}>
-                  {/* AI Risk */}
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 11, fontWeight: 700, color: aiRisk ? 'var(--brown)' : 'var(--text-muted)', userSelect: 'none' }}
-                    title="Use ROMA AI risk manager instead of deterministic Kelly + limits">
-                    <input type="checkbox" checked={aiRisk} onChange={e => setAiRisk(e.target.checked)}
-                      style={{ accentColor: 'var(--brown)', width: 13, height: 13, cursor: 'pointer' }} />
-                    AI Risk
-                  </label>
-
+                  <div style={{ fontSize: 9, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>Analysis Mode</div>
+                  <div style={{ fontSize: 11, color: analysisMode === 'quant' ? 'var(--brown)' : 'var(--blue)', fontWeight: 700, marginBottom: 4 }}>
+                    {analysisMode === 'quant' ? '∑ Quant — pure Brownian math, no LLM' : '✦ AI — Grok-enhanced analysis'}
+                  </div>
+                  <div style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                    {analysisMode === 'quant'
+                      ? 'd-score · Cornish-Fisher CF-VaR · GK vol · Kelly sizing. Deterministic & fast.'
+                      : 'Quant pipeline + Grok AI risk manager (ROMA). Switch model above.'}
+                  </div>
                 </div>
               )}
             </div>

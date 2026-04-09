@@ -1,6 +1,5 @@
 import type { AgentResult, SentimentOutput, BTCQuote, KalshiMarket, KalshiOrderbook, OHLCVCandle, DerivativesSignal } from '../types'
 import { llmToolCall, type AIProvider } from '../llm-client'
-import { callPythonRoma, formatRomaTrace } from '../roma/python-client'
 import { computeQuantSignals, formatQuantBrief } from '../indicators'
 
 /** Format last N 15-min candles as a compact context block for the LLM.
@@ -64,6 +63,7 @@ export async function runSentiment(
   orModelOverride?: string,        // override OpenRouter model ID for this call
   signal?: AbortSignal,            // abort signal from the HTTP request
   apiKeys?: Record<string, string>, // per-provider API keys from user settings
+  aiMode?: boolean,                // true = Grok-powered sentiment instead of pure quant
 ): Promise<AgentResult<SentimentOutput>> {
   const start = Date.now()
 
@@ -234,24 +234,93 @@ ${prevContext}`] : []),
 
   score = Math.max(-1, Math.min(1, score))
 
-  const label: SentimentOutput['label'] =
+  const quantLabel: SentimentOutput['label'] =
     score >  0.6 ? 'strongly_bullish' :
     score >  0.2 ? 'bullish' :
     score < -0.6 ? 'strongly_bearish' :
     score < -0.2 ? 'bearish' : 'neutral'
+
+  // ── AI mode: Grok assesses sentiment using the full market context ─────────
+  // Always uses provider='grok' regardless of AI_PROVIDER env — the UI picker is Grok-only.
+  if (aiMode) {
+    const aboveStrike = distanceFromStrikePct >= 0
+    const grokPrompt = [
+      `You are a quantitative BTC prediction market analyst. This is a 15-min Kalshi binary.`,
+      `YES wins if BTC finishes ${aboveStrike ? 'ABOVE' : 'BELOW'} $${strikePrice.toLocaleString()}.`,
+      `NO wins if BTC ${aboveStrike ? 'drops below' : 'rises above'} the strike before close.`,
+      ``,
+      context,  // includes price, candles, quant signals, OB data — no duplicate quantBrief
+      ``,
+      `Estimate directional sentiment. +1.0 = strongly bullish (YES favored), -1.0 = strongly bearish (NO favored).`,
+      `Focus on: momentum vs time pressure (${minutesUntilExpiry.toFixed(1)} min left), $${distUSD.toFixed(0)} gap to cross, reversal risk.`,
+    ].join('\n')
+
+    try {
+      const aiResult = await llmToolCall<{
+        score: number
+        label: 'strongly_bullish' | 'bullish' | 'neutral' | 'bearish' | 'strongly_bearish'
+        signals: string[]
+      }>({
+        provider: 'grok',          // always Grok — AI mode picker is Grok-only
+        modelOverride: orModelOverride,
+        tier: 'fast',
+        maxTokens: 1024,           // grok-3 needs headroom; 512 can truncate tool output
+        toolName: 'sentiment_analysis',
+        toolDescription: 'Analyze BTC 15-min Kalshi binary sentiment, return directional score',
+        schema: {
+          properties: {
+            score:   { type: 'number', description: 'Directional score: +1.0 = strongly bullish (YES wins), -1.0 = strongly bearish (NO wins). Range: -1.0 to +1.0.' },
+            label:   { type: 'string', enum: ['strongly_bullish', 'bullish', 'neutral', 'bearish', 'strongly_bearish'], description: 'Must be consistent with score.' },
+            signals: { type: 'array', items: { type: 'string' }, description: 'Top 3-5 signals driving your assessment, most important first.' },
+          },
+          required: ['score', 'label', 'signals'],
+        },
+        prompt: grokPrompt,
+      })
+
+      const aiScore = Math.max(-1, Math.min(1, aiResult.score))
+
+      // Derive label from score — don't trust Grok's label if it conflicts with score
+      const derivedLabel: SentimentOutput['label'] =
+        aiScore >  0.6 ? 'strongly_bullish' :
+        aiScore >  0.2 ? 'bullish' :
+        aiScore < -0.6 ? 'strongly_bearish' :
+        aiScore < -0.2 ? 'bearish' : 'neutral'
+      const aiLabel = aiResult.label ?? derivedLabel
+
+      return {
+        agentName: 'SentimentAgent (Grok)',
+        status: 'done',
+        output: {
+          score:         aiScore,
+          label:         aiLabel,
+          momentum:      quant.velocity?.velocityPerMin ?? 0,
+          orderbookSkew: quant.obImbalance?.simple ?? 0,
+          signals:       aiResult.signals.slice(0, 5),
+          provider:      'grok',
+        },
+        reasoning: `Grok sentiment score=${aiScore.toFixed(3)} (${aiLabel}) — ${aiResult.signals.join(' | ')}`,
+        durationMs: Date.now() - start,
+        timestamp: new Date().toISOString(),
+      }
+    } catch (err) {
+      console.error('[SentimentAgent] Grok AI mode failed — falling back to quant:', err instanceof Error ? err.message : err)
+      // Fall through to quant result below
+    }
+  }
 
   return {
     agentName: 'SentimentAgent (quant)',
     status: 'done',
     output: {
       score,
-      label,
+      label:         quantLabel,
       momentum:      quant.velocity?.velocityPerMin ?? 0,
       orderbookSkew: quant.obImbalance?.simple ?? 0,
       signals: signals.slice(0, 5),
       provider: 'quant',
     },
-    reasoning: 'Quant sentiment score=' + score.toFixed(3) + ' (' + label + ') — ' + signals.join(' | '),
+    reasoning: 'Quant sentiment score=' + score.toFixed(3) + ' (' + quantLabel + ') — ' + signals.join(' | '),
     durationMs: Date.now() - start,
     timestamp: new Date().toISOString(),
   }

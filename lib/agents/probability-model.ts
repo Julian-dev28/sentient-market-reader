@@ -1,5 +1,5 @@
 import type { AgentResult, ProbabilityOutput, KalshiMarket, OHLCVCandle, DerivativesSignal } from '../types'
-import type { AIProvider } from '../llm-client'
+import { llmToolCall, type AIProvider } from '../llm-client'
 import { computeQuantSignals, formatQuantBrief } from '../indicators'
 
 export async function runProbabilityModel(
@@ -19,6 +19,7 @@ export async function runProbabilityModel(
   orModelOverride?: string,         // override OpenRouter model ID for this call
   signal?: AbortSignal,             // abort signal from the HTTP request
   apiKeys?: Record<string, string>, // per-provider API keys from user settings
+  aiMode?: boolean,                 // true = Grok-powered probability instead of pure quant
 ): Promise<AgentResult<ProbabilityOutput>> {
   const start = Date.now()
 
@@ -66,6 +67,89 @@ export async function runProbabilityModel(
     : null
   const dAbs = dScore !== null ? Math.abs(dScore) : null
 
+  // ── AI mode: run BEFORE d-gate — Grok makes its own edge assessment ────────
+  // In AI mode the d-gate is informational only (passed as context); Grok decides.
+  // If Grok fails, fall through to quant which DOES apply the d-gate.
+  if (aiMode) {
+    const aboveStrike = distanceFromStrikePct >= 0
+    const distUSD = strikePrice > 0 ? Math.abs(distanceFromStrikePct / 100) * strikePrice : 0
+    const grokPrompt = [
+      `You are a quantitative BTC prediction market analyst. Estimate P(YES) for this 15-min Kalshi binary.`,
+      `YES wins if BTC finishes ${aboveStrike ? 'ABOVE' : 'BELOW'} $${strikePrice.toLocaleString()}.`,
+      ``,
+      `Market state:`,
+      `• BTC vs strike: ${distanceFromStrikePct >= 0 ? '+' : ''}${distanceFromStrikePct.toFixed(4)}% ($${distUSD.toFixed(0)} ${aboveStrike ? 'above' : 'below'})`,
+      `• Minutes to close: ${minutesUntilExpiry.toFixed(2)}`,
+      `• D-score: ${dScore !== null ? dScore.toFixed(3) : 'n/a'} (quant edge zone: |d| ∈ [1.0, 1.2])`,
+      `• Brownian physics anchor P(YES): ${pBrownian !== null ? (pBrownian * 100).toFixed(1) + '%' : 'n/a'}`,
+      `• Kalshi YES ask: ${(pMarket * 100).toFixed(0)}¢ | NO ask: ${(noAsk * 100).toFixed(0)}¢`,
+      sentimentSignals?.length ? `• Sentiment signals: ${sentimentSignals.join(' | ')}` : null,
+      ``,
+      `Quant indicators:`,
+      quantBrief,
+    ].filter(Boolean).join('\n')
+
+    try {
+      const aiResult = await llmToolCall<{
+        pModel: number
+        confidence: 'high' | 'medium' | 'low'
+        reasoning: string
+      }>({
+        provider: 'grok',          // always Grok — AI mode picker is Grok-only
+        modelOverride: orModelOverride,
+        tier: 'fast',
+        maxTokens: 1024,           // grok-3 needs headroom; 512 can truncate tool output
+        toolName: 'probability_estimate',
+        toolDescription: 'Estimate P(YES) for a BTC 15-min Kalshi prediction market',
+        schema: {
+          properties: {
+            pModel:     { type: 'number', description: `P(YES) — probability BTC finishes ${aboveStrike ? 'ABOVE' : 'BELOW'} the strike. Range: 0.05–0.95. Direction lock enforced: must be ${aboveStrike ? '≥ 0.50' : '≤ 0.50'}.` },
+            confidence: { type: 'string', enum: ['high', 'medium', 'low'], description: 'Your confidence level in this estimate.' },
+            reasoning:  { type: 'string', description: 'One concise sentence explaining your estimate.' },
+          },
+          required: ['pModel', 'confidence', 'reasoning'],
+        },
+        prompt: grokPrompt,
+      })
+
+      // Enforce direction lock on AI output
+      let pModelAI = Math.max(0.05, Math.min(0.95, aiResult.pModel))
+      if (aboveStrike  && pModelAI < 0.5) pModelAI = 1 - pModelAI
+      if (!aboveStrike && pModelAI > 0.5) pModelAI = 1 - pModelAI
+      pModelAI = Math.max(0.05, Math.min(0.95, pModelAI))
+
+      const recAI: ProbabilityOutput['recommendation'] = aboveStrike ? 'YES' : 'NO'
+      const entryPriceAI = recAI === 'YES' ? pMarket : noAsk
+      const feeAI   = 0.0175 * entryPriceAI * (1 - entryPriceAI)
+      const pWinAI  = recAI === 'YES' ? pModelAI : (1 - pModelAI)
+      const edgeAI  = pWinAI * ((1 - entryPriceAI) - feeAI) + (1 - pWinAI) * (-entryPriceAI - feeAI)
+
+      return {
+        agentName: 'ProbabilityModelAgent (Grok)',
+        status: 'done',
+        output: {
+          pModel:         pModelAI,
+          pMarket,
+          edge:           edgeAI,
+          edgePct:        edgeAI * 100,
+          recommendation: recAI,
+          confidence:     aiResult.confidence,
+          provider:       'grok',
+          gkVol15m:       quant.gkVol15m,
+          volOfVol:       quant.volOfVol,
+          dScore,
+        },
+        reasoning: `Grok P(YES)=${(pModelAI * 100).toFixed(1)}% — ${aiResult.reasoning} | d=${dScore?.toFixed(3)} DIR_LOCK(${aboveStrike ? 'YES' : 'NO'})`,
+        durationMs: Date.now() - start,
+        timestamp: new Date().toISOString(),
+      }
+    } catch (err) {
+      console.error('[ProbabilityModelAgent] Grok AI mode failed — falling back to quant:', err instanceof Error ? err.message : err)
+      // Fall through to quant (with d-gate) below
+    }
+  }
+
+  // ── Quant-only: apply d-gate (AI mode falls through here only on Grok error) ──
   if (dAbs !== null && (dAbs < D_MIN_THRESHOLD || dAbs > D_MAX_THRESHOLD)) {
     const reason = dAbs < D_MIN_THRESHOLD
       ? `|d|=${dAbs.toFixed(3)} < ${D_MIN_THRESHOLD} — Kalshi correctly prices near-strike; no alpha`
