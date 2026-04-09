@@ -125,10 +125,10 @@ export function runRiskManager(
     rejectionReason = `Daily trade count cap reached (${RISK_PARAMS.maxTradesPerDay})`
   } else if (limitPrice < RISK_PARAMS.minEntryPrice) {
     approved = false
-    rejectionReason = `Entry price ${limitPrice}¢ below min ${RISK_PARAMS.minEntryPrice}¢ — model has no edge at near-50/50 prices`
+    rejectionReason = `BUY ${recommendation} entry price ${limitPrice}¢ below min ${RISK_PARAMS.minEntryPrice}¢ — model has no edge at near-50/50 prices`
   } else if (limitPrice > RISK_PARAMS.maxEntryPrice) {
     approved = false
-    rejectionReason = `Entry price ${limitPrice}¢ above max ${RISK_PARAMS.maxEntryPrice}¢ — fee eats >12% of gross margin at this price`
+    rejectionReason = `BUY ${recommendation} entry price ${limitPrice}¢ above max ${RISK_PARAMS.maxEntryPrice}¢ — fee eats >12% of gross margin at this price`
   } else if (edgePct < RISK_PARAMS.minEdgePct) {
     approved = false
     rejectionReason = `After-fee EV ${edgePct.toFixed(2)}% < minimum ${RISK_PARAMS.minEdgePct}% — insufficient edge to overcome variance`
@@ -202,8 +202,8 @@ export function runRiskManager(
       tradeCount: sessionState.tradeCount,
     },
     reasoning: approved
-      ? `Trade approved. Portfolio: $${portfolioValue.toFixed(0)}. Size: ${positionSize} contracts (Kelly=${(kellyFraction * 100).toFixed(1)}% × 0.25 × vol=${volScalar.toFixed(2)} × conf=${confScalar.toFixed(2)} → $${tradeBudget.toFixed(0)} budget). Max loss: $${maxLoss.toFixed(2)} (${pctOfPortfolio.toFixed(1)}% of portfolio). Daily P&L: $${sessionState.dailyPnl.toFixed(2)} / limit $${Math.abs(maxDailyLoss).toFixed(0)}.`
-      : `Trade REJECTED — ${rejectionReason}`,
+      ? `BUY ${recommendation} approved @ ${limitPrice}¢ (P(WIN)=${(pWin * 100).toFixed(1)}%). Portfolio: $${portfolioValue.toFixed(0)}. Size: ${positionSize} contracts (Kelly=${(kellyFraction * 100).toFixed(1)}% × 0.25 × vol=${volScalar.toFixed(2)} × conf=${confScalar.toFixed(2)} → $${tradeBudget.toFixed(0)} budget). Max loss: $${maxLoss.toFixed(2)} (${pctOfPortfolio.toFixed(1)}% of portfolio). Daily P&L: $${sessionState.dailyPnl.toFixed(2)} / limit $${Math.abs(maxDailyLoss).toFixed(0)}.`
+      : `BUY ${recommendation} REJECTED — ${rejectionReason}`,
     durationMs: Date.now() - start,
     timestamp: new Date().toISOString(),
   }
@@ -222,6 +222,9 @@ export async function runRomaRiskManager(
   provider: AIProvider,
   romaMode?: string,
   portfolioValue: number = 500,   // actual Kalshi account value in dollars
+  orModelOverride?: string,       // model selected in UI (e.g. 'grok-3') — overrides GROK_MODEL env
+  signal?: AbortSignal,           // HTTP request abort signal — propagates cancellation into ROMA
+  apiKeys?: Record<string, string>, // per-provider keys from user settings
 ): Promise<AgentResult<RiskOutput>> {
   const start = Date.now()
   checkDailyReset()
@@ -246,17 +249,21 @@ export async function runRomaRiskManager(
 
   const maxBudget        = Math.min(maxTradeCapital, portfolioValue * 0.25)
 
+  // P(WIN) for the recommended side — always > 0.5 when there's edge
+  const pWinRoma = recommendation === 'NO' ? (1 - pModel) : pModel
+
   const goal =
     `You are a quantitative risk manager for a Kalshi BTC 15-min prediction market trading system. ` +
     `Assess whether this trade should be approved and recommend a position size (in contracts, ${1}–${RISK_PARAMS.maxContractSize}). ` +
     `Consider: edge quality, time pressure, session health, portfolio exposure, and overall risk. ` +
     `Be conservative — only approve trades with genuine statistical edge. ` +
-    `Never risk more than ${RISK_PARAMS.maxTradePct}% of the portfolio on a single trade.`
+    `Never risk more than ${RISK_PARAMS.maxTradePct}% of the portfolio on a single trade. ` +
+    `Note: both YES and NO contract types are valid — a BUY NO trade at 80¢ is equivalent to buying YES at 20¢ on the other side.`
 
   const context = [
-    `Recommendation: BUY ${recommendation} @ ${limitPrice}¢`,
+    `Trade: BUY ${recommendation} @ ${limitPrice}¢`,
+    `P(${recommendation} wins): ${(pWinRoma * 100).toFixed(1)}% | P(YES): ${(pModel * 100).toFixed(1)}% | P(NO): ${((1 - pModel) * 100).toFixed(1)}%`,
     `Model edge: ${edgePct >= 0 ? '+' : ''}${edgePct.toFixed(2)}% (minimum required: ${RISK_PARAMS.minEdgePct}%)`,
-    `Model P(YES): ${(pModel * 100).toFixed(1)}%`,
     `Minutes until window close: ${minutesUntilExpiry.toFixed(1)}`,
     `Portfolio value: $${portfolioValue.toFixed(2)} (live Kalshi balance)`,
     `Max trade budget: $${maxBudget.toFixed(2)} (${RISK_PARAMS.maxTradePct}% of portfolio ≈ ${Math.floor(maxBudget / (limitPrice / 100))} contracts @ ${limitPrice}¢)`,
@@ -269,7 +276,7 @@ export async function runRomaRiskManager(
 
   try {
     const maxDepth = Math.max(1, parseInt(process.env.ROMA_MAX_DEPTH ?? '1'))
-    const romaResult = await callPythonRoma(goal, context, maxDepth, 2, romaMode)
+    const romaResult = await callPythonRoma(goal, context, maxDepth, 2, romaMode, provider, undefined, orModelOverride, signal, apiKeys)
     const romaTrace  = formatRomaTrace(romaResult)
 
     const extracted = await llmToolCall<{
@@ -278,6 +285,7 @@ export async function runRomaRiskManager(
       reasoning: string
     }>({
       provider,
+      modelOverride: orModelOverride,
       tier: 'fast',
       maxTokens: 256,
       toolName: 'risk_decision',
@@ -321,7 +329,7 @@ export async function runRomaRiskManager(
 
 function buildRejected(reason: string, givebackDollars: number, start: number): AgentResult<RiskOutput> {
   return {
-    agentName: 'RiskManagerAgent',
+    agentName: 'RiskManagerAgent (ROMA AI)',
     status: 'skipped',
     output: {
       approved: false,
