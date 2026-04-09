@@ -3,7 +3,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import type { PipelineState, PartialPipelineAgents } from '@/lib/types'
 
-const CYCLE_INTERVAL_MS = 5 * 60 * 1000  // 5-minute cycles
+const CYCLE_INTERVAL_MS        = 5 * 60 * 1000  // 5-minute cycles (quant fixed clock)
+const PRICE_DELTA_TRIGGER_PCT  = 0.20            // AI mode: 0.20% BTC move → re-run
+const MIN_COOLDOWN_MS          = 90_000          // AI mode: minimum 90s between runs
+const AI_WATCHER_INTERVAL_MS   = 15_000          // AI mode: check for triggers every 15s
 
 /**
  * usePipeline — drives the agent pipeline.
@@ -31,12 +34,21 @@ export function usePipeline(
   const [serverLocked, setServerLocked]   = useState(false)
   // Always start at default to match SSR — corrected from localStorage in useEffect below
   const [nextCycleIn, setNextCycleIn] = useState(CYCLE_INTERVAL_MS / 1000)
-  const [error, setError]           = useState<string | null>(null)
+  const [error, setError]              = useState<string | null>(null)
+  // AI delta monitor — current signed % move from last-cycle BTC price
+  const [monitorDeltaPct, setMonitorDeltaPct] = useState<number | null>(null)
   const lastCycleRef                = useRef<number>(0)
   const countdownRef                = useRef<ReturnType<typeof setInterval> | null>(null)
   const autoIntervalRef             = useRef<ReturnType<typeof setInterval> | null>(null)
   const runCycleRef                 = useRef<(() => Promise<void>) | null>(null)
   const abortRef                    = useRef<AbortController | null>(null)
+  // Refs for live price (updated each render; readable inside intervals without adding to deps)
+  const btcPriceRef          = useRef<number | undefined>(btcPrice)
+  const strikePriceRef       = useRef<number | undefined>(strikePrice)
+  const lastCyclePriceRef    = useRef<number>(0)   // BTC price when last cycle completed
+  const lastCycleStrikeRef   = useRef<number>(0)   // strike price when last cycle completed
+  const isRunningRef         = useRef<boolean>(false)
+  const aiRiskRef            = useRef<boolean>(aiRisk)
 
   // Restore persisted state after mount — must be useEffect (not useState init)
   // so SSR and client both start with the same values and hydration passes.
@@ -61,6 +73,12 @@ export function usePipeline(
       try { localStorage.setItem('sentient-pipeline', JSON.stringify(pipeline)) } catch {}
     }
   }, [pipeline])
+
+  // Sync live price refs — readable inside intervals without closure staleness
+  useEffect(() => { btcPriceRef.current   = btcPrice },   [btcPrice])
+  useEffect(() => { strikePriceRef.current = strikePrice }, [strikePrice])
+  useEffect(() => { isRunningRef.current  = isRunning },  [isRunning])
+  useEffect(() => { aiRiskRef.current     = aiRisk },     [aiRisk])
 
   const stopCycle = useCallback(() => {
     // Defer out of React's synchronous event handler.
@@ -221,7 +239,11 @@ export function usePipeline(
       setServerLocked(false)
       lastCycleRef.current = Date.now()
       try { localStorage.setItem('sentient-last-cycle', String(Date.now())) } catch {}
-      setNextCycleIn(CYCLE_INTERVAL_MS / 1000)
+      // Snapshot price so the delta watcher can measure movement since this run
+      if (btcPriceRef.current)    lastCyclePriceRef.current  = btcPriceRef.current
+      if (strikePriceRef.current) lastCycleStrikeRef.current = strikePriceRef.current
+      // AI mode shows 90s cooldown; quant shows full 5-min countdown
+      setNextCycleIn(aiRisk ? MIN_COOLDOWN_MS / 1000 : CYCLE_INTERVAL_MS / 1000)
     }
   }, [liveMode, autoTrade, aiRisk, provider2, providers, orModel])
 
@@ -235,16 +257,61 @@ export function usePipeline(
   // Keep ref current so auto-interval always calls latest version
   useEffect(() => { runCycleRef.current = runCycle }, [runCycle])
 
-  // Auto-cycle when bot is active — fires immediately, then every 5 min
+  // Quant mode: fixed 5-min clock
   useEffect(() => {
-    if (autoTrade) {
-      setTimeout(() => runCycleRef.current?.(), 50)
-      autoIntervalRef.current = setInterval(() => runCycleRef.current?.(), CYCLE_INTERVAL_MS)
-    }
+    if (!autoTrade || aiRisk) return
+    setTimeout(() => runCycleRef.current?.(), 50)
+    autoIntervalRef.current = setInterval(() => runCycleRef.current?.(), CYCLE_INTERVAL_MS)
     return () => {
       if (autoIntervalRef.current) { clearInterval(autoIntervalRef.current); autoIntervalRef.current = null }
     }
-  }, [autoTrade])
+  }, [autoTrade, aiRisk])
+
+  // AI mode: event-driven delta monitor — fires immediately, then checks every 15s
+  useEffect(() => {
+    if (!autoTrade || !aiRisk) return
+    setTimeout(() => runCycleRef.current?.(), 50)
+    const tid = setInterval(() => {
+      if (isRunningRef.current) return
+      const now = Date.now()
+      const sinceLastCycle = now - lastCycleRef.current
+      // Respect cooldown — never hammer Grok faster than 90s
+      if (sinceLastCycle < MIN_COOLDOWN_MS) return
+
+      const price  = btcPriceRef.current
+      const strike = strikePriceRef.current
+      const lastP  = lastCyclePriceRef.current
+      const lastS  = lastCycleStrikeRef.current
+
+      // Update live delta display (signed: + = moved up, - = moved down from last run)
+      if (price && lastP > 0) setMonitorDeltaPct((price - lastP) / lastP * 100)
+
+      // Stale fallback: force run after 5 min regardless
+      if (sinceLastCycle >= CYCLE_INTERVAL_MS) {
+        runCycleRef.current?.()
+        return
+      }
+
+      // Strike cross: BTC flipped which side of strike since last run → re-assess immediately
+      if (price && strike && lastP > 0 && lastS > 0) {
+        const wasAbove = lastP >= lastS
+        const isAbove  = price >= strike
+        if (wasAbove !== isAbove) {
+          runCycleRef.current?.()
+          return
+        }
+      }
+
+      // Price delta trigger: meaningful directional move
+      if (price && lastP > 0) {
+        const deltaPct = Math.abs(price - lastP) / lastP * 100
+        if (deltaPct >= PRICE_DELTA_TRIGGER_PCT) {
+          runCycleRef.current?.()
+        }
+      }
+    }, AI_WATCHER_INTERVAL_MS)
+    return () => clearInterval(tid)
+  }, [autoTrade, aiRisk])
 
   // Countdown timer
   useEffect(() => {
@@ -252,5 +319,5 @@ export function usePipeline(
     return () => { if (countdownRef.current) clearInterval(countdownRef.current) }
   }, [])
 
-  return { pipeline, history, streamingAgents, isRunning, serverLocked, nextCycleIn, error, runCycle, stopCycle }
+  return { pipeline, history, streamingAgents, isRunning, serverLocked, nextCycleIn, error, runCycle, stopCycle, monitorDeltaPct }
 }
