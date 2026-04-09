@@ -2,40 +2,19 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import { usePathname } from 'next/navigation'
 
 interface HeaderProps {
   cycleId: number
   isRunning: boolean
-  nextCycleIn: number
-  liveMode: boolean
-  onToggleLive: () => void
+  lastCompletedAt?: string   // ISO timestamp of last pipeline completion
+  onRunCycle?: () => void
 }
 
-/** SVG ring showing fraction of next-cycle countdown remaining */
-function CycleRing({ seconds, total = 300, running }: { seconds: number; total?: number; running: boolean }) {
-  const r    = 14
-  const circ = 2 * Math.PI * r
-  const frac = running ? 1 : Math.max(0, Math.min(1, seconds / total))
-  const offset = circ * (1 - frac)
-
-  return (
-    <svg width={36} height={36} style={{ transform: 'rotate(-90deg)', flexShrink: 0 }}>
-      <circle cx={18} cy={18} r={r} fill="none" stroke="var(--border)" strokeWidth={2.5} />
-      <circle
-        cx={18} cy={18} r={r} fill="none"
-        stroke={running ? 'var(--pink)' : frac < 0.25 ? 'var(--amber)' : 'var(--green)'}
-        strokeWidth={2.5}
-        strokeDasharray={circ}
-        strokeDashoffset={running ? 0 : offset}
-        strokeLinecap="round"
-        style={{ transition: 'stroke-dashoffset 1s linear, stroke 0.4s ease' }}
-      />
-    </svg>
-  )
-}
-
-export default function Header({ cycleId, isRunning, nextCycleIn, liveMode, onToggleLive }: HeaderProps) {
+export default function Header({ cycleId, isRunning, lastCompletedAt, onRunCycle }: HeaderProps) {
+  const pathname = usePathname()
   const [time, setTime] = useState('')
+  const [dataAgeSec, setDataAgeSec] = useState<number | null>(null)
 
   useEffect(() => {
     const update = () => setTime(
@@ -47,6 +26,22 @@ export default function Header({ cycleId, isRunning, nextCycleIn, liveMode, onTo
     const id = setInterval(update, 1000)
     return () => clearInterval(id)
   }, [])
+
+  useEffect(() => {
+    if (!lastCompletedAt) { setDataAgeSec(null); return }
+    const completedAt = new Date(lastCompletedAt).getTime()
+    const tick = () => setDataAgeSec(Math.floor((Date.now() - completedAt) / 1000))
+    tick()
+    const id = setInterval(tick, 1000)
+    return () => clearInterval(id)
+  }, [lastCompletedAt])
+
+  const stale = dataAgeSec !== null && dataAgeSec >= 600   // >10 min
+  const aging = dataAgeSec !== null && dataAgeSec >= 300   // >5 min
+  function fmtAge(s: number) {
+    const m = Math.floor(s / 60)
+    return m > 0 ? `${m}m ${s % 60}s` : `${s}s`
+  }
 
   return (
     <header style={{
@@ -73,10 +68,30 @@ export default function Header({ cycleId, isRunning, nextCycleIn, liveMode, onTo
 
         <div style={{ height: 22, width: 1, background: 'var(--border)', margin: '0 2px' }} />
 
+        {/* Page nav */}
+        {(['/dashboard', '/agent'] as const).map((href, i) => {
+          const label = i === 0 ? 'Dashboard' : 'Agent'
+          const active = pathname === href
+          return (
+            <Link key={href} href={href} style={{
+              fontSize: 11, fontWeight: active ? 800 : 600,
+              padding: '3px 10px', borderRadius: 7, textDecoration: 'none',
+              border: active ? '1.5px solid var(--blue)' : '1px solid transparent',
+              background: active ? 'rgba(74,127,165,0.10)' : 'transparent',
+              color: active ? 'var(--blue)' : 'var(--text-muted)',
+              transition: 'all 0.15s',
+            }}>
+              {label}
+            </Link>
+          )
+        })}
+
+        <div style={{ height: 22, width: 1, background: 'var(--border)', margin: '0 2px' }} />
+
         <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
           <span className="pill pill-brown">KXBTC15M</span>
-          <span className={`pill ${liveMode ? 'pill-pink' : 'pill-cream'}`} style={{ transition: 'all 0.3s ease' }}>
-            {liveMode ? '● LIVE' : 'PAPER'}
+          <span className="pill pill-green">
+            ● LIVE
           </span>
           <span className="pill pill-green">15-MIN BTC</span>
         </div>
@@ -85,61 +100,6 @@ export default function Header({ cycleId, isRunning, nextCycleIn, liveMode, onTo
       {/* Right controls */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
 
-        {/* Live / Paper toggle */}
-        <button
-          onClick={onToggleLive}
-          title={liveMode ? 'Switch to paper trading' : 'Switch to live trading — real Kalshi orders'}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 7,
-            padding: '5px 12px', borderRadius: 9, cursor: 'pointer',
-            border: liveMode ? '1px solid var(--green-dark)' : '1px solid var(--border-bright)',
-            background: liveMode ? 'var(--green-pale)' : 'var(--cream)',
-            transition: 'all 0.25s ease',
-          }}
-        >
-          <div style={{
-            width: 28, height: 15, borderRadius: 8,
-            background: liveMode ? 'var(--green)' : 'var(--border-bright)',
-            position: 'relative', transition: 'background 0.25s', flexShrink: 0,
-          }}>
-            <div style={{
-              position: 'absolute', top: 2,
-              left: liveMode ? 15 : 2,
-              width: 11, height: 11, borderRadius: '50%',
-              background: '#fff',
-              transition: 'left 0.25s cubic-bezier(0.34,1.56,0.64,1)',
-              boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
-            }} />
-          </div>
-          <span style={{ fontSize: 10, fontWeight: 700, color: liveMode ? 'var(--green-dark)' : 'var(--text-muted)', whiteSpace: 'nowrap' }}>
-            {liveMode ? 'LIVE' : 'PAPER'}
-          </span>
-        </button>
-
-        {/* Cycle ring + label */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <CycleRing seconds={nextCycleIn} running={isRunning} />
-            <div style={{
-              position: 'absolute',
-              fontFamily: 'var(--font-geist-mono)', fontSize: 8, fontWeight: 800,
-              color: isRunning ? 'var(--pink)' : 'var(--text-secondary)',
-              transition: 'color 0.3s',
-            }}>
-              {isRunning ? (
-                <span style={{ animation: 'pulse-dot 0.7s ease infinite', display: 'inline-block' }}>●</span>
-              ) : nextCycleIn}
-            </div>
-          </div>
-          <div>
-            <div style={{ fontSize: 9, color: 'var(--text-muted)', lineHeight: 1 }}>
-              {isRunning ? 'Running' : 'Next cycle'}
-            </div>
-            <div style={{ fontSize: 10, fontWeight: 700, color: isRunning ? 'var(--pink)' : 'var(--text-secondary)', lineHeight: 1.4 }}>
-              {isRunning ? 'ACTIVE' : `${nextCycleIn}s`}
-            </div>
-          </div>
-        </div>
 
         {/* Cycle badge */}
         <div style={{
@@ -152,6 +112,31 @@ export default function Header({ cycleId, isRunning, nextCycleIn, liveMode, onTo
             #{cycleId}
           </div>
         </div>
+
+        {/* Data age badge */}
+        {!isRunning && dataAgeSec !== null && (aging || stale) && (
+          <button
+            onClick={onRunCycle}
+            title="Data is stale — click to re-run pipeline"
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              padding: '4px 10px', borderRadius: 8, cursor: onRunCycle ? 'pointer' : 'default',
+              border: `1px solid ${stale ? 'rgba(212,85,130,0.5)' : 'rgba(212,135,44,0.4)'}`,
+              background: stale ? 'rgba(212,85,130,0.08)' : 'rgba(212,135,44,0.08)',
+              transition: 'all 0.3s',
+            }}
+          >
+            <span style={{ fontSize: 10, color: stale ? 'var(--pink)' : 'var(--amber)' }}>
+              {stale ? '⚠' : '◷'}
+            </span>
+            <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 10, fontWeight: 700, color: stale ? 'var(--pink)' : 'var(--amber)', whiteSpace: 'nowrap' }}>
+              {fmtAge(dataAgeSec)} old
+            </span>
+            {onRunCycle && (
+              <span style={{ fontSize: 9, color: stale ? 'var(--pink)' : 'var(--amber)', opacity: 0.7 }}>· re-run</span>
+            )}
+          </button>
+        )}
 
         {/* Live clock */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>

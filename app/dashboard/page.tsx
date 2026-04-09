@@ -8,22 +8,14 @@ import MarketCard from '@/components/MarketCard'
 import PriceChart from '@/components/PriceChart'
 import AgentPipeline from '@/components/AgentPipeline'
 import SignalPanel from '@/components/SignalPanel'
-import TradeLog from '@/components/TradeLog'
-import PerformancePanel from '@/components/PerformancePanel'
 import PositionsPanel from '@/components/PositionsPanel'
 import PipelineHistory from '@/components/PipelineHistory'
-import ChallengePanel from '@/components/ChallengePanel'
-import StrategyPanel from '@/components/StrategyPanel'
 
 export default function Home() {
-  const [liveMode, setLiveMode]           = useState(false)
-  const [showLiveWarning, setShowLiveWarning] = useState(false)
   const [botActive, setBotActive]           = useState(false)
   const [showBotWarning, setShowBotWarning] = useState(false)
   const [showLateWarning, setShowLateWarning] = useState(false)
   const [aiRisk, setAiRisk]                 = useState(false)
-  const [sentMode, setSentMode]             = useState<string | undefined>(undefined)
-  const [probMode, setProbMode]             = useState<string | undefined>(undefined)
   const [orModel, setOrModel]               = useState<string>('')
   const [showSettings, setShowSettings]     = useState(false)
   const [orModels, setOrModels]             = useState<{ id: string; name: string }[]>([])
@@ -36,7 +28,6 @@ export default function Home() {
 
   // Sync from localStorage after hydration
   useEffect(() => {
-    if (localStorage.getItem('sentient-live-mode') === 'true') setLiveMode(true)
     const om = localStorage.getItem('sentient-or-model')
     if (om) setOrModel(om)
     const fav = localStorage.getItem('sentient-or-favorites')
@@ -81,8 +72,6 @@ export default function Home() {
     return () => document.removeEventListener('mousedown', handleClick)
   }, [orModelOpen])
 
-  const romaMode: string = 'keen'
-
   // ── Market tick — runs BEFORE usePipeline so btcPrice/strikePrice are available
   // for strike-flip detection. useMarketTick auto-discovers the active market when
   // ticker is null; switches to the specific ticker once pipeline has run.
@@ -93,8 +82,8 @@ export default function Home() {
     ? parseFloat(liveMarket.yes_sub_title.replace(/[^0-9.]/g, ''))
     : 0) || liveMarket?.floor_strike || 0
 
-  const { pipeline, history, streamingAgents, trades, isRunning, serverLocked, nextCycleIn, error, stats, strikeFlipped, dismissStrikeFlip, runCycle, stopCycle } = usePipeline(
-    liveMode, romaMode, botActive, aiRisk, undefined, undefined, sentMode, probMode, orModel || undefined,
+  const { pipeline, history, streamingAgents, isRunning, serverLocked, nextCycleIn, error, runCycle, stopCycle } = usePipeline(
+    true, botActive, aiRisk, undefined, undefined, orModel || undefined,
     liveBTCPrice || undefined, liveStrikePrice || undefined,
   )
 
@@ -111,25 +100,34 @@ export default function Home() {
   }, [md?.activeMarket?.ticker])
 
   // ── Trade alert pop-up ─────────────────────────────────────────────────────
-  type TradeAlert = { action: string; side: 'yes' | 'no'; limitPrice: number; ticker: string; edge: number; pModel: number }
+  type TradeAlert = { action: string; side: 'yes' | 'no'; limitPrice: number; ticker: string; edge: number; pModel: number; windowKey: string }
   const [tradeAlert, setTradeAlert]       = useState<TradeAlert | null>(null)
   const [alertStatus, setAlertStatus]     = useState<'idle' | 'placing' | 'ok' | 'err'>('idle')
-  const lastAlertCycleRef                 = useRef<number>(0)
+  const alertShownWindowRef               = useRef<string | null>(null)   // window key alert was shown for
+
+  function getDismissedKey() { return typeof window !== 'undefined' ? localStorage.getItem('alertDismissedWindow') : null }
+  function setDismissedKey(k: string) { localStorage.setItem('alertDismissedWindow', k) }
 
   useEffect(() => {
     if (!pipeline) return
-    const { cycleId } = pipeline
     const ex   = pipeline.agents.execution.output
     const prob = pipeline.agents.probability.output
-    if (ex.action !== 'PASS' && ex.side && ex.limitPrice != null && cycleId > lastAlertCycleRef.current) {
-      lastAlertCycleRef.current = cycleId
-      setTradeAlert({ action: ex.action, side: ex.side as 'yes' | 'no', limitPrice: ex.limitPrice, ticker: ex.marketTicker, edge: prob.edge, pModel: prob.pModel })
+    const mdOut = pipeline.agents.marketDiscovery.output
+    const windowKey = (mdOut.activeMarket as { event_ticker?: string } | undefined)?.event_ticker
+      ?? mdOut.activeMarket?.ticker.split('-').slice(0, 2).join('-')
+      ?? null
+    if (!windowKey) return
+    if (alertShownWindowRef.current === windowKey) return      // already shown this window
+    if (getDismissedKey() === windowKey) return                // user dismissed this window (persists across refresh)
+    if (ex.action !== 'PASS' && ex.side && ex.limitPrice != null) {
+      alertShownWindowRef.current = windowKey
+      setTradeAlert({ action: ex.action, side: ex.side as 'yes' | 'no', limitPrice: ex.limitPrice, ticker: ex.marketTicker, edge: prob.edge, pModel: prob.pModel, windowKey })
       setAlertStatus('idle')
     }
   }, [pipeline])
 
   async function executeAlertTrade() {
-    if (!tradeAlert || !liveMode) return
+    if (!tradeAlert) return
     setAlertStatus('placing')
     const contracts = Math.max(1, Math.floor(40 / (tradeAlert.limitPrice / 100)))
     try {
@@ -185,21 +183,6 @@ export default function Home() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isRunning, serverLocked, secondsUntilExpiry])
 
-  function handleToggleLive() {
-    if (!liveMode) {
-      setShowLiveWarning(true)
-    } else {
-      setLiveMode(false)
-      localStorage.setItem('sentient-live-mode', 'false')
-    }
-  }
-
-  function confirmLive() {
-    setShowLiveWarning(false)
-    setLiveMode(true)
-    localStorage.setItem('sentient-live-mode', 'true')
-  }
-
   function handleStartBot() {
     setShowBotWarning(true)
   }
@@ -219,55 +202,9 @@ export default function Home() {
       <Header
         cycleId={pipeline?.cycleId ?? 0}
         isRunning={isRunning}
-        nextCycleIn={nextCycleIn}
-        liveMode={liveMode}
-        onToggleLive={handleToggleLive}
+        lastCompletedAt={pipeline?.cycleCompletedAt}
+        onRunCycle={isRunning || serverLocked ? undefined : runCycle}
       />
-
-      {/* Live mode warning modal */}
-      {showLiveWarning && (
-        <div style={{
-          position: 'fixed', inset: 0, zIndex: 1000,
-          background: 'rgba(5,5,7,0.80)', backdropFilter: 'blur(12px)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>
-          <div className="card animate-fade-in" style={{ maxWidth: 420, width: '90%', padding: '28px 28px' }}>
-            <div style={{ fontSize: 22, marginBottom: 10 }}>⚠️</div>
-            <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-primary)', marginBottom: 8 }}>
-              Enable Live Trading?
-            </div>
-            <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 20 }}>
-              In live mode the pipeline will place <strong>real orders on Kalshi</strong> using your API key. Real money will be at risk on each trade the execution agent approves.
-              <br /><br />
-              Risk parameters (3% min edge, $150 daily loss cap, 15% drawdown limit) are enforced by the agent, but no system is foolproof.
-            </div>
-            <div style={{ display: 'flex', gap: 10 }}>
-              <button
-                onClick={() => setShowLiveWarning(false)}
-                style={{
-                  flex: 1, padding: '10px 0', borderRadius: 9, cursor: 'pointer',
-                  border: '1px solid var(--border)', background: 'var(--bg-secondary)',
-                  fontSize: 13, fontWeight: 700, color: 'var(--text-secondary)',
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={confirmLive}
-                style={{
-                  flex: 1, padding: '10px 0', borderRadius: 9, cursor: 'pointer',
-                  border: '1px solid var(--green-dark)',
-                  background: 'linear-gradient(135deg, var(--green-dark) 0%, var(--green) 100%)',
-                  fontSize: 13, fontWeight: 700, color: '#fff',
-                  boxShadow: '0 2px 10px rgba(78,138,94,0.35)',
-                }}
-              >
-                Enable Live Trading
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Bot start confirmation modal */}
       {showBotWarning && (
@@ -282,10 +219,8 @@ export default function Home() {
               Start Trading Agent?
             </div>
             <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 20 }}>
-              The bot will run a pipeline cycle every <strong>5 minutes</strong> and automatically place a <strong>$100 {liveMode ? 'live' : 'paper'} order</strong> when the agent approves a trade.
-              {liveMode && (
-                <><br /><br /><span style={{ color: 'var(--pink)', fontWeight: 700 }}>⚠ Live mode is on — real money will be used.</span></>
-              )}
+              The bot will run a pipeline cycle every <strong>5 minutes</strong> and automatically place a <strong>$100 live order</strong> when the agent approves a trade.
+              <><br /><br /><span style={{ color: 'var(--pink)', fontWeight: 700 }}>⚠ Live mode — real money will be used.</span></>
               <br /><br />
               Risk guards: 3% min edge · $150 daily loss cap · 15% drawdown limit · 48 trades/day max.
             </div>
@@ -304,12 +239,10 @@ export default function Home() {
                 onClick={confirmStartBot}
                 style={{
                   flex: 1, padding: '10px 0', borderRadius: 9, cursor: 'pointer',
-                  border: liveMode ? '1px solid var(--green-dark)' : '1px solid var(--brown)',
-                  background: liveMode
-                    ? 'linear-gradient(135deg, var(--green-dark) 0%, var(--green) 100%)'
-                    : 'linear-gradient(135deg, #7a5c32 0%, var(--brown) 100%)',
+                  border: '1px solid var(--green-dark)',
+                  background: 'linear-gradient(135deg, var(--green-dark) 0%, var(--green) 100%)',
                   fontSize: 13, fontWeight: 700, color: '#fff',
-                  boxShadow: liveMode ? '0 2px 10px rgba(78,138,94,0.35)' : '0 2px 8px rgba(139,111,71,0.3)',
+                  boxShadow: '0 2px 10px rgba(78,138,94,0.35)',
                 }}
               >
                 ▶ Start Agent
@@ -332,7 +265,7 @@ export default function Home() {
               Under 2 Minutes Remaining
             </div>
             <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 20 }}>
-              The current 15-minute window closes in <strong>less than 2 minutes</strong>. The pipeline takes {romaMode === 'blitz' ? '~30–60s' : romaMode === 'sharp' ? '~1–2 min' : '~1–3 min'} to complete — it will not finish before the market settles.
+              The current 15-minute window closes in <strong>less than 2 minutes</strong>. The pipeline takes ~1–3 min to complete — it will not finish before the market settles.
               <br /><br />
               Any signal generated will likely be <strong>outdated by the time it completes</strong>.
             </div>
@@ -364,64 +297,6 @@ export default function Home() {
         </div>
       )}
 
-      {/* Strike-flip popup */}
-      {strikeFlipped && (
-        <div className="animate-fade-in" style={{
-          position: 'fixed', bottom: 24, right: 24, zIndex: 1050,
-          maxWidth: 320, width: 'calc(100vw - 48px)',
-          background: 'var(--bg-card)', borderRadius: 14,
-          border: '1.5px solid rgba(212,135,44,0.55)',
-          boxShadow: '0 8px 32px rgba(0,0,0,0.28), 0 0 0 1px rgba(212,135,44,0.10)',
-          padding: '16px 18px',
-        }}>
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-            <div style={{
-              width: 36, height: 36, borderRadius: '50%', flexShrink: 0,
-              background: 'rgba(212,135,44,0.12)', border: '1.5px solid rgba(212,135,44,0.4)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 16,
-            }}>⚡</div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--text-primary)', marginBottom: 3 }}>
-                BTC crossed ${strikePrice > 0 ? strikePrice.toLocaleString(undefined, { maximumFractionDigits: 0 }) : 'strike'}
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-                Price flipped sides. Re-run the pipeline to update the analysis?
-              </div>
-            </div>
-            <button
-              onClick={dismissStrikeFlip}
-              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 14, lineHeight: 1, padding: 2, flexShrink: 0 }}
-            >✕</button>
-          </div>
-          <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
-            <button
-              onClick={() => { dismissStrikeFlip(); runCycle() }}
-              disabled={isRunning || serverLocked}
-              style={{
-                flex: 2, padding: '8px 0', borderRadius: 8, cursor: isRunning || serverLocked ? 'not-allowed' : 'pointer',
-                border: '1px solid rgba(212,135,44,0.6)',
-                background: 'linear-gradient(135deg, #b8720f 0%, var(--amber) 100%)',
-                fontSize: 12, fontWeight: 800, color: '#fff',
-                opacity: isRunning || serverLocked ? 0.5 : 1,
-                boxShadow: '0 2px 10px rgba(212,135,44,0.3)',
-              }}
-            >
-              {isRunning ? 'Running…' : 'Re-run now'}
-            </button>
-            <button
-              onClick={dismissStrikeFlip}
-              style={{
-                flex: 1, padding: '8px 0', borderRadius: 8, cursor: 'pointer',
-                border: '1px solid var(--border)', background: 'var(--bg-secondary)',
-                fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)',
-              }}
-            >
-              Dismiss
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* ── Trade alert pop-up ─────────────────────────────────────────────── */}
       {tradeAlert && (
@@ -473,14 +348,14 @@ export default function Home() {
             {/* Action buttons */}
             {alertStatus === 'idle' && (
               <div style={{ display: 'flex', gap: 8 }}>
-                <button onClick={() => setTradeAlert(null)} style={{
+                <button onClick={() => { setDismissedKey(tradeAlert.windowKey); setTradeAlert(null) }} style={{
                   flex: 1, padding: '10px 0', borderRadius: 9, cursor: 'pointer',
                   border: '1px solid var(--border)', background: 'var(--bg-secondary)',
                   fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)',
                 }}>
                   Dismiss
                 </button>
-                <button onClick={liveMode ? executeAlertTrade : () => setTradeAlert(null)} style={{
+                <button onClick={executeAlertTrade} style={{
                   flex: 2, padding: '10px 0', borderRadius: 9, cursor: 'pointer',
                   border: tradeAlert.side === 'yes' ? '1px solid var(--green-dark)' : '1px solid var(--pink)',
                   background: tradeAlert.side === 'yes'
@@ -490,7 +365,7 @@ export default function Home() {
                   boxShadow: tradeAlert.side === 'yes' ? '0 2px 12px rgba(74,148,112,0.35)' : '0 2px 12px rgba(212,85,130,0.35)',
                   letterSpacing: '0.01em',
                 }}>
-                  {liveMode ? 'Buy $40' : 'Got it (paper)'}
+                  Buy $40
                 </button>
               </div>
             )}
@@ -534,17 +409,15 @@ export default function Home() {
         )}
 
         {/* Live mode banner */}
-        {liveMode && (
-          <div className="animate-fade-in" style={{
-            marginBottom: 14, padding: '10px 16px', borderRadius: 12,
-            background: 'var(--green-pale)', border: '1px solid #a8d8b5',
-            fontSize: 12, color: 'var(--green-dark)',
-            display: 'flex', alignItems: 'center', gap: 8,
-          }}>
-            <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--green)', display: 'inline-block', boxShadow: '0 0 6px var(--green)', animation: 'pulse-live 1.5s ease-in-out infinite', flexShrink: 0 }} />
-            <span><strong>Live trading active</strong> — real Kalshi orders will be placed when the pipeline approves a trade. Risk controls: 3% min edge · $150 daily cap · 15% max drawdown.</span>
-          </div>
-        )}
+        <div style={{
+          marginBottom: 14, padding: '10px 16px', borderRadius: 12,
+          background: 'var(--green-pale)', border: '1px solid #164030',
+          fontSize: 12, color: 'var(--green-dark)',
+          display: 'flex', alignItems: 'center', gap: 8,
+        }}>
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--green)', display: 'inline-block', boxShadow: '0 0 6px var(--green)', animation: 'pulse-live 1.5s ease-in-out infinite', flexShrink: 0 }} />
+          <span><strong>Live trading active</strong> — real Kalshi orders will be placed when the pipeline approves a trade. Risk controls: 3% min edge · $150 daily cap · 15% max drawdown.</span>
+        </div>
 
 
         <div style={{ display: 'grid', gridTemplateColumns: '310px 1fr 290px', gap: 14, alignItems: 'start' }}>
@@ -557,7 +430,7 @@ export default function Home() {
               strikePrice={strikePrice}
               currentBTCPrice={currentBTCPrice}
               secondsUntilExpiry={secondsUntilExpiry}
-              liveMode={liveMode}
+              liveMode={true}
               onRefresh={refreshMarket}
             />
             <SignalPanel probability={prob} sentiment={sent} />
@@ -571,7 +444,7 @@ export default function Home() {
                   color: exec.action === 'BUY_YES' ? 'var(--green-dark)' : 'var(--blue-dark)' }}>
                   <span style={{ fontSize: 16 }}>{exec.action === 'BUY_YES' ? '↑' : '↓'}</span>
                   {exec.action === 'BUY_YES' ? 'BUY YES' : 'BUY NO'} — Latest Signal
-                  {liveMode && <span style={{ marginLeft: 'auto', fontSize: 9, fontWeight: 700, color: 'var(--green-dark)', background: 'var(--green-pale)', border: '1px solid #a8d8b5', borderRadius: 4, padding: '1px 5px' }}>LIVE</span>}
+                  <span style={{ marginLeft: 'auto', fontSize: 9, fontWeight: 700, color: 'var(--green-dark)', background: 'var(--green-pale)', border: '1px solid #164030', borderRadius: 4, padding: '1px 5px' }}>LIVE</span>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 7 }}>
                   {[
@@ -587,9 +460,7 @@ export default function Home() {
                   ))}
                 </div>
                 <div style={{ marginTop: 8, fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.5 }}>
-                  {liveMode
-                    ? exec.rationale.replace('Paper trade only — no real order placed.', 'Live mode — real order placed via Kalshi API.')
-                    : exec.rationale}
+                  {exec.rationale.replace('Paper trade only — no real order placed.', 'Live mode — real order placed via Kalshi API.')}
                 </div>
 
                 {/* Prices at pipeline run */}
@@ -870,36 +741,6 @@ export default function Home() {
                     AI Risk
                   </label>
 
-                  <div style={{ width: 1, height: 20, background: 'var(--border)' }} />
-
-                  {/* Stage token-budget tier overrides */}
-                  {(['sent', 'prob'] as const).map(stage => {
-                    const val    = stage === 'sent' ? sentMode : probMode
-                    const setVal = stage === 'sent' ? setSentMode : setProbMode
-                    return (
-                      <div key={stage} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                        <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em' }}
-                          title={stage === 'sent' ? 'Token budget tier for Sentiment stage' : 'Token budget tier for Probability stage'}>
-                          {stage === 'sent' ? 'Sent' : 'Prob'}
-                        </span>
-                        <select value={val ?? ''} onChange={e => setVal(e.target.value || undefined)}
-                          style={{
-                            fontSize: 11, fontWeight: 600, cursor: 'pointer',
-                            padding: '4px 6px', borderRadius: 6,
-                            border: val ? '1px solid var(--brown)' : '1px solid var(--border)',
-                            background: 'var(--bg-secondary)',
-                            color: val ? 'var(--brown)' : 'var(--text-muted)',
-                            outline: 'none',
-                          }}>
-                          <option value="">auto</option>
-                          <option value="blitz">blitz</option>
-                          <option value="sharp">sharp</option>
-                          <option value="keen">keen</option>
-                          <option value="smart">smart</option>
-                        </select>
-                      </div>
-                    )
-                  })}
                 </div>
               )}
             </div>
@@ -908,18 +749,11 @@ export default function Home() {
             <AgentPipeline pipeline={pipeline} isRunning={isRunning} streamingAgents={streamingAgents} />
             <PipelineHistory history={history} />
 
-            {/* ── Challenge + Strategy — beneath pipeline ── */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <ChallengePanel stats={stats} trades={trades} />
-              <StrategyPanel stats={stats} trades={trades} market={activeMarket} />
-            </div>
           </div>
 
           {/* ─── RIGHT ─── */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <PositionsPanel liveMode={liveMode} />
-            <PerformancePanel stats={stats} trades={trades} />
-            <TradeLog trades={trades} />
+            <PositionsPanel liveMode={true} />
           </div>
         </div>
       </main>

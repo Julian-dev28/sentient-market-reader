@@ -3,9 +3,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import type { KalshiMarket, KalshiOrderbook, PricePoint } from '@/lib/types'
 
-const QUOTE_MS  = 500    // 500ms YES/NO bid/ask refresh (2 req/s — well within Kalshi Basic 20/s)
-const BTC_MS    = 2_000  // 2s BTC price refresh (CMC rate limit)
-const OB_MS     = 1_000  // 1s orderbook depth refresh
+const QUOTE_MS  = 250    // 250ms YES/NO bid/ask refresh (4 req/s — well within Kalshi Basic 20/s)
+const BTC_MS    = 1_000  // 1s BTC price refresh (Coinbase public API, no strict limit)
+const OB_MS     = 500    // 500ms orderbook depth refresh
 
 interface MarketTick {
   liveMarket: KalshiMarket | null

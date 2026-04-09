@@ -16,11 +16,13 @@ Usage:
 import os
 import time
 import traceback
+import json as _json
+from datetime import datetime
 from typing import Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import dspy
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from roma_dspy.core.engine.solve import solve, ROMAConfig
@@ -48,75 +50,45 @@ app.add_middleware(
 
 # ── LLM configuration ────────────────────────────────────────────────────────
 
-def build_llm_config(roma_mode: str = "keen", provider_override: Optional[str] = None, model_override: Optional[str] = None) -> tuple[LLMConfig, str]:
+def build_llm_config(
+    provider_override: Optional[str] = None,
+    model_override: Optional[str] = None,
+    api_keys: Optional[dict] = None,
+) -> tuple[LLMConfig, str]:
     """
-    Build an LLMConfig from environment variables.
-    Mirrors the TypeScript llm-client providers exactly:
-      anthropic    → ANTHROPIC_API_KEY
-      openai       → OPENAI_API_KEY
-      grok         → XAI_API_KEY → api.x.ai/v1
-      openrouter   → OPENROUTER_API_KEY + OPENROUTER_MODEL
-      huggingface  → HF_API_KEY → router.huggingface.co/v1 (or HF_BASE_URL)
-
-    roma_mode is passed from the Next.js request body (not read from env),
-    so only the root .env.local needs to be edited.
-      blitz → GROK_BLITZ_MODEL (default: grok-4-1-fast-non-reasoning)
-      sharp → GROK_FAST_MODEL  (default: grok-3-mini-fast)
-      keen  → GROK_MID_MODEL   (default: grok-3)
-      smart → GROK_SMART_MODEL (default: grok-4-0709)
-    Sentiment and Probability stages are called with different roma_modes
-    (SENT_MODE_MAP in index.ts runs sentiment one tier lighter than probability).
-    provider_override: if set, takes precedence over AI_PROVIDER env var (split-provider support).
-    Returns (llm_config, provider_label).
+    Build an LLMConfig from environment variables (or user-provided keys).
+    Single model per provider — set via env var or model_override.
+    api_keys: optional dict with per-provider keys e.g. {'openrouter': '...', 'anthropic': '...'}
+    provider_override: if set, takes precedence over AI_PROVIDER env var.
     """
     provider = provider_override or os.getenv("AI_PROVIDER", "grok")
+    ak = api_keys or {}
 
     if provider == "anthropic":
-        api_key = os.getenv("ANTHROPIC_API_KEY")
+        api_key = ak.get("anthropic") or os.getenv("ANTHROPIC_API_KEY")
         if not api_key:
             raise ValueError("ANTHROPIC_API_KEY not set")
-        if roma_mode == "blitz":
-            model = os.getenv("ANTHROPIC_BLITZ_MODEL", "claude-haiku-4-5-20251001")
-        elif roma_mode == "sharp":
-            model = os.getenv("ANTHROPIC_FAST_MODEL", "claude-haiku-4-5-20251001")
-        elif roma_mode == "keen":
-            model = os.getenv("ANTHROPIC_MID_MODEL", "claude-haiku-4-5-20251001")
-        else:  # smart
-            model = os.getenv("ANTHROPIC_SMART_MODEL", "claude-sonnet-4-6")
+        model = model_override or os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
         return (
             LLMConfig(model=f"anthropic/{model}", api_key=api_key),
             f"anthropic/{model}",
         )
 
     if provider == "openai":
-        api_key = os.getenv("OPENAI_API_KEY")
+        api_key = ak.get("openai") or os.getenv("OPENAI_API_KEY")
         if not api_key:
             raise ValueError("OPENAI_API_KEY not set")
-        if roma_mode == "blitz":
-            model = os.getenv("OPENAI_BLITZ_MODEL", "gpt-4o-mini")
-        elif roma_mode == "sharp":
-            model = os.getenv("OPENAI_FAST_MODEL", "gpt-4o-mini")
-        elif roma_mode == "keen":
-            model = os.getenv("OPENAI_MID_MODEL", "gpt-4o-mini")
-        else:  # smart
-            model = os.getenv("OPENAI_SMART_MODEL", "gpt-4o")
+        model = model_override or os.getenv("OPENAI_MODEL", "gpt-4o-mini")
         return (
             LLMConfig(model=f"openai/{model}", api_key=api_key),
             f"openai/{model}",
         )
 
     if provider == "grok":
-        api_key = os.getenv("XAI_API_KEY")
+        api_key = ak.get("xai") or ak.get("grok") or os.getenv("XAI_API_KEY")
         if not api_key:
             raise ValueError("XAI_API_KEY not set")
-        if roma_mode == "blitz":
-            model = os.getenv("GROK_BLITZ_MODEL", "grok-4-1-fast-non-reasoning")  # 0.8s/call
-        elif roma_mode == "sharp":
-            model = os.getenv("GROK_FAST_MODEL", "grok-3-mini-fast")               # 9.8s/call
-        elif roma_mode == "keen":
-            model = os.getenv("GROK_MID_MODEL", "grok-3")
-        else:  # smart
-            model = os.getenv("GROK_SMART_MODEL", "grok-4-0709")
+        model = model_override or os.getenv("GROK_MODEL", "grok-3-mini-fast")
         return (
             LLMConfig(
                 model=f"openai/{model}",
@@ -127,19 +99,10 @@ def build_llm_config(roma_mode: str = "keen", provider_override: Optional[str] =
         )
 
     if provider == "openrouter":
-        api_key = os.getenv("OPENROUTER_API_KEY")
+        api_key = ak.get("openrouter") or os.getenv("OPENROUTER_API_KEY")
         if not api_key:
             raise ValueError("OPENROUTER_API_KEY not set")
-        if model_override:
-            model = model_override
-        elif roma_mode == "blitz":
-            model = os.getenv("OPENROUTER_BLITZ_MODEL", os.getenv("OPENROUTER_MODEL", "x-ai/grok-3-mini"))
-        elif roma_mode == "sharp":
-            model = os.getenv("OPENROUTER_FAST_MODEL",  os.getenv("OPENROUTER_MODEL", "x-ai/grok-3-mini"))
-        elif roma_mode == "keen":
-            model = os.getenv("OPENROUTER_MID_MODEL",   os.getenv("OPENROUTER_MODEL", "x-ai/grok-3-mini"))
-        else:  # smart
-            model = os.getenv("OPENROUTER_MODEL", "x-ai/grok-3-mini")
+        model = model_override or os.getenv("OPENROUTER_MODEL", "google/gemini-2.5-flash")
         return (
             LLMConfig(
                 model=f"openrouter/{model}",
@@ -152,18 +115,11 @@ def build_llm_config(roma_mode: str = "keen", provider_override: Optional[str] =
         )
 
     if provider == "huggingface":
-        api_key = os.getenv("HUGGINGFACE_API_KEY") or os.getenv("HF_API_KEY")
+        api_key = ak.get("huggingface") or ak.get("hf") or os.getenv("HUGGINGFACE_API_KEY") or os.getenv("HF_API_KEY")
         if not api_key:
             raise ValueError("HUGGINGFACE_API_KEY not set")
         base_url = os.getenv("HF_BASE_URL", "https://router.huggingface.co/v1")
-        if roma_mode == "blitz":
-            model = os.getenv("HF_BLITZ_MODEL", "Qwen/Qwen2.5-1.5B-Instruct")
-        elif roma_mode == "sharp":
-            model = os.getenv("HF_FAST_MODEL", "meta-llama/Llama-3.2-3B-Instruct")
-        elif roma_mode == "keen":
-            model = os.getenv("HF_MID_MODEL", "meta-llama/Llama-3.1-8B-Instruct")
-        else:  # smart
-            model = os.getenv("HF_SMART_MODEL", "meta-llama/Llama-3.3-70B-Instruct")
+        model = model_override or os.getenv("HUGGINGFACE_MODEL", "Qwen/Qwen2.5-7B-Instruct")
         return (
             LLMConfig(
                 model=f"openai/{model}",
@@ -225,9 +181,17 @@ def build_roma_config_tiered(analysis_llm: LLMConfig, orchestration_llm: LLMConf
     }
     budgets = _token_budgets.get(roma_mode, _token_budgets["keen"])
 
+    def _is_reasoning_model(model: str) -> bool:
+        """OpenAI o-series reasoning models require temperature=1.0 and max_tokens>=16000."""
+        import re
+        return bool(re.search(r'[/:]o[1-9](-|$|mini|preview|high)', model))
+
     def make_cfg(llm: LLMConfig, temperature: float, max_tokens: int) -> AgentConfig:
         import copy as _copy
         cfg_llm = _copy.copy(llm)
+        if _is_reasoning_model(getattr(cfg_llm, 'model', '')):
+            temperature = 1.0
+            max_tokens  = max(16000, max_tokens)
         try:
             cfg_llm.temperature = temperature
             cfg_llm.max_tokens = max_tokens
@@ -263,9 +227,9 @@ def build_roma_config_tiered(analysis_llm: LLMConfig, orchestration_llm: LLMConf
     )
 
 
-# Build LLM config on startup using default mode — each /analyze call rebuilds with the request's roma_mode
+# Build LLM config on startup — each /analyze call rebuilds with the request's provider + keys
 try:
-    _llm_config, _provider_label = build_llm_config("keen")
+    _llm_config, _provider_label = build_llm_config()
     # Also configure global DSPy LM for any direct dspy.predict() calls
     dspy.configure(lm=dspy.LM(
         _llm_config.model,
@@ -287,11 +251,11 @@ class AnalyzeRequest(BaseModel):
     context: str
     max_depth: Optional[int] = 1
     beam_width: Optional[int] = None       # parallel executor beams; None = SDK default (typically 1-2)
-    roma_mode: Optional[str] = "keen"      # blitz | sharp | keen | smart — analysis model tier
-    orch_mode: Optional[str] = None        # orchestration model tier (atomizer/planner); defaults to one tier below roma_mode
+    roma_mode: Optional[str] = "keen"      # blitz | sharp | keen | smart — controls token budgets only
     provider: Optional[str] = None         # overrides AI_PROVIDER env (single-provider support)
     providers: Optional[list[str]] = None  # multi-provider parallel solve — runs each provider simultaneously and merges answers
-    model_override: Optional[str] = None   # override specific model ID for openrouter provider (e.g. "google/gemini-2.5-pro")
+    model_override: Optional[str] = None   # override specific model ID (e.g. "google/gemini-2.5-pro")
+    api_keys: Optional[dict] = None        # per-provider API keys {'openrouter': '...', 'anthropic': '...', 'xai': '...', ...}
 
 
 class SubtaskResult(BaseModel):
@@ -342,21 +306,16 @@ def analyze(req: AnalyzeRequest):
     if _llm_config is None:
         raise HTTPException(status_code=503, detail="LLM not configured — check env vars")
 
-    # Rebuild LLM config using the mode sent by the caller (not env)
+    # Rebuild LLM config using provider + keys from the caller
     # provider from request overrides AI_PROVIDER env — enables split-provider pipelines
     roma_mode = req.roma_mode or "keen"
-    analysis_llm, provider_label = build_llm_config(roma_mode, req.provider)
-
-    # Orchestration tier: one step faster than analysis tier by default
-    # sharp→blitz, keen→sharp, smart→keen; blitz stays at blitz (already at floor)
-    _orch_tier_map = {"blitz": "blitz", "sharp": "blitz", "keen": "sharp", "smart": "keen"}
-    orch_mode = req.orch_mode or _orch_tier_map.get(roma_mode, "sharp")
-    orchestration_llm, _ = build_llm_config(orch_mode, req.provider)
+    analysis_llm, provider_label = build_llm_config(req.provider, req.model_override, req.api_keys)
+    orchestration_llm, _ = build_llm_config(req.provider, None, req.api_keys)
 
     # Multi-provider mode: providers list takes precedence over single provider
     active_providers = req.providers if req.providers and len(req.providers) > 0 else [req.provider or os.getenv("AI_PROVIDER", "grok")]
 
-    print(f"[ROMA] /analyze  mode={roma_mode}  orch={orch_mode}  providers={active_providers}  model={analysis_llm.model}")
+    print(f"[ROMA] /analyze  mode={roma_mode}  providers={active_providers}  model={analysis_llm.model}")
 
     start = time.time()
 
@@ -371,8 +330,8 @@ Market context:
 
     def run_single_solve(prov: str) -> tuple[str, object]:
         """Run one ROMA solve for a given provider; returns (provider_label, result)."""
-        a_llm, p_label = build_llm_config(roma_mode, prov, req.model_override)
-        o_llm, _       = build_llm_config(orch_mode, prov)
+        a_llm, p_label = build_llm_config(prov, req.model_override, req.api_keys)
+        o_llm, _       = build_llm_config(prov, None, req.api_keys)
         cfg = build_roma_config_tiered(a_llm, o_llm, roma_mode)
         solve_kwargs: dict = {"max_depth": req.max_depth, "config": cfg}
 
@@ -465,3 +424,337 @@ Market context:
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"ROMA solve failed: {str(e)}")
+
+
+# ── Calibration & Optimization ────────────────────────────────────────────────
+
+_PARAM_BOUNDS = {
+    'alpha_cap':               (0.70, 0.92),
+    'gate_velocity_threshold': (0.40, 0.75),
+    'edge_min_pct':            (1.5,  6.0),
+    'sentiment_weight':        (0.05, 0.30),
+    'fat_tail_nu':             (2.0,  8.0),
+}
+
+_DEFAULT_PARAMS = {
+    'alpha_cap':               0.85,
+    'gate_velocity_threshold': 0.55,
+    'edge_min_pct':            3.0,
+    'sentiment_weight':        0.18,
+    'fat_tail_nu':             4.0,
+}
+
+
+class CalibrateRequest(BaseModel):
+    predictions: list[float]   # raw p_model values in [0, 1]
+    outcomes:    list[int]     # 0 (LOSS) or 1 (WIN)
+
+
+class CalibrateResponse(BaseModel):
+    a: float    # Platt scaling coefficient
+    b: float    # Platt scaling intercept
+    n: int      # number of samples fitted
+
+
+class OptimizeRequest(BaseModel):
+    trades:      list[dict]   # TradeRecord list from client
+    calibration: dict = {}    # CalibrationResult
+
+
+class OptimizeResponse(BaseModel):
+    alphaCap:              float
+    gateVelocityThreshold: float
+    edgeMinPct:            float
+    sentimentWeight:       float
+    fatTailNu:             Optional[float]
+    rationale:             str
+    riskLevel:             str
+    keyChanges:            list[str]
+    computedAt:            str
+    tradesSampled:         int
+    brierScore:            float
+
+
+def _opt_clamp(val: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, val))
+
+
+def _opt_apply_bounds(params: dict) -> dict:
+    out = dict(params)
+    for k, (lo, hi) in _PARAM_BOUNDS.items():
+        if k in out and out[k] is not None:
+            out[k] = round(_opt_clamp(float(out[k]), lo, hi), 4)
+    return out
+
+
+def _opt_dampen(proposed: dict, current: dict, max_delta: float = 0.10) -> dict:
+    out = dict(proposed)
+    for k in _PARAM_BOUNDS:
+        if k in out and out[k] is not None and k in current:
+            delta = out[k] - current[k]
+            if abs(delta) > max_delta:
+                out[k] = round(current[k] + max_delta * (1 if delta > 0 else -1), 4)
+    return out
+
+
+def _opt_summarize_trades(trades: list[dict]) -> dict:
+    settled = [t for t in trades if t.get('outcome') in ('WIN', 'LOSS')]
+    if not settled:
+        return {'count': 0}
+    wins      = [t for t in settled if t['outcome'] == 'WIN']
+    avg_p     = sum(t.get('pModel', 0.5) for t in settled) / len(settled)
+    actual_wr = len(wins) / len(settled)
+    brier     = sum((t.get('pModel', 0.5) - (1 if t['outcome'] == 'WIN' else 0)) ** 2
+                    for t in settled) / len(settled)
+    with_sigs = [t for t in settled if t.get('signals')]
+    sent_correct = 0
+    if with_sigs:
+        for t in with_sigs:
+            s = t['signals']
+            actual_yes = (t.get('side') == 'yes' and t['outcome'] == 'WIN') or \
+                         (t.get('side') == 'no'  and t['outcome'] == 'LOSS')
+            if (s.get('sentimentScore', 0) > 0.1) == actual_yes:
+                sent_correct += 1
+    return {
+        'count':              len(settled),
+        'win_rate':           round(actual_wr, 4),
+        'avg_p_model':        round(avg_p, 4),
+        'calibration_gap':    round(avg_p - actual_wr, 4),
+        'brier_score':        round(brier, 4),
+        'wins':               len(wins),
+        'losses':             len(settled) - len(wins),
+        'sentiment_accuracy': round(sent_correct / len(with_sigs), 4) if with_sigs else None,
+        'last_5_outcomes':    [t['outcome'] for t in settled[-5:]],
+    }
+
+
+def _opt_build_prompt(trade_summary: dict, calibration: dict, current_params: dict) -> str:
+    return f"""You are a quantitative trading system optimizer for a BTC binary options algo.
+Analyze performance data and recommend parameter adjustments for the next trading session.
+
+TRADING PERFORMANCE
+{_json.dumps(trade_summary, indent=2)}
+
+CALIBRATION ANALYSIS
+Brier Score: {calibration.get('brierScore', 0.25):.4f}  (random=0.25, perfect=0.00)
+Log Loss:    {calibration.get('logLoss', 0.693):.4f}
+ROC-AUC:     {calibration.get('rocAuc', 0.5):.4f}  (random=0.5, perfect=1.0)
+Win Rate:    {calibration.get('overallWinRate', 0.5):.1%}
+Avg P(MODEL):{calibration.get('avgPModel', 0.5):.1%}
+
+Signal Importances:
+{_json.dumps(calibration.get('signals', []), indent=2)}
+
+CURRENT ALGO PARAMETERS
+{_json.dumps(current_params, indent=2)}
+
+Parameter meanings:
+- alpha_cap [0.70–0.92]: max weight given to quant math vs LLM. Higher = more math trust.
+- gate_velocity_threshold [0.40–0.75]: reachability gate pace threshold. Lower = more permissive.
+- edge_min_pct [1.5–6.0]: minimum model vs market edge % to place a trade.
+- sentiment_weight [0.05–0.30]: how much LLM sentiment shifts the probability estimate.
+- fat_tail_nu [2.0–8.0]: Student-t degrees of freedom. Lower = heavier tails (volatile).
+
+REASONING GUIDELINES
+1. If Brier score > 0.20 → model poorly calibrated → increase alpha_cap (trust math more)
+2. If sentiment accuracy < 0.55 → reduce sentiment_weight significantly
+3. If sentiment accuracy > 0.65 → sentiment is a real signal → increase sentiment_weight
+4. If calibration_gap > 0.10 (model overconfident) → raise edge_min_pct
+5. If calibration_gap < -0.05 (model underconfident) → lower edge_min_pct
+6. If win rate < 0.45 → higher edge_min_pct (require more edge before trading)
+7. If win rate > 0.65 and trades > 10 → normal or aggressive mode
+8. Do NOT make dramatic changes (max ±0.10 per parameter per session) — prevents overfitting
+
+Respond ONLY with a JSON object:
+{{
+  "alpha_cap": <float>,
+  "gate_velocity_threshold": <float>,
+  "edge_min_pct": <float>,
+  "sentiment_weight": <float>,
+  "fat_tail_nu": <float or null>,
+  "rationale": "<2-3 sentence explanation>",
+  "risk_level": "<conservative|normal|aggressive>",
+  "key_changes": ["<change 1>", "<change 2>"]
+}}"""
+
+
+def _opt_call_gemini(prompt: str, api_key: str) -> dict:
+    import urllib.request as _ureq
+    url = (
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        f"gemini-2.5-flash-preview-04-17:generateContent?key={api_key}"
+    )
+    payload = _json.dumps({
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 512},
+    }).encode()
+    req = _ureq.Request(url, data=payload, headers={"Content-Type": "application/json"})
+    with _ureq.urlopen(req, timeout=30) as resp:
+        data = _json.loads(resp.read())
+    text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+    if text.startswith("```"):
+        text = text.split("```")[1]
+        if text.startswith("json"):
+            text = text[4:]
+    return _json.loads(text.strip())
+
+
+def _opt_call_openrouter(prompt: str, api_key: str) -> dict:
+    """Call Gemini 2.5 Flash via OpenRouter — used when GOOGLE_AI_API_KEY is absent."""
+    import requests as _req
+    model = os.getenv("OPENROUTER_MODEL", "google/gemini-2.5-flash")
+    resp = _req.post(
+        "https://openrouter.ai/api/v1/chat/completions",
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        json={
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.2,
+            "max_tokens": 512,
+        },
+        timeout=30,
+    )
+    resp.raise_for_status()
+    text = resp.json()["choices"][0]["message"]["content"].strip()
+    if text.startswith("```"):
+        text = text.split("```")[1]
+        if text.startswith("json"):
+            text = text[4:]
+    return _json.loads(text.strip())
+
+
+@app.post("/calibrate", response_model=CalibrateResponse)
+def calibrate(req: CalibrateRequest):
+    """
+    Fit Platt scaling to raw model predictions.
+    p_cal = sigmoid(a * logit(p_raw) + b)
+    Minimises negative log-likelihood via L-BFGS-B.
+    """
+    try:
+        import numpy as np
+        from scipy.special import logit, expit
+        from scipy.optimize import minimize
+    except ImportError:
+        raise HTTPException(status_code=503, detail="scipy/numpy not available — pip install scipy numpy")
+
+    if len(req.predictions) < 10:
+        raise HTTPException(status_code=400, detail="Need at least 10 samples for Platt scaling")
+
+    eps = 1e-7
+    p = np.clip(np.array(req.predictions, dtype=float), eps, 1 - eps)
+    y = np.array(req.outcomes, dtype=float)
+    f = logit(p)
+
+    def neg_ll(params: list) -> float:
+        a, b = params
+        p_cal = np.clip(expit(a * f + b), eps, 1 - eps)
+        return -float(np.mean(y * np.log(p_cal) + (1 - y) * np.log(1 - p_cal)))
+
+    result = minimize(neg_ll, x0=[1.0, 0.0], method='L-BFGS-B',
+                      bounds=[(-10.0, 10.0), (-10.0, 10.0)])
+    a, b = result.x.tolist()
+    print(f"[CAL] Platt scaling fitted — a={a:.4f} b={b:.4f} n={len(y)}")
+    return CalibrateResponse(a=round(a, 6), b=round(b, 6), n=int(len(y)))
+
+
+@app.get("/backtest")
+def backtest(
+    request: Request,
+    days: int = 3,
+    provider: Optional[str] = None,
+    roma_mode: str = "blitz",
+    starting_cash: float = 100.0,
+    max_llm: int = 20,
+    limit: Optional[int] = None,
+    model: Optional[str] = None,
+):
+    """
+    Run historical backtest against settled KXBTC15M markets.
+    Fetches real Kalshi + Coinbase data; replays quant math (+ optional LLM).
+
+    days: 1–14 days of history (default 3)
+    provider: if set (e.g. "openrouter"), enriches up to max_llm records with ROMA LLM
+    roma_mode: ROMA speed mode for LLM calls (default "blitz")
+    max_llm: max records to enrich with LLM (default 20)
+    api_keys: pass via x-provider-keys header (base64-encoded JSON dict)
+    """
+    if days < 1 or days > 14:
+        raise HTTPException(status_code=400, detail="days must be between 1 and 14")
+    if max_llm < 1 or max_llm > 50:
+        raise HTTPException(status_code=400, detail="max_llm must be 1–50")
+
+    # Read per-provider API keys from header (base64 JSON, same format as /analyze)
+    api_keys: dict = {}
+    keys_header = request.headers.get("x-provider-keys")
+    if keys_header:
+        try:
+            import base64
+            api_keys = _json.loads(base64.b64decode(keys_header).decode())
+        except Exception:
+            pass
+
+    try:
+        from backtest import run_backtest
+        result = run_backtest(
+            days_back=days,
+            provider=provider or None,
+            api_keys=api_keys or None,
+            roma_mode=roma_mode,
+            max_llm=max_llm,
+            limit=limit,
+            model_override=model or None,
+            starting_cash=starting_cash,
+        )
+        return result
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Backtest failed: {str(e)}")
+
+
+@app.post("/optimize", response_model=OptimizeResponse)
+def optimize(req: OptimizeRequest):
+    """
+    Run Gemini 2.5 Flash meta-optimizer to recommend algo parameter updates.
+    Uses GOOGLE_AI_API_KEY (direct) or falls back to OPENROUTER_API_KEY.
+    Receives trade history + calibration data → returns updated DailyOptParams.
+    """
+    google_key    = os.getenv('GOOGLE_AI_API_KEY') or os.getenv('GEMINI_API_KEY')
+    openrouter_key = os.getenv('OPENROUTER_API_KEY')
+    if not google_key and not openrouter_key:
+        raise HTTPException(status_code=503, detail="No optimizer API key — set GOOGLE_AI_API_KEY or OPENROUTER_API_KEY")
+
+    current_params = dict(_DEFAULT_PARAMS)
+    trade_summary  = _opt_summarize_trades(req.trades)
+    print(f"[OPT] Summarized {trade_summary.get('count', 0)} settled trades for optimization")
+
+    prompt = _opt_build_prompt(trade_summary, req.calibration, current_params)
+
+    try:
+        if google_key:
+            raw = _opt_call_gemini(prompt, google_key)
+            print("[OPT] Used Google AI API (direct)")
+        else:
+            raw = _opt_call_openrouter(prompt, openrouter_key)
+            print(f"[OPT] Used OpenRouter ({os.getenv('OPENROUTER_MODEL', 'google/gemini-2.5-flash')})")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Optimizer call failed: {str(e)}")
+
+    proposed = _opt_apply_bounds(raw)
+    final    = _opt_dampen(proposed, current_params)
+
+    print(f"[OPT] Done — risk={raw.get('risk_level')}  brier={trade_summary.get('brier_score', '?')}")
+
+    return OptimizeResponse(
+        alphaCap=              final.get('alpha_cap',               _DEFAULT_PARAMS['alpha_cap']),
+        gateVelocityThreshold= final.get('gate_velocity_threshold', _DEFAULT_PARAMS['gate_velocity_threshold']),
+        edgeMinPct=            final.get('edge_min_pct',            _DEFAULT_PARAMS['edge_min_pct']),
+        sentimentWeight=       final.get('sentiment_weight',        _DEFAULT_PARAMS['sentiment_weight']),
+        fatTailNu=             final.get('fat_tail_nu'),
+        rationale=             raw.get('rationale', ''),
+        riskLevel=             raw.get('risk_level', 'normal'),
+        keyChanges=            raw.get('key_changes', []),
+        computedAt=            datetime.utcnow().isoformat(),
+        tradesSampled=         trade_summary.get('count', 0),
+        brierScore=            trade_summary.get('brier_score',
+                                   req.calibration.get('brierScore', 0.25)),
+    )

@@ -11,6 +11,7 @@
  */
 
 import type { KalshiOrderbook, OHLCVCandle } from './types'
+import crypto from 'crypto'
 
 // ── Normal CDF (Abramowitz & Stegun, error < 7.5e-8) ─────────────────────────
 export function normalCDF(z: number): number {
@@ -69,18 +70,19 @@ export function studentTCDF(t: number, nu: number): number {
 // ── Fat-tail binary option pricing (Student-t digital) ────────────────────────
 // Identical to log-normal binary but uses Student-t CDF(d₂, ν) instead of Φ(d₂).
 // More accurate for BTC because normal CDF systematically underestimates strike crossings.
+// nu: degrees of freedom, calibrated to observed excess kurtosis for dynamic fitting.
 export function computeFatTailBinary(
   spot: number,
   strike: number,
   sigmaAnnualized: number,
   minutesLeft: number,
   nu = 4,
-): { pYesFat: number; d2: number } | null {
+): { pYesFat: number; d2: number; nu: number } | null {
   if (spot <= 0 || strike <= 0 || sigmaAnnualized <= 0 || minutesLeft <= 0) return null
   const T  = minutesLeft / (365 * 24 * 60)
   const d2 = (Math.log(spot / strike) - 0.5 * sigmaAnnualized ** 2 * T) /
-             (sigmaAnnualized * Math.sqrt(T))
-  return { pYesFat: studentTCDF(d2, nu), d2 }
+              (sigmaAnnualized * Math.sqrt(T))
+  return { pYesFat: studentTCDF(d2, nu), d2, nu }
 }
 
 // ── Logarithmic Opinion Pool ──────────────────────────────────────────────────
@@ -420,6 +422,236 @@ export function computeReturnAutoCorr(candles: OHLCVCandle[]): number | null {
   return vari > 0 ? cov / vari : null
 }
 
+// ── Average True Range (ATR) ──────────────────────────────────────────────────
+// Empirical price range per candle — more robust than σ-based expected range.
+// Accounts for gap opens between candles that Brownian models miss.
+export function computeATR(candles: OHLCVCandle[], period = 9): number | null {
+  if (candles.length < 2) return null
+  const ordered = [...candles].reverse()  // oldest first
+  const trs: number[] = []
+  for (let i = 1; i < ordered.length; i++) {
+    const [, low, high] = ordered[i]
+    const prevClose = ordered[i - 1][4]
+    trs.push(Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose)))
+  }
+  if (!trs.length) return null
+  const p = Math.min(period, trs.length)
+  return trs.slice(-p).reduce((a, b) => a + b, 0) / p
+}
+
+// ── Volume trend ──────────────────────────────────────────────────────────────
+// Compares latest candle volume to recent average. High volume on a move = conviction.
+// Low volume on a move = suspect — likely to fade.
+export function computeVolumeTrend(candles: OHLCVCandle[], period = 5): {
+  avgVolume: number
+  latestVolume: number
+  trend: 'increasing' | 'decreasing' | 'flat'
+  ratio: number   // latestVolume / avgVolume: >1.25 = increasing, <0.75 = decreasing
+} | null {
+  if (candles.length < 2) return null
+  const recent = candles.slice(0, Math.min(period, candles.length))
+  const volumes = recent.map(c => c[5])
+  const avgVolume = volumes.reduce((a, b) => a + b, 0) / volumes.length
+  const latestVolume = candles[0][5]
+  const ratio = avgVolume > 0 ? latestVolume / avgVolume : 1
+  return {
+    avgVolume,
+    latestVolume,
+    ratio,
+    trend: ratio > 1.25 ? 'increasing' : ratio < 0.75 ? 'decreasing' : 'flat',
+  }
+}
+
+// ── 1-min micro-momentum (current window green/red streak) ────────────────────
+// Fraction of recent 1-min candles that are green (close >= open).
+// >65% green = strong short-term bullish pressure. <35% = bearish.
+// Streak: consecutive same-direction candles — length indicates momentum conviction.
+export function computeMicroMomentum(liveCandles: OHLCVCandle[], n = 8): {
+  greenFraction: number   // 0–1 fraction of recent 1-min candles that are green
+  streak: number          // +N = N consecutive green, −N = N consecutive red (newest first)
+  direction: 'up' | 'down' | 'mixed'
+} | null {
+  if (!liveCandles?.length) return null
+  const recent = liveCandles.slice(0, Math.min(n, liveCandles.length))
+  const isGreen = (c: OHLCVCandle) => c[4] >= c[3]
+  const greens = recent.filter(isGreen).length
+  const greenFraction = greens / recent.length
+  let streak = 0
+  const firstDir = isGreen(recent[0])
+  for (const c of recent) {
+    if (isGreen(c) === firstDir) streak++
+    else break
+  }
+  return {
+    greenFraction,
+    streak: firstDir ? streak : -streak,
+    direction: greenFraction > 0.65 ? 'up' : greenFraction < 0.35 ? 'down' : 'mixed',
+  }
+}
+
+// ── On-Balance Volume (OBV) ───────────────────────────────────────────────────
+// Cumulative volume-in-direction-of-price. Rising OBV on up moves = smart money
+// confirming the move. Divergence (price up, OBV falling) = warning sign.
+function computeOBV(candles: OHLCVCandle[]): {
+  trend: 'rising' | 'falling' | 'flat'
+  changeRate: number  // fractional change in OBV over last 6 candles
+} | null {
+  if (candles.length < 6) return null
+  const ordered = [...candles].reverse()  // oldest first
+  let obv = 0
+  const obvSeries: number[] = [0]
+  for (let i = 1; i < ordered.length; i++) {
+    const close = ordered[i][4], prevClose = ordered[i - 1][4], vol = ordered[i][5]
+    if (close > prevClose) obv += vol
+    else if (close < prevClose) obv -= vol
+    obvSeries.push(obv)
+  }
+  const n = obvSeries.length
+  const recent = obvSeries.slice(-3).reduce((a, b) => a + b, 0) / 3
+  const prior  = obvSeries.slice(-6, -3).reduce((a, b) => a + b, 0) / 3
+  const absBase = Math.max(Math.abs(prior), 1e-9)
+  const changeRate = (recent - prior) / absBase
+  return {
+    trend: changeRate > 0.05 ? 'rising' : changeRate < -0.05 ? 'falling' : 'flat',
+    changeRate,
+  }
+}
+
+// ── Money Flow Index (MFI) ────────────────────────────────────────────────────
+// RSI weighted by dollar volume flow: MFI > 80 = overbought (bearish pressure likely),
+// MFI < 20 = oversold (bullish pressure likely). Filters out volume-less price moves.
+function computeMFI(candles: OHLCVCandle[], period = 9): number | null {
+  if (candles.length < period + 1) return null
+  const ordered = [...candles].reverse()
+  const recent  = ordered.slice(-(period + 1))
+  let posFlow = 0, negFlow = 0
+  for (let i = 1; i < recent.length; i++) {
+    const [, lo, hi, , cl, vol] = recent[i]
+    const [, pLo, pHi, , pCl] = recent[i - 1]
+    const tp  = (hi + lo + cl) / 3
+    const pTp = (pHi + pLo + pCl) / 3
+    const rawFlow = tp * vol
+    if (tp > pTp) posFlow += rawFlow
+    else if (tp < pTp) negFlow += rawFlow
+  }
+  if (negFlow === 0) return 100
+  return 100 - (100 / (1 + posFlow / negFlow))
+}
+
+// ── Efficiency Ratio (Perry Kaufman, 1995) ────────────────────────────────────
+// ER = net directional move / total path length. Range: 0 (random) → 1 (perfect trend).
+// More intuitive than Hurst for short timeframes — directly measures trend quality.
+// ER > 0.6 = strong trend (trust momentum signals). ER < 0.3 = choppy (fade extremes).
+function computeEfficiencyRatio(candles: OHLCVCandle[], period = 10): number | null {
+  const p = Math.min(period, candles.length)
+  if (p < 4) return null
+  const ordered = [...candles].reverse()
+  const recent  = ordered.slice(-p)
+  const netMove = Math.abs(recent[p - 1][4] - recent[0][4])
+  let totalPath = 0
+  for (let i = 1; i < recent.length; i++) totalPath += Math.abs(recent[i][4] - recent[i - 1][4])
+  return totalPath === 0 ? 0 : Math.min(1, netMove / totalPath)
+}
+
+// ── Donchian channel + %rank ──────────────────────────────────────────────────
+// %rank = where current price sits within N-period high-low range.
+// 0 = at range low (support), 1 = at range high (resistance / breakout).
+// Breakout above 0.95 or below 0.05 = potential trend acceleration.
+function computeDonchian(candles: OHLCVCandle[], period = 12): {
+  upper: number; lower: number; pctRank: number
+} | null {
+  const p = Math.min(period, candles.length)
+  if (p < 3) return null
+  const recent = candles.slice(0, p)
+  const upper  = Math.max(...recent.map(c => c[2]))
+  const lower  = Math.min(...recent.map(c => c[1]))
+  if (upper === lower) return null
+  return { upper, lower, pctRank: Math.max(0, Math.min(1, (candles[0][4] - lower) / (upper - lower))) }
+}
+
+// ── Price Z-score (mean reversion signal) ─────────────────────────────────────
+// How many std deviations current close is from N-candle rolling mean.
+// |Z| > 2 = statistically extreme — mean reversion pressure increases.
+// |Z| < 0.5 = near center of recent range — no mean-reversion edge.
+function computePriceZScore(candles: OHLCVCandle[], period = 12): number | null {
+  const p = Math.min(period, candles.length)
+  if (p < 4) return null
+  const closes = candles.slice(0, p).map(c => c[4])
+  const mean   = closes.reduce((a, b) => a + b, 0) / closes.length
+  const std    = Math.sqrt(closes.reduce((s, c) => s + (c - mean) ** 2, 0) / closes.length)
+  return std > 0 ? (closes[0] - mean) / std : 0
+}
+
+// ── RSI divergence (4-candle lookback) ────────────────────────────────────────
+// Bullish: price lower low but RSI higher low → hidden bullish momentum.
+// Bearish: price higher high but RSI lower high → hidden bearish momentum.
+// Both are high-conviction reversal signals when at oscillator extremes.
+function detectRSIDivergence(candles: OHLCVCandle[]): {
+  type: 'bullish' | 'bearish' | 'none'
+} | null {
+  if (candles.length < 8) return null
+  const rsiNow  = computeRSI(candles, 9)
+  const rsiOld  = computeRSI(candles.slice(4), 9)
+  if (rsiNow === null || rsiOld === null) return null
+  const priceNow = candles[0][4], priceOld = candles[4][4]
+  const priceUp  = priceNow > priceOld
+  const rsiUp    = rsiNow > rsiOld
+  if (priceUp && !rsiUp) return { type: 'bearish' }
+  if (!priceUp && rsiUp) return { type: 'bullish' }
+  return { type: 'none' }
+}
+
+// ── MACD histogram slope (momentum acceleration) ──────────────────────────────
+// Rate of change of the MACD histogram: positive = momentum building (confirm direction),
+// negative = momentum fading (potential reversal even if histogram still positive).
+function computeMACDSlope(candles: OHLCVCandle[]): number | null {
+  if (candles.length < 14) return null
+  const now  = computeMACD(candles)
+  const prev = computeMACD(candles.slice(1))
+  if (!now || !prev) return null
+  return now.histogram - prev.histogram
+}
+
+// ── 1-min candle pattern detection ───────────────────────────────────────────
+// Detects classic single-candle reversal patterns on the most recent 1-min candle.
+// Hammer: long lower wick, small body at top → bullish reversal signal.
+// Shooting star: long upper wick, small body at bottom → bearish reversal signal.
+// Doji: tiny body → indecision, potential reversal.
+// Engulfing: current candle body engulfs prior candle body (strong reversal signal).
+function detectCandlePattern(liveCandles: OHLCVCandle[]): {
+  type: 'hammer' | 'shooting_star' | 'doji' | 'engulfing_bull' | 'engulfing_bear' | 'none'
+  strength: number   // 0–1
+} | null {
+  if (!liveCandles?.length) return null
+  const [, lo, hi, op, cl] = liveCandles[0]
+  const range = hi - lo
+  if (range === 0) return { type: 'doji', strength: 1 }
+  const body      = Math.abs(cl - op)
+  const bodyRatio = body / range
+  const upperWick = hi - Math.max(op, cl)
+  const lowerWick = Math.min(op, cl) - lo
+  // Doji
+  if (bodyRatio < 0.1) return { type: 'doji', strength: 1 - bodyRatio * 5 }
+  // Hammer: long lower wick, small body, close > open
+  if (lowerWick > 2 * body && upperWick < body * 0.5 && cl >= op)
+    return { type: 'hammer', strength: Math.min(1, lowerWick / (3 * body)) }
+  // Shooting star: long upper wick, small body, close < open
+  if (upperWick > 2 * body && lowerWick < body * 0.5 && cl < op)
+    return { type: 'shooting_star', strength: Math.min(1, upperWick / (3 * body)) }
+  // Engulfing (requires previous candle)
+  if (liveCandles.length >= 2) {
+    const [, , , pOp, pCl] = liveCandles[1]
+    const prevBody = Math.abs(pCl - pOp)
+    if (prevBody > 0) {
+      if (pCl < pOp && cl >= op && body > prevBody && op <= pCl && cl >= pOp)
+        return { type: 'engulfing_bull', strength: Math.min(1, body / prevBody - 1) }
+      if (pCl >= pOp && cl < op && body > prevBody && op >= pCl && cl <= pOp)
+        return { type: 'engulfing_bear', strength: Math.min(1, body / prevBody - 1) }
+    }
+  }
+  return { type: 'none', strength: 0 }
+}
+
 // ── Price velocity on 1-min live candles ─────────────────────────────────────
 // Slope of last N closes ($/min), and acceleration (change in slope)
 export function computePriceVelocity(liveCandles: OHLCVCandle[], n = 5): {
@@ -526,7 +758,7 @@ export interface QuantSignals {
   // Pricing models
   brownianPrior: { pQuant: number; sigmaCandle: number; sigmaPerMin: number } | null
   lnBinary:      { pYes: number; d2: number } | null
-  fatTailBinary: { pYesFat: number; d2: number } | null                    // Student-t (ν=4)
+  fatTailBinary: { pYesFat: number; d2: number; nu: number } | null                    // Student-t (dynamic ν)
   skewAdjBinary: { pYesSkewAdj: number; d2: number; d2CF: number } | null  // Cornish-Fisher
   binaryGreeks:  { delta: number; thetaPerMin: number; d2: number } | null // Δ and Θ
   // Long-memory & regime
@@ -538,7 +770,31 @@ export interface QuantSignals {
   volOfVol:      number | null  // coefficient of variation of |returns|
   // Auxiliary probability
   obImpliedProb: number | null  // orderbook-implied P(YES) ∈ [0.05, 0.95]
+  // Additional signals
+  atr:            number | null  // Average True Range per candle ($)
+  volumeTrend:    { avgVolume: number; latestVolume: number; trend: string; ratio: number } | null
+  microMomentum:  { greenFraction: number; streak: number; direction: string } | null  // 1-min micro-momentum
+  intraVwap:      number | null  // VWAP over current window (1-min candles)
+  // Extended signals (no external API needed)
+  obv:            { trend: 'rising' | 'falling' | 'flat'; changeRate: number } | null
+  mfi:            number | null  // Money Flow Index 0-100
+  efficiencyRatio: number | null  // 0=random walk, 1=perfect trend
+  donchian:       { upper: number; lower: number; pctRank: number } | null
+  priceZScore:    number | null  // std deviations from 12-candle mean
+  rsiDivergence:  { type: 'bullish' | 'bearish' | 'none' } | null
+  macdSlope:      number | null  // rate of change of MACD histogram (momentum accel)
+  candlePattern:  { type: string; strength: number } | null  // 1-min pattern
 }
+
+// ── Calibrate Student-t ν from sample excess kurtosis ─────────────────────────
+// Excess kurtosis γ₂ = E[(r-μ)^4] / σ^4 - 3 for Student-t reduces to 6/(ν-4) for ν>4
+// Invert: ν ≈ 4 + 6/γ₂ (cap at 4min, 20max for stability)
+function calibrateStudentNu(skewKurt: { skew: number; excessKurt: number }): number {
+  if (skewKurt.excessKurt <= 0) return 4
+  return Math.max(4, Math.min(20, 4 + 6 / skewKurt.excessKurt))
+}
+
+const quantCache = new Map<string, QuantSignals>()
 
 export function computeQuantSignals(
   candles:     OHLCVCandle[] | undefined,
@@ -549,6 +805,9 @@ export function computeQuantSignals(
   distancePct: number,
   minutesLeft: number,
 ): QuantSignals {
+  const input = {candles, liveCandles, orderbook, spot, strike, distancePct, minutesLeft}
+  const key = crypto.createHash('sha256').update(JSON.stringify(input)).digest('hex')
+  if (quantCache.has(key)) return quantCache.get(key)!
   const gkVol15m        = candles ? computeGarmanKlassVol(candles) : null
   // BTC trades 24/7 — annualize over 365d × 24h × 4 candles/h = 35,040 periods/year
   const gkVolAnnualized = gkVol15m !== null ? gkVol15m * Math.sqrt(35_040) : null
@@ -556,9 +815,14 @@ export function computeQuantSignals(
   const lnBinary        = gkVolAnnualized !== null
     ? computeLogNormalBinary(spot, strike, gkVolAnnualized, minutesLeft)
     : null
-  // Fat-tail binary uses Student-t(ν=4) instead of normal — more accurate for BTC tails
+
+  // Compute skew/kurt for dynamic Student-t tail calibration
+  const skewKurt = candles ? computeSkewKurt(candles) : null
+  const dynamicNu = skewKurt ? calibrateStudentNu(skewKurt) : 4
+
+  // Fat-tail binary uses Student-t(ν from data) instead of normal — more accurate for BTC tails
   const fatTailBinary   = gkVolAnnualized !== null
-    ? computeFatTailBinary(spot, strike, gkVolAnnualized, minutesLeft)
+    ? computeFatTailBinary(spot, strike, gkVolAnnualized, minutesLeft, dynamicNu)
     : null
   const expectedRangeUSD = brownianPrior
     ? brownianPrior.sigmaPerMin * Math.sqrt(minutesLeft) * spot
@@ -566,7 +830,6 @@ export function computeQuantSignals(
 
   // Higher-moment analysis
   const bipowerVar = candles ? computeBipowerVariation(candles) : null
-  const skewKurt   = candles ? computeSkewKurt(candles) : null
   const volOfVol   = candles ? computeVolOfVol(candles) : null
 
   // Cornish-Fisher skew/kurtosis-adjusted binary
@@ -589,7 +852,20 @@ export function computeQuantSignals(
   const obImbalance   = computeOrderbookImbalance(orderbook)
   const obImpliedProb = computeOrderbookImpliedProb(obImbalance)
 
-  return {
+  const atr            = candles ? computeATR(candles) : null
+  const volumeTrend    = candles ? computeVolumeTrend(candles) : null
+  const microMomentum  = liveCandles ? computeMicroMomentum(liveCandles) : null
+  const intraVwap      = liveCandles ? computeVWAP(liveCandles) : null
+  const obv            = candles ? computeOBV(candles) : null
+  const mfi            = candles ? computeMFI(candles) : null
+  const efficiencyRatio = candles ? computeEfficiencyRatio(candles) : null
+  const donchian       = candles ? computeDonchian(candles) : null
+  const priceZScore    = candles ? computePriceZScore(candles) : null
+  const rsiDivergence  = candles ? detectRSIDivergence(candles) : null
+  const macdSlope      = candles ? computeMACDSlope(candles) : null
+  const candlePattern  = liveCandles ? detectCandlePattern(liveCandles) : null
+
+  const result: QuantSignals = {
     gkVol15m,
     gkVolAnnualized,
     expectedRangeUSD,
@@ -602,6 +878,18 @@ export function computeQuantSignals(
     autocorr:   candles ? computeReturnAutoCorr(candles) : null,
     velocity:   liveCandles ? computePriceVelocity(liveCandles) : null,
     obImbalance,
+    atr,
+    volumeTrend,
+    microMomentum,
+    intraVwap,
+    obv,
+    mfi,
+    efficiencyRatio,
+    donchian,
+    priceZScore,
+    rsiDivergence,
+    macdSlope,
+    candlePattern,
     brownianPrior,
     lnBinary,
     fatTailBinary,
@@ -614,6 +902,8 @@ export function computeQuantSignals(
     volOfVol,
     obImpliedProb,
   }
+  quantCache.set(key, result)
+  return result
 }
 
 // ── Format as quant brief for LLM context ─────────────────────────────────────
@@ -694,6 +984,14 @@ export function formatQuantBrief(
   if (sig.expectedRangeUSD !== null) {
     lines.push(`  Expected ±$${sig.expectedRangeUSD.toFixed(0)} remaining move (1σ, Brownian)`)
   }
+  if (sig.atr !== null) {
+    lines.push(
+      `  ATR(9):                    $${sig.atr.toFixed(0)}/candle (empirical range)` +
+      (sig.expectedRangeUSD !== null
+        ? `  [${sig.atr > sig.expectedRangeUSD ? 'ATR>1σ: fatter tails than model' : 'ATR<1σ: model may overstate range'}]`
+        : '')
+    )
+  }
   lines.push(
     `  NOTE: Both models assume zero drift — valid for 15-min horizon. ` +
     `Deviate >15pp only with strong directional evidence from signals below.`
@@ -729,7 +1027,89 @@ export function formatQuantBrief(
   }
   if (sig.vwap !== null) {
     const vDiff = ((spot - sig.vwap) / sig.vwap) * 100
-    lines.push(`  VWAP:             $${sig.vwap.toFixed(2)}  BTC ${vDiff >= 0 ? 'above' : 'below'} by ${Math.abs(vDiff).toFixed(3)}%`)
+    lines.push(`  VWAP (15-min):    $${sig.vwap.toFixed(2)}  BTC ${vDiff >= 0 ? 'above' : 'below'} by ${Math.abs(vDiff).toFixed(3)}%`)
+  }
+  if (sig.intraVwap !== null) {
+    const ivDiff = ((spot - sig.intraVwap) / sig.intraVwap) * 100
+    lines.push(`  VWAP (1-min):     $${sig.intraVwap.toFixed(2)}  BTC ${ivDiff >= 0 ? 'above' : 'below'} by ${Math.abs(ivDiff).toFixed(3)}% — intra-window`)
+  }
+  if (sig.volumeTrend !== null) {
+    const vt = sig.volumeTrend
+    const lbl = vt.trend === 'increasing' ? '▲ above avg — conviction move' :
+                vt.trend === 'decreasing' ? '▼ below avg — suspect, may fade' : '→ average'
+    lines.push(`  Volume trend:     ${vt.ratio.toFixed(2)}× avg  →  ${lbl}`)
+  }
+  if (sig.microMomentum !== null) {
+    const mm = sig.microMomentum
+    const streakStr = mm.streak > 0 ? `${mm.streak} consecutive GREEN` : `${Math.abs(mm.streak)} consecutive RED`
+    const convLbl = Math.abs(mm.streak) >= 5 ? ' — HIGH CONVICTION' : Math.abs(mm.streak) >= 3 ? ' — moderate' : ''
+    lines.push(
+      `  1-min momentum:   ${(mm.greenFraction * 100).toFixed(0)}% green bars` +
+      `  [${streakStr}${convLbl}]` +
+      `  → ${mm.direction.toUpperCase()}`
+    )
+  }
+  if (sig.candlePattern !== null && sig.candlePattern.type !== 'none') {
+    const cp = sig.candlePattern
+    const desc: Record<string, string> = {
+      hammer:         '🔨 HAMMER — bullish reversal signal on 1-min',
+      shooting_star:  '⭐ SHOOTING STAR — bearish reversal signal on 1-min',
+      doji:           '⊥ DOJI — indecision / potential reversal on 1-min',
+      engulfing_bull: '▲ BULLISH ENGULFING — strong bullish reversal signal',
+      engulfing_bear: '▼ BEARISH ENGULFING — strong bearish reversal signal',
+    }
+    lines.push(`  1-min pattern:    ${desc[cp.type] ?? cp.type}  (strength: ${(cp.strength * 100).toFixed(0)}%)`)
+  }
+  if (sig.obv !== null) {
+    const obv = sig.obv
+    const lbl = obv.trend === 'rising'  ? '▲ RISING — volume confirms bullish move' :
+                obv.trend === 'falling' ? '▼ FALLING — volume confirms bearish move or warns of bull fade' :
+                                          '→ flat'
+    lines.push(`  OBV trend:        ${lbl}  (Δ${obv.changeRate >= 0 ? '+' : ''}${(obv.changeRate * 100).toFixed(1)}%)`)
+  }
+  if (sig.mfi !== null) {
+    const lbl = sig.mfi > 80 ? '⚠ overbought — reversal pressure (volume confirms)' :
+                sig.mfi < 20 ? '⚠ oversold — bounce pressure (volume confirms)' :
+                sig.mfi > 60 ? 'bullish zone' : sig.mfi < 40 ? 'bearish zone' : 'neutral'
+    lines.push(`  MFI(9):           ${sig.mfi.toFixed(1)}  →  ${lbl}`)
+  }
+  if (sig.efficiencyRatio !== null) {
+    const er = sig.efficiencyRatio
+    const lbl = er > 0.6 ? 'STRONG TREND — momentum signals highly reliable' :
+                er > 0.35 ? 'moderate trend' :
+                'CHOPPY / RANDOM — fade extremes, momentum signals unreliable'
+    lines.push(`  Efficiency Ratio: ${er.toFixed(3)}  →  ${lbl}`)
+  }
+  if (sig.rsiDivergence !== null && sig.rsiDivergence.type !== 'none') {
+    const rdiv = sig.rsiDivergence
+    const desc = rdiv.type === 'bullish'
+      ? '⚡ BULLISH DIVERGENCE — price lower low, RSI higher low → hidden bullish pressure, potential reversal UP'
+      : '⚡ BEARISH DIVERGENCE — price higher high, RSI lower high → hidden bearish pressure, potential reversal DOWN'
+    lines.push(`  RSI divergence:   ${desc}`)
+  }
+  if (sig.macdSlope !== null) {
+    const slope = sig.macdSlope
+    const lbl = slope > 0.5  ? '▲ ACCELERATING — momentum building fast' :
+                slope > 0    ? '↗ building' :
+                slope < -0.5 ? '▼ DECELERATING FAST — momentum dying, reversal risk' :
+                               '↘ fading'
+    lines.push(`  MACD accel:       ${slope >= 0 ? '+' : ''}${slope.toFixed(3)}  →  ${lbl}`)
+  }
+  if (sig.donchian !== null) {
+    const dc = sig.donchian
+    const pct = (dc.pctRank * 100).toFixed(1)
+    const lbl = dc.pctRank > 0.92 ? '⚠ AT RANGE HIGH — resistance / breakout zone' :
+                dc.pctRank < 0.08 ? '⚠ AT RANGE LOW — support / breakdown zone' :
+                dc.pctRank > 0.65 ? 'upper half of range' :
+                dc.pctRank < 0.35 ? 'lower half of range' : 'mid-range'
+    lines.push(`  Donchian(12):     ${pct}% of range  [${lbl}]  H=$${dc.upper.toFixed(0)} L=$${dc.lower.toFixed(0)}`)
+  }
+  if (sig.priceZScore !== null) {
+    const z = sig.priceZScore
+    const lbl = Math.abs(z) > 2 ? `⚠ EXTREME (${z.toFixed(2)}σ) — strong mean reversion pressure` :
+                Math.abs(z) > 1.2 ? `stretched (${z.toFixed(2)}σ) — moderate reversion pressure` :
+                `neutral (${z.toFixed(2)}σ)`
+    lines.push(`  Price Z-score:    ${lbl}`)
   }
 
   // ── Regime ──────────────────────────────────────────────────────────────────
@@ -763,26 +1143,51 @@ export function formatQuantBrief(
   }
 
   // ── Live intra-window velocity ───────────────────────────────────────────────
-  if (sig.velocity) {
-    const v    = sig.velocity
-    const accelNote = Math.abs(v.acceleration) > 5
-      ? (v.acceleration > 0 ? '  ↑ accelerating up' : '  ↓ decelerating / reversing')
-      : '  → constant pace'
+  if (Math.abs(distancePct) > 0 && minutesLeft > 0) {
+    const distUSD    = Math.abs(distancePct / 100) * spot
+    const reqVel     = distUSD / minutesLeft
+    // Frame the question correctly: what needs to happen for YES to win/lose
+    const yesWins    = distancePct >= 0  // BTC currently above strike → YES wins by default
+    const scenario   = yesWins
+      ? `YES wins unless BTC FALLS $${distUSD.toFixed(0)} — need -$${reqVel.toFixed(2)}/min downward for NO to win`
+      : `YES wins only if BTC RISES $${distUSD.toFixed(0)} — need +$${reqVel.toFixed(2)}/min for YES to win`
     lines.push(
-      `\n[LIVE VELOCITY (1-min)]  ` +
-      `${v.velocityPerMin >= 0 ? '+' : ''}$${v.velocityPerMin.toFixed(2)}/min  [${v.direction}]${accelNote}`
+      `\n[STRIKE REACHABILITY — CRITICAL]` +
+      `\n  ${scenario}` +
+      `\n  Time remaining: ${minutesLeft.toFixed(1)}min`
     )
-    // Minutes to reach strike at current velocity
-    if (Math.abs(v.velocityPerMin) > 0.5 && Math.abs(distancePct) > 0) {
-      const distanceUSD   = Math.abs(distancePct / 100) * spot
-      const minsToStrike  = distanceUSD / Math.abs(v.velocityPerMin)
-      const willCross     = minutesLeft > minsToStrike
-        ? (v.velocityPerMin > 0 && distancePct < 0) || (v.velocityPerMin < 0 && distancePct > 0)
-          ? `⚠ At current velocity reaches strike in ~${minsToStrike.toFixed(1)}min (CROSS LIKELY)`
-          : `  At current velocity reaches strike in ~${minsToStrike.toFixed(1)}min`
-        : `  Strike unreachable at current velocity in ${minutesLeft.toFixed(1)}min remaining`
-      lines.push(`  ${willCross}`)
+    if (sig.velocity) {
+      const v       = sig.velocity
+      const toward  = (distancePct < 0 && v.velocityPerMin > 0) || (distancePct > 0 && v.velocityPerMin < 0)
+      const ratio   = reqVel > 0 ? Math.abs(v.velocityPerMin) / reqVel : 0
+      const accelNote = Math.abs(v.acceleration) > 5
+        ? (v.acceleration > 0 ? ' ↑accelerating' : ' ↓decelerating')
+        : ' →constant'
+      lines.push(
+        `  Current velocity:  ${v.velocityPerMin >= 0 ? '+' : ''}$${v.velocityPerMin.toFixed(2)}/min` +
+        `  [${v.direction}${accelNote}]  ${(ratio * 100).toFixed(0)}% of required pace`
+      )
+      if (!toward) {
+        lines.push(`  ⛔ MOVING AWAY FROM STRIKE — strike physically unreachable unless reversal`)
+      } else if (ratio < 0.4) {
+        lines.push(`  ⛔ VELOCITY TOO SLOW (${(ratio * 100).toFixed(0)}% of needed) — strike unreachable at current pace`)
+      } else if (ratio < 0.75) {
+        lines.push(`  ⚠  Below required pace (${(ratio * 100).toFixed(0)}%) — needs acceleration to reach strike`)
+      } else {
+        const minsToStrike = distUSD / Math.abs(v.velocityPerMin)
+        const msg = minsToStrike <= minutesLeft
+          ? `✓ On pace — reaches strike in ~${minsToStrike.toFixed(1)}min (${minutesLeft.toFixed(1)}min remaining)`
+          : `  Borderline — ${minsToStrike.toFixed(1)}min at current pace vs ${minutesLeft.toFixed(1)}min left`
+        lines.push(`  ${msg}`)
+      }
+    } else {
+      lines.push(`  [No live velocity data — use physics priors for reachability]`)
     }
+  } else if (sig.velocity) {
+    const v = sig.velocity
+    const accelNote = Math.abs(v.acceleration) > 5
+      ? (v.acceleration > 0 ? ' ↑accelerating' : ' ↓decelerating') : ' →constant'
+    lines.push(`\n[LIVE VELOCITY (1-min)]  ${v.velocityPerMin >= 0 ? '+' : ''}$${v.velocityPerMin.toFixed(2)}/min  [${v.direction}${accelNote}]`)
   }
 
   // ── Orderbook microstructure ─────────────────────────────────────────────────

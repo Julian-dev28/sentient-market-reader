@@ -63,16 +63,11 @@ export async function runSentiment(
   extractionProvider?: AIProvider, // provider for JSON extraction step (defaults to provider)
   orModelOverride?: string,        // override OpenRouter model ID for this call
   signal?: AbortSignal,            // abort signal from the HTTP request
+  apiKeys?: Record<string, string>, // per-provider API keys from user settings
 ): Promise<AgentResult<SentimentOutput>> {
   const start = Date.now()
 
   const distSign = distanceFromStrikePct >= 0 ? '+' : ''
-  const obYes = orderbook?.yes?.slice(0, 5)
-    .filter(l => l.price != null && l.delta != null)
-    .map(l => `${l.price}¢×${Math.abs(l.delta)}`).join(', ') || 'n/a'
-  const obNo  = orderbook?.no?.slice(0, 5)
-    .filter(l => l.price != null && l.delta != null)
-    .map(l => `${l.price}¢×${Math.abs(l.delta)}`).join(', ') || 'n/a'
 
   // Format 1-min live candles — show the current window at 1-min resolution
   const liveCandleBlock = (() => {
@@ -97,86 +92,166 @@ export async function runSentiment(
     `Basis (perp mark vs spot index): ${derivatives.basis >= 0 ? '+' : ''}${derivatives.basis.toFixed(4)}% — ${derivatives.basis > 0.02 ? 'contango (futures premium → bullish)' : derivatives.basis < -0.02 ? 'backwardation (futures discount → bearish)' : 'flat (no meaningful futures bias)'}`,
   ].join('\n') : null
 
-  // Pre-compute quantitative signals — deterministic math done before the LLM call
-  const quant     = computeQuantSignals(candles, liveCandles, orderbook, quote.price, strikePrice, distanceFromStrikePct, minutesUntilExpiry)
-  const quantBrief = formatQuantBrief(quant, quote.price, distanceFromStrikePct, minutesUntilExpiry)
+  const distUSD = Math.abs(distanceFromStrikePct / 100) * quote.price
+  const reqVel  = minutesUntilExpiry > 0 ? distUSD / minutesUntilExpiry : 0
 
-  const goal =
-    `Assess short-term BTC directional sentiment for this 15-min Kalshi KXBTC15M prediction window. ` +
-    `You have pre-computed quantitative signals — treat these as your primary analytical framework. ` +
-    `The math is already done; your role is to interpret what the signals collectively imply. ` +
-    `Synthesize in this priority order: ` +
-    `(1) PRICING MODELS — Brownian motion and log-normal binary P(YES) give you a calibrated baseline; ` +
-    `(2) REGIME — autocorrelation tells you whether to extrapolate momentum or fade it; ` +
-    `(3) LIVE VELOCITY — what BTC is doing right now at 1-min resolution, including $ per minute and time-to-strike; ` +
-    `(4) MOMENTUM indicators (RSI, MACD histogram, %B, Stochastic) — confirm or contradict the trend; ` +
-    `CRITICAL: ⚡ CANDLE FLIP ALERT = structural reversal, override all prior trend signals; ` +
-    `(5) ORDERBOOK pressure-weighted imbalance — crowd positioning at the microstructure level; ` +
-    `(6) DERIVATIVES — funding rate (crowded longs = bearish near-term), basis (contango vs backwardation); ` +
-    `(7) time pressure: ${minutesUntilExpiry.toFixed(1)} min left — under 5 min, velocity and pricing models dominate. ` +
-    `Produce a directional sentiment score from -1 (strongly bearish) to +1 (strongly bullish).`
+  // Pre-compute quantitative signals
+  const quant      = computeQuantSignals(candles, liveCandles, orderbook, quote.price, strikePrice, distanceFromStrikePct, minutesUntilExpiry)
+  const quantBrief = formatQuantBrief(quant, quote.price, distanceFromStrikePct, minutesUntilExpiry)
 
   const context = [
     `BTC price: $${quote.price.toLocaleString('en-US', { maximumFractionDigits: 2 })}`,
     `Strike price: $${strikePrice.toLocaleString('en-US', { maximumFractionDigits: 2 })}`,
-    `BTC vs strike: ${distSign}${distanceFromStrikePct.toFixed(4)}% — BTC is ${distanceFromStrikePct >= 0 ? 'ABOVE' : 'BELOW'} strike`,
-    `Minutes to window close: ${minutesUntilExpiry.toFixed(2)}`,
+    `BTC vs strike: ${distSign}${distanceFromStrikePct.toFixed(4)}% — BTC is ${distanceFromStrikePct >= 0 ? 'ABOVE' : 'BELOW'} strike by $${distUSD.toFixed(0)}`,
+    `Minutes to window close: ${minutesUntilExpiry.toFixed(2)} | Required velocity: ±$${reqVel.toFixed(2)}/min to reach strike`,
     `1h change: ${quote.percent_change_1h >= 0 ? '+' : ''}${quote.percent_change_1h.toFixed(4)}%`,
     `24h change: ${quote.percent_change_24h >= 0 ? '+' : ''}${quote.percent_change_24h.toFixed(4)}%`,
     market
       ? `Kalshi market: YES ask=${market.yes_ask}¢ bid=${market.yes_bid}¢ | NO ask=${market.no_ask}¢ | spread=${market.yes_ask - market.yes_bid}¢`
       : 'No active Kalshi market',
-    `\n${quantBrief}`,
+    `
+${quantBrief}`,
     derivativesBlock,
-    ...(liveCandles?.length && liveCandleBlock ? [`\n${liveCandleBlock}`] : []),
-    ...(candles?.length ? [`\n${formatCandles(candles)}`] : []),
-    ...(prevContext ? [`\nPrevious cycle analysis:\n${prevContext}`] : []),
+    ...(liveCandles?.length && liveCandleBlock ? [`
+${liveCandleBlock}`] : []),
+    ...(candles?.length ? [`
+${formatCandles(candles)}`] : []),
+    ...(prevContext ? [`
+Previous cycle analysis:
+${prevContext}`] : []),
   ].filter(Boolean).join('\n')
 
-  // Depth controlled by ROMA_MAX_DEPTH env var (default 1). ROMA treats 0 as unlimited — never send 0.
-  const maxDepth = Math.max(1, parseInt(process.env.ROMA_MAX_DEPTH ?? '1'))
-  const romaResult = await callPythonRoma(goal, context, maxDepth, 2, romaMode, provider, providers, orModelOverride, signal)
-  const romaTrace  = formatRomaTrace(romaResult)
 
-  // Use fast tier (grok-3-mini) — extraction is simple JSON parsing, no need for the
-  // heavy model. Keeps token pressure low after ROMA already used the bulk of the budget.
-  const extracted = await llmToolCall<{
-    score: number
-    label: SentimentOutput['label']
-    momentum: number
-    orderbookSkew: number
-    signals: string[]
-  }>({
-    provider: extractionProvider ?? provider,
-    tier: 'fast',
-    maxTokens: romaMode === 'blitz' ? 256 : 512,
-    toolName: 'output_sentiment',
-    toolDescription: 'Extract structured BTC sentiment data from ROMA analysis output',
-    schema: {
-      properties: {
-        score:         { type: 'number', description: 'Overall sentiment score: -1.0 = strongly bearish, +1.0 = strongly bullish' },
-        label:         { type: 'string', enum: ['strongly_bullish', 'bullish', 'neutral', 'bearish', 'strongly_bearish'] },
-        momentum:      { type: 'number', description: 'Short-term price momentum component: -1 to +1' },
-        orderbookSkew: { type: 'number', description: 'Kalshi orderbook/crowd sentiment skew: -1 to +1' },
-        signals:       { type: 'array', items: { type: 'string' }, description: '3-5 concise signals from the ROMA analysis' },
-      },
-      required: ['score', 'label', 'momentum', 'orderbookSkew', 'signals'],
-    },
-    prompt: `Extract structured sentiment data from this ROMA analysis:\n\n${romaResult.answer}`,
-  })
+  // ── Rule-based quant sentiment — no LLM call ─────────────────────────────
+  // Derives directional score from pre-computed quant signals.
+  // LLM-based sentiment was adding noise vs pure quant; this is deterministic.
+  let score = 0
+  const signals: string[] = []
+
+  // 1. Distance / reachability bias
+  if (distanceFromStrikePct > 0.05)       { score += 0.15; signals.push('BTC above strike') }
+  else if (distanceFromStrikePct < -0.05) { score -= 0.15; signals.push('BTC below strike') }
+
+  // 2. RSI
+  const rsiVal = quant.rsi
+  if (rsiVal !== null) {
+    if      (rsiVal > 60) { score += 0.20; signals.push('RSI ' + rsiVal.toFixed(0) + ' bullish') }
+    else if (rsiVal < 40) { score -= 0.20; signals.push('RSI ' + rsiVal.toFixed(0) + ' bearish') }
+  }
+
+  // 3. MACD histogram + slope
+  if (quant.macd) {
+    if (quant.macd.histogram > 0) { score += 0.15; signals.push('MACD bullish') }
+    else                          { score -= 0.15; signals.push('MACD bearish') }
+  }
+  if (quant.macdSlope !== null) {
+    score += quant.macdSlope > 0 ? 0.05 : -0.05
+  }
+
+  // 4. Bollinger %B
+  if (quant.bollingerB) {
+    const pctB = quant.bollingerB.pctB
+    if      (pctB > 0.7) { score += 0.10; signals.push('Bollinger high') }
+    else if (pctB < 0.3) { score -= 0.10; signals.push('Bollinger low') }
+  }
+
+  // 5. Stochastic
+  if (quant.stochastic !== null) {
+    if      (quant.stochastic > 70) { score += 0.10; signals.push('Stoch overbought bullish') }
+    else if (quant.stochastic < 30) { score -= 0.10; signals.push('Stoch oversold bearish') }
+  }
+
+  // 6. Velocity — direction relative to whether YES or NO needs to win
+  // BTC above strike: velocity toward strike (downward) = bad for YES = bearish signal
+  // BTC below strike: velocity toward strike (upward) = good for YES = bullish signal
+  // The score is YES-relative, so moving toward strike when above = -score, when below = +score
+  if (quant.velocity) {
+    const vel = quant.velocity.velocityPerMin
+    const movingDown = vel < 0
+    const aboveStrike = distanceFromStrikePct > 0
+    // Toward strike means: above + moving down, OR below + moving up
+    const towardStrike = (aboveStrike && movingDown) || (!aboveStrike && !movingDown)
+    if (towardStrike) {
+      // Toward strike when above = threatens YES (bad). Toward strike when below = helps YES (good).
+      const delta = aboveStrike ? -0.15 : +0.15
+      score += delta
+      signals.push(aboveStrike ? 'Price falling toward strike (YES at risk)' : 'Price rising toward strike (YES opportunity)')
+    } else if (Math.abs(vel) > 0) {
+      // Moving away from strike — reinforces current position
+      const delta = aboveStrike ? +0.10 : -0.10
+      score += delta
+      signals.push(aboveStrike ? 'Price moving away from strike (YES safe)' : 'Price falling away from strike (NO safe)')
+    }
+  }
+
+  // 7. Micro momentum (1-min candles)
+  if (quant.microMomentum) {
+    const gf = quant.microMomentum.greenFraction
+    if      (gf > 0.65) { score += 0.15; signals.push('1-min momentum bullish') }
+    else if (gf < 0.35) { score -= 0.15; signals.push('1-min momentum bearish') }
+  }
+
+  // 8. OBV trend
+  if (quant.obv) {
+    if      (quant.obv.trend === 'rising')  { score += 0.10; signals.push('OBV rising') }
+    else if (quant.obv.trend === 'falling') { score -= 0.10; signals.push('OBV falling') }
+  }
+
+  // 9. MFI extremes
+  if (quant.mfi !== null) {
+    if      (quant.mfi > 80) { score -= 0.10; signals.push('MFI overbought') }
+    else if (quant.mfi < 20) { score += 0.10; signals.push('MFI oversold bullish') }
+  }
+
+  // 10. CUSUM jump (highest-weight — regime shift)
+  if (quant.cusum?.jumpDetected) {
+    const jumpScore = quant.cusum.direction === 'up' ? 0.30 : -0.30
+    score += jumpScore
+    signals.push('CUSUM jump ' + quant.cusum.direction)
+  }
+
+  // 11. RSI divergence
+  if (quant.rsiDivergence && quant.rsiDivergence.type !== 'none') {
+    if      (quant.rsiDivergence.type === 'bullish') { score += 0.15; signals.push('RSI bullish divergence') }
+    else if (quant.rsiDivergence.type === 'bearish') { score -= 0.15; signals.push('RSI bearish divergence') }
+  }
+
+  // 12. Kalshi orderbook imbalance (pressure-weighted YES vs NO depth)
+  if (quant.obImbalance) {
+    const pw = quant.obImbalance.pressureWeighted
+    if      (pw >  0.30) { score += 0.15; signals.push('OB strong YES pressure') }
+    else if (pw >  0.12) { score += 0.08; signals.push('OB mild YES pressure') }
+    else if (pw < -0.30) { score -= 0.15; signals.push('OB strong NO pressure') }
+    else if (pw < -0.12) { score -= 0.08; signals.push('OB mild NO pressure') }
+    else                 { signals.push('OB balanced') }
+  }
+
+  // 13. Efficiency ratio — dampen signals in choppy market
+  if (quant.efficiencyRatio !== null && quant.efficiencyRatio < 0.3) {
+    score *= 0.5
+    signals.push('Choppy regime — signals dampened')
+  }
+
+  score = Math.max(-1, Math.min(1, score))
+
+  const label: SentimentOutput['label'] =
+    score >  0.6 ? 'strongly_bullish' :
+    score >  0.2 ? 'bullish' :
+    score < -0.6 ? 'strongly_bearish' :
+    score < -0.2 ? 'bearish' : 'neutral'
 
   return {
-    agentName: `SentimentAgent (roma-dspy · ${romaResult.provider})`,
+    agentName: 'SentimentAgent (quant)',
     status: 'done',
     output: {
-      score:         Math.max(-1, Math.min(1, extracted.score)),
-      label:         extracted.label,
-      momentum:      extracted.momentum,
-      orderbookSkew: extracted.orderbookSkew,
-      signals:       extracted.signals,
-      provider:      romaResult.provider,
+      score,
+      label,
+      momentum:      quant.velocity?.velocityPerMin ?? 0,
+      orderbookSkew: quant.obImbalance?.simple ?? 0,
+      signals: signals.slice(0, 5),
+      provider: 'quant',
     },
-    reasoning: romaTrace + `\n\nScore: ${extracted.score.toFixed(3)} (${extracted.label}) — ${extracted.signals.join(' | ')}`,
+    reasoning: 'Quant sentiment score=' + score.toFixed(3) + ' (' + label + ') — ' + signals.join(' | '),
     durationMs: Date.now() - start,
     timestamp: new Date().toISOString(),
   }

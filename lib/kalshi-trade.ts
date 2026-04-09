@@ -7,6 +7,7 @@
 
 import { buildKalshiHeaders } from './kalshi-auth'
 import type { KalshiBalance, KalshiPosition, KalshiOrder, KalshiFill } from './types'
+import { normalizeKalshiPosition, normalizeKalshiOrder, normalizeKalshiFill } from './types'
 
 const KALSHI_BASE = 'https://api.elections.kalshi.com/trade-api/v2'
 
@@ -40,6 +41,7 @@ export interface PlaceOrderParams {
   yesPrice?: number       // limit price in cents for YES side
   noPrice?: number        // limit price in cents for NO side
   clientOrderId?: string
+  ioc?: boolean           // immediate_or_cancel — fills at market or cancels instantly
 }
 
 export interface PlaceOrderResult {
@@ -57,7 +59,7 @@ export async function placeOrder(params: PlaceOrderParams): Promise<PlaceOrderRe
     count: params.count,
     ...(params.yesPrice !== undefined ? { yes_price: params.yesPrice } : {}),
     ...(params.noPrice  !== undefined ? { no_price:  params.noPrice  } : {}),
-    time_in_force: 'good_till_canceled',
+    time_in_force: params.ioc ? 'immediate_or_cancel' : 'good_till_canceled',
     ...(params.clientOrderId ? { client_order_id: params.clientOrderId } : {}),
   }
 
@@ -77,7 +79,7 @@ export async function placeOrder(params: PlaceOrderParams): Promise<PlaceOrderRe
     if (!res.ok) {
       return { ok: false, error: extractError(data, res.status) }
     }
-    return { ok: true, order: data.order as KalshiOrder }
+    return { ok: true, order: normalizeKalshiOrder(data.order) }
   } catch (err) {
     return { ok: false, error: String(err) }
   }
@@ -114,7 +116,7 @@ export async function sellOrder(params: SellOrderParams): Promise<PlaceOrderResu
     })
     const data = await res.json()
     if (!res.ok) return { ok: false, error: extractError(data, res.status) }
-    return { ok: true, order: data.order as KalshiOrder }
+    return { ok: true, order: normalizeKalshiOrder(data.order) }
   } catch (err) {
     return { ok: false, error: String(err) }
   }
@@ -144,7 +146,7 @@ export async function limitSellOrder(params: SellOrderParams): Promise<PlaceOrde
     })
     const data = await res.json()
     if (!res.ok) return { ok: false, error: extractError(data, res.status) }
-    return { ok: true, order: data.order as KalshiOrder }
+    return { ok: true, order: normalizeKalshiOrder(data.order) }
   } catch (err) {
     return { ok: false, error: String(err) }
   }
@@ -214,7 +216,7 @@ export async function getPositions(): Promise<PositionsResult> {
     if (!res.ok) {
       return { ok: false, error: extractError(body, res.status), status: res.status, positions: [], orders: [] }
     }
-    return { ok: true, positions: (body.market_positions ?? []) as KalshiPosition[], orders: [] }
+    return { ok: true, positions: (body.market_positions ?? []).map(normalizeKalshiPosition) as KalshiPosition[], orders: [] }
   } catch (err) {
     return { ok: false, error: String(err), positions: [], orders: [] }
   }
@@ -228,7 +230,7 @@ export async function getFills(limit = 20): Promise<{ ok: boolean; fills: Kalshi
     const res = await fetch(`${KALSHI_BASE}/portfolio/fills?limit=${limit}`, { headers, cache: 'no-store' })
     const body = await res.json().catch(() => null)
     if (!res.ok) return { ok: false, fills: [], error: extractError(body, res.status) }
-    return { ok: true, fills: (body.fills ?? []) as KalshiFill[] }
+    return { ok: true, fills: (body.fills ?? []).map(normalizeKalshiFill) as KalshiFill[] }
   } catch (err) {
     return { ok: false, fills: [], error: String(err) }
   }
@@ -245,7 +247,7 @@ export async function getOrders(status?: string): Promise<{ ok: boolean; orders:
     if (!res.ok) {
       return { ok: false, orders: [], error: extractError(body, res.status) }
     }
-    return { ok: true, orders: (body.orders ?? []) as KalshiOrder[] }
+    return { ok: true, orders: (body.orders ?? []).map(normalizeKalshiOrder) as KalshiOrder[] }
   } catch (err) {
     return { ok: false, orders: [], error: String(err) }
   }

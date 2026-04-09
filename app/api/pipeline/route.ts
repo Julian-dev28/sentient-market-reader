@@ -3,6 +3,7 @@ import { runAgentPipeline } from '@/lib/agents'
 import { buildKalshiHeaders } from '@/lib/kalshi-auth'
 import { getBalance } from '@/lib/kalshi-trade'
 import type { KalshiMarket, KalshiOrderbook, BTCQuote, OHLCVCandle, DerivativesSignal } from '@/lib/types'
+import { normalizeKalshiMarket } from '@/lib/types'
 import type { AIProvider } from '@/lib/llm-client'
 import { tryLockPipeline, releasePipelineLock } from '@/lib/pipeline-lock'
 
@@ -78,7 +79,7 @@ export async function GET(req: NextRequest) {
 
     if (eventRes?.ok) {
       const data = await eventRes.json()
-      markets = (data.markets ?? []).filter(isTradeable)
+      markets = (data.markets ?? []).map(normalizeKalshiMarket).filter(isTradeable)
     }
 
     // Fallback: query recent series markets without status filter
@@ -90,7 +91,7 @@ export async function GET(req: NextRequest) {
       ).catch(() => null)
       if (fallbackRes?.ok) {
         const data = await fallbackRes.json()
-        markets = (data.markets ?? []).filter(isTradeable)
+        markets = (data.markets ?? []).map(normalizeKalshiMarket).filter(isTradeable)
       }
     }
 
@@ -202,12 +203,16 @@ export async function GET(req: NextRequest) {
       ? (providersRaw.split(',').filter(p => (validProviders as readonly string[]).includes(p)) as AIProvider[])
       : undefined
 
-    const validModes = ['blitz', 'sharp', 'keen', 'smart']
-    const sentModeRaw = req.nextUrl.searchParams.get('sentMode')
-    const probModeRaw = req.nextUrl.searchParams.get('probMode')
-    const sentModeOverride = sentModeRaw && validModes.includes(sentModeRaw) ? sentModeRaw : undefined
-    const probModeOverride = probModeRaw && validModes.includes(probModeRaw) ? probModeRaw : undefined
     const orModelOverride  = req.nextUrl.searchParams.get('orModel') || undefined
+
+    // Read user-provided API keys from request header (base64-encoded JSON)
+    let apiKeys: Record<string, string> | undefined
+    const keysHeader = req.headers.get('x-provider-keys')
+    if (keysHeader) {
+      try {
+        apiKeys = JSON.parse(Buffer.from(keysHeader, 'base64').toString('utf8'))
+      } catch { /* ignore malformed header */ }
+    }
 
     // ── SSE stream phase ──────────────────────────────────────────────────
     // All data is fetched; start the event stream. Lock is released in stream's finally.
@@ -220,10 +225,11 @@ export async function GET(req: NextRequest) {
         try {
           const pipeline = await runAgentPipeline(
             markets, quote!, orderbook, provider, romaMode, aiRisk,
-            provider2, providers, sentModeOverride, probModeOverride,
+            provider2, providers,
             candles, liveCandles, derivatives, orModelOverride, req.signal,
             (key, result) => enc('agent', { key, result }),
             portfolioValueCents,
+            apiKeys,
           )
           enc('done', pipeline)
         } catch (err) {

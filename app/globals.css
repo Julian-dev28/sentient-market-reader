@@ -153,6 +153,10 @@ html, body {
   0%   { transform: translate(-50%,-68%) scale(0.85); opacity: 0.6; }
   100% { transform: translate(-50%,-68%) scale(1.55); opacity: 0; }
 }
+@keyframes scanLine {
+  0%   { left: -40%; }
+  100% { left: 100%; }
+}
 @keyframes dataPacket {
   0%   { left: -3%;  opacity: 0; }
   10%  { opacity: 1; }

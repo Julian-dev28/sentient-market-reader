@@ -23,6 +23,36 @@ export interface KalshiMarket {
   no_sub_title?: string
   rules_primary?: string
   market_type?: string
+  // New API dollar fields (Kalshi v2 uses these instead of cent integers)
+  yes_ask_dollars?: number
+  yes_bid_dollars?: number
+  no_ask_dollars?: number
+  no_bid_dollars?: number
+}
+
+/**
+ * Normalize a raw Kalshi API market object.
+ * The v2 API now returns `yes_ask_dollars` (float USD) instead of `yes_ask` (int cents).
+ * This converts dollar fields → cent fields so all downstream code stays consistent.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function normalizeKalshiMarket(m: any): KalshiMarket {
+  const toC = (dollars: number | undefined, cents: number | undefined): number => {
+    if (cents && cents > 0) return cents
+    if (dollars !== undefined && dollars >= 0) return Math.round(dollars * 100)
+    return 0
+  }
+  const fp = (v: unknown) => parseFloat(String(v ?? 0)) || 0
+  return {
+    ...m,
+    yes_ask:       toC(m.yes_ask_dollars,      m.yes_ask),
+    yes_bid:       toC(m.yes_bid_dollars,      m.yes_bid),
+    no_ask:        toC(m.no_ask_dollars,       m.no_ask),
+    no_bid:        toC(m.no_bid_dollars,       m.no_bid),
+    last_price:    toC(m.last_price_dollars,   m.last_price),
+    volume:        fp(m.volume_fp       ?? m.volume),
+    open_interest: fp(m.open_interest_fp ?? m.open_interest),
+  }
 }
 
 export interface KalshiOrderbookLevel {
@@ -104,12 +134,14 @@ export interface SentimentOutput {
 export interface ProbabilityOutput {
   pModel: number         // 0.0–1.0 model's P(YES)
   pMarket: number        // 0.0–1.0 market-implied P(YES) from yes_ask
-  edge: number           // pModel - pMarket
-  edgePct: number        // edge as %
+  edge: number           // after-fee EV per contract in dollars (positive = favourable)
+  edgePct: number        // edge × 100 as % (used for minEdgePct gate in risk manager)
   recommendation: 'YES' | 'NO' | 'NO_TRADE'
   confidence: 'high' | 'medium' | 'low'
   provider: string       // e.g. "grok/grok-4-0709"
   gkVol15m?: number | null  // Garman-Klass realized vol (per-candle) — forwarded to risk manager
+  volOfVol?: number | null  // vol-of-vol: high = unstable regime → reduce position size
+  dScore?: number | null    // precise d-score from pipeline candles (used to sync currentD display)
 }
 
 export interface RiskOutput {
@@ -118,7 +150,7 @@ export interface RiskOutput {
   positionSize: number   // contracts
   maxLoss: number        // $ max loss on this trade
   dailyPnl: number       // simulated session P&L
-  drawdownPct: number
+  givebackDollars: number  // $ given back from today's peak P&L (replaces drawdownPct %)
   tradeCount: number
 }
 
@@ -162,7 +194,7 @@ export interface KalshiBalance {
 
 export interface KalshiPosition {
   ticker: string
-  position: number        // positive = YES, negative = NO
+  position: number        // positive = YES, negative = NO (contracts)
   realized_pnl: number    // cents
   market_exposure: number // cents
   fees_paid: number       // cents
@@ -199,9 +231,90 @@ export interface KalshiFill {
   fee_cost: string        // dollar string e.g. "0.01"
 }
 
+/** Normalize raw Kalshi API position — new API uses _fp / _dollars suffixes */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function normalizeKalshiPosition(p: any): KalshiPosition {
+  const fp  = (v: unknown) => parseFloat(String(v ?? 0)) || 0
+  const toC = (dollars: unknown, cents: unknown) =>
+    (cents !== undefined && cents !== null && fp(cents) !== 0) ? fp(cents) : Math.round(fp(dollars) * 100)
+  return {
+    ticker:              p.ticker ?? p.market_ticker ?? '',
+    position:            fp(p.position_fp ?? p.position),
+    realized_pnl:        toC(p.realized_pnl_dollars, p.realized_pnl),
+    market_exposure:     toC(p.market_exposure_dollars, p.market_exposure),
+    fees_paid:           toC(p.fees_paid_dollars, p.fees_paid),
+    resting_orders_count: fp(p.resting_orders_count),
+  }
+}
+
+/** Normalize raw Kalshi API order */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function normalizeKalshiOrder(o: any): KalshiOrder {
+  const fp  = (v: unknown) => parseFloat(String(v ?? 0)) || 0
+  const toC = (dollars: unknown, cents: unknown) =>
+    (cents !== undefined && cents !== null && fp(cents) !== 0) ? fp(cents) : Math.round(fp(dollars) * 100)
+  return {
+    order_id:        o.order_id ?? '',
+    ticker:          o.ticker ?? o.market_ticker ?? '',
+    side:            o.side,
+    action:          o.action,
+    count:           fp(o.count_fp ?? o.count),
+    fill_count:      fp(o.fill_count_fp ?? o.fill_count),
+    remaining_count: fp(o.remaining_count_fp ?? o.remaining_count),
+    initial_count:   fp(o.initial_count_fp ?? o.initial_count ?? o.count_fp ?? o.count),
+    yes_price:       toC(o.yes_price_dollars, o.yes_price),
+    no_price:        toC(o.no_price_dollars,  o.no_price),
+    status:          o.status,
+    created_time:    o.created_time ?? '',
+    client_order_id: o.client_order_id,
+  }
+}
+
+/** Normalize raw Kalshi API fill */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function normalizeKalshiFill(f: any): KalshiFill {
+  const fp  = (v: unknown) => parseFloat(String(v ?? 0)) || 0
+  const toC = (dollars: unknown, cents: unknown) =>
+    (cents !== undefined && cents !== null && fp(cents) !== 0) ? fp(cents) : Math.round(fp(dollars) * 100)
+  return {
+    fill_id:      f.fill_id ?? f.trade_id ?? '',
+    order_id:     f.order_id ?? '',
+    ticker:       f.ticker ?? f.market_ticker ?? '',
+    side:         f.side,
+    action:       f.action,
+    count:        fp(f.count_fp ?? f.count),
+    yes_price:    toC(f.yes_price_dollars, f.yes_price),
+    no_price:     toC(f.no_price_dollars,  f.no_price),
+    is_taker:     f.is_taker ?? false,
+    created_time: f.created_time ?? '',
+    fee_cost:     f.fee_cost ?? '0',
+  }
+}
+
 // ─── Trade Log ─────────────────────────────────────────────────────────────
 
 export type TradeOutcome = 'WIN' | 'LOSS' | 'PENDING'
+
+/** Full signal snapshot captured at trade entry — used for calibration and attribution */
+export interface TradeSignals {
+  // Sentiment agent
+  sentimentScore: number       // -1 to +1
+  sentimentMomentum: number    // -1 to +1
+  orderbookSkew: number        // -1 to +1
+  sentimentLabel: string       // e.g. 'strongly_bullish'
+  // Probability agent
+  pLLM: number                 // raw LLM P(YES) before quant blend
+  confidence: string           // 'high' | 'medium' | 'low'
+  gkVol: number | null         // Garman-Klass realized vol
+  // Market context
+  distancePct: number          // BTC distance from strike (signed %)
+  minutesLeft: number          // minutes until expiry
+  aboveStrike: boolean         // BTC above strike at entry
+  // Market structure
+  priceMomentum1h: number      // 1h price change %
+  // TimesFM (if available)
+  timesfmPYes?: number         // TimesFM-derived P(YES)
+}
 
 export interface TradeRecord {
   id: string
@@ -221,9 +334,100 @@ export interface TradeRecord {
   pModel: number
   pMarket: number
   edge: number
+  signals?: TradeSignals    // full signal vector for calibration/attribution
   // Live trading fields
   liveOrderId?: string
   liveMode?: boolean
+  // Backtest flag — true for synthetic records from historical backtest
+  isBacktest?: boolean
+}
+
+// ─── Agent Engine ────────────────────────────────────────────────────────────
+
+export interface AgentTrade {
+  id: string
+  cycleId: number
+  windowKey: string       // event_ticker identifying the 15-min window
+  sliceNum: number        // 1-based slice index within this window
+  side: 'yes' | 'no'
+  limitPrice: number      // cents
+  contracts: number
+  cost: number            // dollars deployed for this slice
+  marketTicker: string
+  strikePrice: number
+  btcPriceAtEntry?: number
+  expiresAt: string
+  enteredAt: string
+  status: 'open' | 'won' | 'lost'
+  pnl?: number            // profit/loss in dollars (net of cost)
+  settlementPrice?: number
+  pModel: number
+  pMarket: number
+  edge: number
+  signals?: TradeSignals  // full signal vector for calibration/attribution
+  liveOrderId?: string
+  liveMode?: boolean
+  orderError?: string     // set if live order placement failed
+}
+
+export interface AgentStats {
+  windowsTraded: number
+  totalSlices: number
+  totalDeployed: number
+  totalPnl: number
+  wins: number
+  losses: number
+  winRate: number
+  bestWindow: number
+  worstWindow: number
+}
+
+// ─── Calibration ────────────────────────────────────────────────────────────
+
+/** Calibration bucket: "when model says X%, how often does YES actually win?" */
+export interface CalibrationBucket {
+  bucket: string            // e.g. "50–60%"
+  pMid: number              // midpoint, e.g. 0.55
+  predicted: number         // avg pModel in bucket
+  actual: number            // actual win rate
+  count: number             // trade count
+}
+
+export interface SignalImportance {
+  feature: string           // signal name
+  coefficient: number       // logistic regression coefficient
+  direction: 'bullish' | 'bearish' | 'mixed'
+  accuracy: number          // % of times this signal correctly predicted direction
+  count: number             // sample size
+}
+
+export interface CalibrationResult {
+  brierScore: number        // 0–0.25; lower is better; random=0.25
+  logLoss: number           // lower is better
+  rocAuc: number            // 0.5–1.0; 0.5=random
+  totalTrades: number
+  settledTrades: number
+  overallWinRate: number
+  avgPModel: number         // average predicted P(YES) on YES trades
+  buckets: CalibrationBucket[]
+  signals: SignalImportance[]
+  plattA: number | null     // Platt scaling coefficient a (null if not fitted)
+  plattB: number | null     // Platt scaling coefficient b
+  computedAt: string        // ISO timestamp
+}
+
+/** Daily optimization parameters output by Gemini meta-optimizer */
+export interface DailyOptParams {
+  alphaCap: number          // max quant weight (0.70–0.92)
+  gateVelocityThreshold: number  // reachability gate (0.40–0.75)
+  edgeMinPct: number        // minimum edge to trade (1.5–6.0)
+  sentimentWeight: number   // LLM sentiment blend weight (0.05–0.30)
+  fatTailNu: number | null  // Student-t degrees of freedom (null = auto)
+  rationale: string         // Gemini's explanation
+  riskLevel: 'conservative' | 'normal' | 'aggressive'
+  computedAt: string
+  tradesSampled: number
+  brierScore: number
 }
 
 // ─── Performance ───────────────────────────────────────────────────────────

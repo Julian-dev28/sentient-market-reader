@@ -44,7 +44,14 @@ next-env.d.ts
 python-service/.checkpoints
 python-service/.cache
 python-service/__pycache__/
+python-service/venv*/
+python-service/timesfm/venv*/
+venv*/
+timesfm/
 **/__pycache__/
 *.pyc
 # Kalshi UI-uploaded credentials (never commit)
 .kalshi-credentials.json
+
+# Persistent trade log (local algo data, not for VCS)
+data/trade-log.json

@@ -14,98 +14,23 @@ import Anthropic from '@anthropic-ai/sdk'
 import OpenAI from 'openai'
 
 export type AIProvider = 'anthropic' | 'openai' | 'grok' | 'openrouter' | 'huggingface'
-export type RomaMode = 'blitz' | 'sharp' | 'keen' | 'smart'
 
-// ── ROMA Mode ────────────────────────────────────────────────────────────────
-// ROMA_MODE controls which model tier every agent uses across the pipeline:
-//
-//   blitz — grok-3-mini-fast; same weights as mini but on faster infra (~5–15s)
-//   sharp — grok-3-mini;      fastest non-premium model               (~10–20s)
-//   keen  — grok-3-fast;      balanced speed and quality              (~20–40s)
-//   smart — grok-3;           best quality within Grok 3 family       (~40–70s)
-//
-export const ROMA_MODE: RomaMode = (() => {
-  const m = process.env.ROMA_MODE ?? 'keen'
-  if (m === 'blitz' || m === 'sharp' || m === 'keen' || m === 'smart') return m
-  console.warn(`[llm-client] Unknown ROMA_MODE "${m}", falling back to "keen"`)
-  return 'keen'
-})()
-
-// ── Model mapping ────────────────────────────────────────────────────────────
-// All model IDs can be overridden via environment variables — see .env.local.
-//
-// Speed reference per provider (single call, p50):
-//
-// ANTHROPIC
-//   blitz: claude-haiku-4-5-20251001  ~2–5s   — blitz tier (haiku is already fastest)
-//   fast:  claude-haiku-4-5-20251001  ~2–5s   — sharp tier
-//   mid:   claude-haiku-4-5-20251001  ~2–5s   — keen tier
-//   smart: claude-sonnet-4-6          ~10–20s  — smart tier
-//
-// OPENAI
-//   blitz: gpt-4o-mini                ~3–8s   — blitz tier (mini is already fastest)
-//   fast:  gpt-4o-mini                ~3–8s   — sharp tier
-//   mid:   gpt-4o-mini                ~3–8s   — keen tier
-//   smart: gpt-4o                     ~10–20s  — smart tier
-//
-// GROK (xAI)
-//   blitz: grok-4-1-fast-non-reasoning  ~0.8s   — absolute fastest, grok-4.1 non-reasoning
-//   fast:  grok-3-mini-fast             ~9.8s   — sharp tier, grok-3 mini non-reasoning
-//   mid:   grok-3-mini                  ~10.6s  — keen tier, grok-3 mini reasoning
-//   smart: grok-3                       ~30–50s — smart tier
-//
-// For openrouter: set OPENROUTER_MODEL (smart), OPENROUTER_MID_MODEL (keen), OPENROUTER_FAST_MODEL (sharp/blitz).
-// For huggingface: set HUGGINGFACE_API_KEY + optionally HF_BASE_URL (default: router.huggingface.co/v1).
-//   blitz: Qwen2.5-1.5B-Instruct  ~2–5s   — 1.5B, practical minimum w/ reliable JSON
-//   fast:  Llama-3.2-3B-Instruct  ~3–8s   — sharp tier
-//   mid:   Llama-3.1-8B-Instruct  ~5–15s  — keen tier
-//   smart: Llama-3.3-70B-Instruct ~15–40s — smart tier
-export const PROVIDER_MODELS: Record<AIProvider, { blitz: string; fast: string; mid: string; smart: string; label: string }> = {
-  anthropic: {
-    blitz: process.env.ANTHROPIC_BLITZ_MODEL ?? 'claude-haiku-4-5-20251001',
-    fast:  process.env.ANTHROPIC_FAST_MODEL  ?? 'claude-haiku-4-5-20251001',
-    mid:   process.env.ANTHROPIC_MID_MODEL   ?? 'claude-haiku-4-5-20251001',
-    smart: process.env.ANTHROPIC_SMART_MODEL ?? 'claude-sonnet-4-6',
-    label: 'Claude',
-  },
-  openai: {
-    blitz: process.env.OPENAI_BLITZ_MODEL ?? 'gpt-4o-mini',
-    fast:  process.env.OPENAI_FAST_MODEL  ?? 'gpt-4o-mini',
-    mid:   process.env.OPENAI_MID_MODEL   ?? 'gpt-4o-mini',
-    smart: process.env.OPENAI_SMART_MODEL ?? 'gpt-4o',
-    label: 'GPT-4o',
-  },
-  grok: {
-    blitz: process.env.GROK_BLITZ_MODEL ?? 'grok-4-1-fast-non-reasoning',  // 0.8s/call — fastest
-    fast:  process.env.GROK_FAST_MODEL  ?? 'grok-3-mini-fast',              // 9.8s/call
-    mid:   process.env.GROK_MID_MODEL   ?? 'grok-3-mini',                   // 10.6s/call
-    smart: process.env.GROK_SMART_MODEL ?? 'grok-3',
-    label: 'Grok',
-  },
-  openrouter: {
-    blitz: process.env.OPENROUTER_BLITZ_MODEL ?? process.env.OPENROUTER_FAST_MODEL ?? process.env.OPENROUTER_MODEL ?? 'anthropic/claude-haiku-4-5-20251001',
-    fast:  process.env.OPENROUTER_FAST_MODEL  ?? process.env.OPENROUTER_MODEL ?? 'anthropic/claude-haiku-4-5-20251001',
-    mid:   process.env.OPENROUTER_MID_MODEL   ?? process.env.OPENROUTER_MODEL ?? 'anthropic/claude-haiku-4-5-20251001',
-    smart: process.env.OPENROUTER_MODEL       ?? 'anthropic/claude-sonnet-4-6',
-    label: 'OpenRouter',
-  },
-  huggingface: {
-    blitz: process.env.HF_BLITZ_MODEL ?? 'Qwen/Qwen2.5-1.5B-Instruct',   // 1.5B — fastest w/ reliable JSON
-    fast:  process.env.HF_FAST_MODEL  ?? 'meta-llama/Llama-3.2-3B-Instruct',
-    mid:   process.env.HF_MID_MODEL   ?? 'meta-llama/Llama-3.1-8B-Instruct',
-    smart: process.env.HF_SMART_MODEL ?? 'meta-llama/Llama-3.3-70B-Instruct',
-    label: 'HuggingFace',
-  },
+// ── Default model per provider ────────────────────────────────────────────────
+// Used when no model is selected via the UI picker (orModelOverride).
+// Set via env vars — see .env.local. OpenRouter IDs use provider/model format.
+export const PROVIDER_MODELS: Record<AIProvider, { model: string; label: string }> = {
+  anthropic:   { model: process.env.ANTHROPIC_MODEL   ?? 'claude-haiku-4-5-20251001', label: 'Claude' },
+  openai:      { model: process.env.OPENAI_MODEL      ?? 'gpt-4o-mini',               label: 'GPT' },
+  grok:        { model: process.env.GROK_MODEL        ?? 'grok-3-mini-fast',          label: 'Grok' },
+  openrouter:  { model: process.env.OPENROUTER_MODEL  ?? 'google/gemini-2.5-flash',   label: 'OpenRouter' },
+  huggingface: { model: process.env.HUGGINGFACE_MODEL ?? 'Qwen/Qwen2.5-7B-Instruct', label: 'HuggingFace' },
 }
 
-// Remaps to the correct tier based on ROMA_MODE:
-//   blitz → blitz (grok-3-mini-fast — same weights as mini, faster infra)
-//   sharp → fast  (grok-3-mini)
-//   keen  → mid   (grok-3-fast)
-//   smart → smart (grok-3)
-export function resolveModel(tier: 'fast' | 'smart', provider: AIProvider): string {
-  const effectiveTier = ROMA_MODE === 'blitz' ? 'blitz' : ROMA_MODE === 'sharp' ? 'fast' : ROMA_MODE === 'keen' ? 'mid' : 'smart'
-  return PROVIDER_MODELS[provider][effectiveTier]
+// Returns the default model for a provider.
+// The `tier` param is accepted for backwards-compatibility but ignored — model is
+// determined by the UI picker (orModelOverride) or the single env-var default.
+export function resolveModel(_tier: 'fast' | 'smart' | undefined, provider: AIProvider): string {
+  return PROVIDER_MODELS[provider].model
 }
 
 // ── Singleton clients ────────────────────────────────────────────────────────
@@ -243,7 +168,9 @@ export async function llmToolCall<T>(opts: {
     return JSON.parse(jsonMatch[0]) as T
   }
 
-  const res = await oaiCompatClient(provider as 'openai' | 'grok' | 'openrouter').chat.completions.create(
+  const client = oaiCompatClient(provider as 'openai' | 'grok' | 'openrouter')
+
+  const res = await client.chat.completions.create(
     {
       model,
       max_tokens: maxTokens,
@@ -254,6 +181,24 @@ export async function llmToolCall<T>(opts: {
     { signal: AbortSignal.timeout(timeout) },
   )
   const toolCall = res.choices[0]?.message?.tool_calls?.[0] as { function: { arguments: string } } | undefined
-  if (!toolCall) throw new Error(`No tool_call from ${provider}`)
-  return JSON.parse(toolCall.function.arguments) as T
+  if (toolCall) return JSON.parse(toolCall.function.arguments) as T
+
+  // Fallback 1: model returned JSON in content instead of tool_calls (common with reasoning models)
+  const raw = res.choices[0]?.message?.content ?? ''
+  const jsonMatch = raw.match(/\{[\s\S]*\}/)
+  if (jsonMatch) {
+    try { return JSON.parse(jsonMatch[0]) as T } catch { /* fall through */ }
+  }
+
+  // Fallback 2: plain JSON prompt — no tools at all, just ask for the JSON directly
+  const jsonPrompt = `${prompt}\n\nRespond with ONLY a valid JSON object matching this schema, no markdown:\n${JSON.stringify(fullSchema, null, 2)}`
+  const res2 = await client.chat.completions.create(
+    { model, max_tokens: Math.max(maxTokens, 512), messages: [{ role: 'user', content: jsonPrompt }] },
+    { signal: AbortSignal.timeout(timeout) },
+  )
+  const raw2 = res2.choices[0]?.message?.content ?? ''
+  const jsonMatch2 = raw2.match(/\{[\s\S]*\}/)
+  if (jsonMatch2) return JSON.parse(jsonMatch2[0]) as T
+
+  throw new Error(`No tool_call from ${provider}`)
 }
