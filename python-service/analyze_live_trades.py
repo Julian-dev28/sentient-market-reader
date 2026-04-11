@@ -22,7 +22,6 @@ import logging
 import os
 from datetime import datetime, timezone, timedelta
 from typing import Optional
-from collections import defaultdict
 
 import requests
 
@@ -81,7 +80,7 @@ def _get(url: str, retries: int = 4) -> dict:
                 time.sleep(2 ** attempt); continue
             r.raise_for_status()
             return r.json()
-        except Exception as e:
+        except Exception:
             if attempt < retries - 1:
                 time.sleep(1.5)
                 continue
@@ -243,7 +242,6 @@ def analyze_live_trades(fills: list, outcomes: dict, candles_15m: list, candles_
     Returns list of analyzed trade dicts.
     """
     # Index candles
-    c15_by_ts = {c['time']: c for c in candles_15m}
     c1_by_ts  = {c['time']: c['close'] for c in candles_1m}
     c15_sorted = sorted(candles_15m, key=lambda c: c['time'])
 
@@ -553,13 +551,13 @@ def main():
     print(f"  Trades where we paid MORE than Brownian (overpaying)   : {len(negative_disc)} ({len(negative_disc)/len(trades):.1%})")
     print(f"  Average discount across all trades: {avg_discount:+.1f}¢")
     print()
-    print(f"  Win rate at discount > 5¢: ", end='')
+    print("  Win rate at discount > 5¢: ", end='')
     hi_disc = [t for t in trades if t['discount_cents'] > 5]
     if hi_disc:
         print(f"{sum(1 for t in hi_disc if t['won'])/len(hi_disc):.1%} ({len(hi_disc)} trades)")
     else:
         print("no trades")
-    print(f"  Win rate at discount < 0¢: ", end='')
+    print("  Win rate at discount < 0¢: ", end='')
     lo_disc = [t for t in trades if t['discount_cents'] < 0]
     if lo_disc:
         print(f"{sum(1 for t in lo_disc if t['won'])/len(lo_disc):.1%} ({len(lo_disc)} trades)")

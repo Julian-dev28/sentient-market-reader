@@ -77,24 +77,24 @@ function Fact({ label, value, color, mono = true }: { label: string; value: stri
 }
 
 // ── Running indicator (minimal scan bar) ────────────────────────────────────
-function ScanLoader({ elapsed }: { elapsed: number }) {
+function ScanLoader({ elapsed, aiMode }: { elapsed: number; aiMode?: boolean }) {
   const sec = (elapsed / 1000).toFixed(1)
+  const scanColor = aiMode ? 'var(--blue)' : 'var(--green)'
+  const label     = aiMode ? 'GROK ANALYZING' : 'SCANNING MARKET'
   return (
     <div style={{ padding: '24px 0 20px' }}>
-      {/* Scan bar */}
       <div style={{ position: 'relative', height: 2, borderRadius: 1, background: 'var(--border)', overflow: 'hidden', marginBottom: 20 }}>
         <div style={{
           position: 'absolute', top: 0, left: 0, height: '100%', width: '40%',
-          background: 'linear-gradient(90deg, transparent, var(--green), transparent)',
+          background: `linear-gradient(90deg, transparent, ${scanColor}, transparent)`,
           animation: 'scanLine 1.2s ease-in-out infinite',
         }} />
       </div>
-      {/* Status */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span className="status-dot running" style={{ width: 6, height: 6 }} />
+          <span className="status-dot running" style={{ width: 6, height: 6, background: scanColor }} />
           <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 10, color: 'var(--text-muted)', letterSpacing: '0.06em' }}>
-            SCANNING MARKET
+            {label}
           </span>
         </div>
         <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 10, color: 'var(--text-muted)', opacity: 0.5 }}>{sec}s</span>
@@ -104,13 +104,22 @@ function ScanLoader({ elapsed }: { elapsed: number }) {
 }
 
 // ── Agent cards (post-run results) ──────────────────────────────────────────
-const AGENTS = [
+const AGENTS_QUANT = [
   { key: 'marketDiscovery' as const, label: 'Market Discovery', short: 'MARKET',    icon: '◎', desc: 'KXBTC15M scan',     color: 'var(--brown)',  rgb: '125,112,96',  bg: 'var(--brown-pale)', border: '#cbc6be' },
   { key: 'priceFeed'       as const, label: 'Price Feed',       short: 'PRICE',     icon: '◈', desc: 'Coinbase BTC feed', color: 'var(--green)',  rgb: '74,148,112',  bg: 'var(--green-pale)', border: '#9ecfb8' },
-  { key: 'sentiment'       as const, label: 'Sentiment',        short: 'SENTIMENT', icon: '◉', desc: 'roma-dspy',         color: 'var(--blue)',   rgb: '74,127,165',  bg: 'var(--blue-pale)',  border: '#a8cce0' },
-  { key: 'probability'     as const, label: 'Probability',      short: 'PROB',      icon: '⬟', desc: 'roma-dspy',         color: 'var(--amber)',  rgb: '160,120,64',  bg: 'var(--amber-pale)', border: '#d0b888' },
+  { key: 'sentiment'       as const, label: 'Sentiment',        short: 'SENTIMENT', icon: '◉', desc: 'quant signals',     color: 'var(--blue)',   rgb: '74,127,165',  bg: 'var(--blue-pale)',  border: '#a8cce0' },
+  { key: 'probability'     as const, label: 'Probability',      short: 'PROB',      icon: '⬟', desc: 'Brownian + d-gate', color: 'var(--amber)',  rgb: '160,120,64',  bg: 'var(--amber-pale)', border: '#d0b888' },
   { key: 'risk'            as const, label: 'Risk Manager',     short: 'RISK',      icon: '⬡', desc: 'Kelly + limits',    color: 'var(--brown)',  rgb: '125,112,96',  bg: 'var(--brown-pale)', border: '#cbc6be' },
-  { key: 'execution'       as const, label: 'Execution',        short: 'EXEC',      icon: '▶', desc: 'Paper order',       color: 'var(--green)',  rgb: '74,148,112',  bg: 'var(--green-pale)', border: '#9ecfb8' },
+  { key: 'execution'       as const, label: 'Execution',        short: 'EXEC',      icon: '▶', desc: 'paper order',       color: 'var(--green)',  rgb: '74,148,112',  bg: 'var(--green-pale)', border: '#9ecfb8' },
+]
+
+const AGENTS_AI = [
+  { key: 'marketDiscovery' as const, label: 'Market Discovery', short: 'MARKET',    icon: '◎', desc: 'KXBTC15M scan',     color: 'var(--brown)',  rgb: '125,112,96',  bg: 'var(--brown-pale)', border: '#cbc6be' },
+  { key: 'priceFeed'       as const, label: 'Price Feed',       short: 'PRICE',     icon: '◈', desc: 'Coinbase BTC feed', color: 'var(--green)',  rgb: '74,148,112',  bg: 'var(--green-pale)', border: '#9ecfb8' },
+  { key: 'sentiment'       as const, label: 'Sentiment',        short: 'SENTIMENT', icon: '◉', desc: 'Grok AI',           color: 'var(--blue)',   rgb: '74,127,165',  bg: 'var(--blue-pale)',  border: '#a8cce0' },
+  { key: 'probability'     as const, label: 'Probability',      short: 'PROB',      icon: '⬟', desc: 'Grok AI',           color: 'var(--amber)',  rgb: '160,120,64',  bg: 'var(--amber-pale)', border: '#d0b888' },
+  { key: 'risk'            as const, label: 'Risk Manager',     short: 'RISK',      icon: '⬡', desc: 'Grok sizing',       color: 'var(--brown)',  rgb: '125,112,96',  bg: 'var(--brown-pale)', border: '#cbc6be' },
+  { key: 'execution'       as const, label: 'Execution',        short: 'EXEC',      icon: '▶', desc: 'Grok order',        color: 'var(--green)',  rgb: '74,148,112',  bg: 'var(--green-pale)', border: '#9ecfb8' },
 ]
 
 function shortenProvider(raw: string): string {
@@ -297,7 +306,7 @@ function SentimentBody({ output, color }: { output: any; color: string }) {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function ProbabilityBody({ output, color }: { output: any; color: string }) {
+function ProbabilityBody({ output, color, aiMode }: { output: any; color: string; aiMode?: boolean }) {
   const pModel  = output.pModel  ?? 0
   const pMarket = output.pMarket ?? 0
   const edgePct = output.edgePct ?? 0
@@ -336,12 +345,14 @@ function ProbabilityBody({ output, color }: { output: any; color: string }) {
         </div>
       </div>
 
-      {/* ROMA vs Market bars */}
+      {/* Model vs Market bars */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10 }}>
-        {/* ROMA */}
+        {/* Model */}
         <div>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
-            <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>ROMA</span>
+            <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              {aiMode ? 'Grok' : 'Model'}
+            </span>
             <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 10, fontWeight: 800, color: recColor }}>{(pModel * 100).toFixed(1)}%</span>
           </div>
           <MiniBar value={pModel} color={recColor} bg="rgba(0,0,0,0.07)" height={7} delay={120} />
@@ -392,7 +403,7 @@ function ProbabilityBody({ output, color }: { output: any; color: string }) {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function RiskBody({ output, color }: { output: any; color: string }) {
+function RiskBody({ output, color, aiMode }: { output: any; color: string; aiMode?: boolean }) {
   const approved = output.approved
   const approvedColor = approved ? 'var(--green)' : 'var(--pink)'
   const approvedBg    = approved ? 'rgba(74,148,112,0.1)' : 'rgba(181,96,112,0.1)'
@@ -412,7 +423,9 @@ function RiskBody({ output, color }: { output: any; color: string }) {
             {approved ? 'APPROVED' : 'BLOCKED'}
           </div>
           <div style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 600 }}>
-            {approved ? 'Kelly sizing applied' : output.rejectionReason ?? 'Risk limit exceeded'}
+            {approved
+              ? (aiMode ? 'Grok AI sizing' : 'Kelly sizing applied')
+              : (output.rejectionReason?.slice(0, 60) ?? 'Risk limit exceeded')}
           </div>
         </div>
       </div>
@@ -541,11 +554,13 @@ function AgentCard({
   result,
   index,
   pipelineRunning,
+  aiMode,
 }: {
-  agent: typeof AGENTS[0]
+  agent: typeof AGENTS_QUANT[0]
   result?: PipelineState['agents'][keyof PipelineState['agents']]
   index: number
   pipelineRunning?: boolean
+  aiMode?: boolean
 }) {
   const status: AgentStatus = result?.status ?? 'idle'
   const done    = status === 'done'
@@ -602,11 +617,13 @@ function AgentCard({
             color: (done || skipped) ? 'var(--text-primary)' : 'var(--text-muted)',
             lineHeight: 1.2,
           }}>{agent.label}</div>
-          {done && result?.agentName && (
+          {done && (
             <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2, fontFamily: 'var(--font-geist-mono)', opacity: 0.7 }}>
-              {result.agentName.includes('roma-dspy')
+              {result?.agentName?.includes('roma-dspy')
                 ? shortenProvider(result.agentName.replace(/^.*?\(/, '').replace(/\)$/, ''))
-                : agent.desc}
+                : result?.agentName?.includes('Grok')
+                  ? agent.desc  // e.g. "Grok AI", "Grok sizing", "Grok order"
+                  : agent.desc}
             </div>
           )}
         </div>
@@ -622,8 +639,8 @@ function AgentCard({
           if (agent.key === 'marketDiscovery') return <MarketDiscoveryBody output={o} color={agent.color} />
           if (agent.key === 'priceFeed')       return <PriceFeedBody       output={o} color={agent.color} />
           if (agent.key === 'sentiment')       return <SentimentBody       output={o} color={agent.color} />
-          if (agent.key === 'probability')     return <ProbabilityBody     output={o} color={agent.color} />
-          if (agent.key === 'risk')            return <RiskBody            output={o} color={agent.color} />
+          if (agent.key === 'probability')     return <ProbabilityBody     output={o} color={agent.color} aiMode={aiMode} />
+          if (agent.key === 'risk')            return <RiskBody            output={o} color={agent.color} aiMode={aiMode} />
           if (agent.key === 'execution')       return <ExecutionBody       output={o} color={agent.color} />
           return null
         })() : pending ? (
@@ -653,10 +670,12 @@ export default function AgentPipeline({
   pipeline,
   isRunning,
   streamingAgents,
+  aiMode,
 }: {
   pipeline: PipelineState | null
   isRunning: boolean
   streamingAgents?: PartialPipelineAgents
+  aiMode?: boolean
 }) {
   const [elapsedMs, setElapsedMs]   = useState(0)
   const [dataAgeSec, setDataAgeSec] = useState(0)
@@ -685,8 +704,10 @@ export default function AgentPipeline({
       {/* Header */}
       <div style={{ marginBottom: isRunning ? 10 : 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: isRunning ? 8 : 0 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '-0.01em' }}>
-            Quant Pipeline
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '-0.01em' }}>
+            {aiMode
+              ? <><span style={{ color: 'var(--blue)', fontSize: 12 }}>✦</span> Grok AI Agent</>
+              : <><span style={{ color: 'var(--brown)', fontSize: 11 }}>∑</span> Quant Pipeline</>}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             {pipeline && <span className="pill pill-brown">cycle #{pipeline.cycleId}</span>}
@@ -706,15 +727,15 @@ export default function AgentPipeline({
 
       {/* Body */}
       {isRunning && !Object.keys(streamingAgents ?? {}).length ? (
-        <ScanLoader elapsed={elapsedMs} />
+        <ScanLoader elapsed={elapsedMs} aiMode={aiMode} />
       ) : (isRunning || pipeline) ? (
         <>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            {AGENTS.map((agent, i) => {
+            {(aiMode ? AGENTS_AI : AGENTS_QUANT).map((agent, i) => {
               const result = isRunning
                 ? streamingAgents?.[agent.key]
                 : pipeline?.agents[agent.key]
-              return <AgentCard key={agent.key} agent={agent} result={result} index={i} pipelineRunning={isRunning} />
+              return <AgentCard key={agent.key} agent={agent} result={result} index={i} pipelineRunning={isRunning} aiMode={aiMode} />
             })}
           </div>
 
