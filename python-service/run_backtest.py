@@ -34,7 +34,6 @@ import math
 import time
 import logging
 from datetime import datetime, timezone, timedelta
-from typing import Optional
 
 import requests
 
@@ -749,7 +748,6 @@ def simulate(records):
       - Slippage: linear book-sweep above SLIPPAGE_FREE_CTRS
       - No artificial miss-rate or regime-flip noise
     """
-    from datetime import timezone
 
     ET_OFFSET = timedelta(hours=5)   # UTC-5 (ET standard; close enough for daily reset)
 
@@ -830,7 +828,7 @@ def simulate(records):
         if contracts <= 0 or expected_profit < min_profit:
             r['contracts'] = 0; r['cost'] = 0.0; r['pnl'] = 0.0
             r['cash_after'] = round(cash, 2)
-            r['skipped_reason'] = (f'zero contracts' if contracts <= 0
+            r['skipped_reason'] = ('zero contracts' if contracts <= 0
                                    else f'profit ${expected_profit:.2f} < floor ${min_profit:.2f}')
             continue
 
@@ -959,7 +957,7 @@ def main():
     W = 102
     print("\n" + "="*W)
     print(f"  ROMA AGENT  ·  KXBTC15M  ·  {DAYS_BACK}-day Backtest  ·  ${STARTING_CASH:.2f} start  ·  {period}")
-    print(f"  Strategy: d∈[1.0,1.2] · entry 3–9min · Quarter-Kelly (0.25×) · maker fee 1.75%")
+    print("  Strategy: d∈[1.0,1.2] · entry 3–9min · Quarter-Kelly (0.25×) · maker fee 1.75%")
     print(f"  Risk mgr: minEdge {MIN_EDGE_PCT}% · maxEntry {MAX_ENTRY_PRICE_RM}¢ · giveback {MAX_GIVEBACK_MULT}×daily-loss · loss/day {MAX_DAILY_LOSS_FLOOR}$ floor · {MAX_TRADES_PER_DAY} trades/day")
     print(f"  Execution: {MAX_ORDER_DEPTH}-contract book depth · linear slippage above {SLIPPAGE_FREE_CTRS} contracts")
     print("="*W)

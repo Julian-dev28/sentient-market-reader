@@ -392,16 +392,6 @@ export default function Home() {
           </div>
         )}
 
-        {/* Live mode banner */}
-        <div style={{
-          marginBottom: 14, padding: '10px 16px', borderRadius: 12,
-          background: 'var(--green-pale)', border: '1px solid #164030',
-          fontSize: 12, color: 'var(--green-dark)',
-          display: 'flex', alignItems: 'center', gap: 8,
-        }}>
-          <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--green)', display: 'inline-block', boxShadow: '0 0 6px var(--green)', animation: 'pulse-live 1.5s ease-in-out infinite', flexShrink: 0 }} />
-          <span><strong>Live trading active</strong> — real Kalshi orders will be placed when the pipeline approves a trade. Risk controls: 3% min edge · $150 daily cap · 15% max drawdown.</span>
-        </div>
 
 
         <div style={{ display: 'grid', gridTemplateColumns: '310px 1fr 290px', gap: 14, alignItems: 'start' }}>

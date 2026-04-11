@@ -67,7 +67,7 @@ def _get(url: str, retries: int = 4) -> dict:
                 continue
             r.raise_for_status()
             return r.json()
-        except Exception as e:
+        except Exception:
             if attempt < retries - 1:
                 time.sleep(1.5 ** attempt)
                 continue
@@ -805,7 +805,7 @@ def main():
     all_d = [r['d_abs'] for r in ALL_RECORDS]
     all_gk = [r['gk_vol'] for r in ALL_RECORDS if r.get('gk_vol')]
     yes_results = [r for r in ALL_RECORDS if r['result'] == 'yes']
-    print(f"\n  Market stats:")
+    print("\n  Market stats:")
     print(f"    YES outcomes: {len(yes_results)}/{len(ALL_RECORDS)} ({len(yes_results)/len(ALL_RECORDS):.1%})")
     print(f"    Median |d| at 5min left: {sorted(all_d)[len(all_d)//2]:.3f}")
     print(f"    Median GK vol:           {sorted(all_gk)[len(all_gk)//2]:.5f}")
@@ -1023,16 +1023,16 @@ def main():
     log.info("Running walk-forward optimization...")
     wf = walk_forward_optimize(ALL_RECORDS, param_grid)
     if wf['best_params']:
-        print(f"\n  Best parameters (from train set):")
+        print("\n  Best parameters (from train set):")
         print(f"    d_threshold:     {wf['best_params']['d_threshold']}")
         print(f"    market_discount: {wf['best_params']['market_discount_cents']}¢")
         print(f"    min_edge:        {wf['best_params']['min_edge_pct']}%")
         tr = wf['train']
         te = wf['test']
-        print(f"\n  Train (70%) results:")
+        print("\n  Train (70%) results:")
         print(f"    Trades: {tr.get('trades',0)}, WR={tr.get('win_rate',0):.1%}, "
               f"Return={tr.get('total_return_pct',0):+.1f}%, Sharpe={tr.get('sharpe',0):.2f}, MaxDD={tr.get('max_dd',0):.1%}")
-        print(f"\n  Test (30%) out-of-sample results:")
+        print("\n  Test (30%) out-of-sample results:")
         print(f"    Trades: {te.get('trades',0)}, WR={te.get('win_rate',0):.1%}, "
               f"Return={te.get('total_return_pct',0):+.1f}%, Sharpe={te.get('sharpe',0):.2f}, MaxDD={te.get('max_dd',0):.1%}")
 
@@ -1044,7 +1044,7 @@ def main():
         test_records = sorted(ALL_RECORDS, key=lambda r: r['check_ts'])
         test_records = test_records[int(0.70 * len(test_records)):]
 
-        print(f"\n  Best filter (H1+H2+H3) on test set with optimized params:")
+        print("\n  Best filter (H1+H2+H3) on test set with optimized params:")
         h5_filter = lambda r: (
             (r.get('gk_vol') or 0) <= 0.003 and
             not r.get('jump', False) and
@@ -1059,11 +1059,11 @@ def main():
     print("\n" + "=" * 80)
     print("  FINAL SUMMARY")
     print("=" * 80)
-    print(f"\n  Baseline (existing run_backtest.py, 30d):")
-    print(f"    Win rate: 93.6%  |  Return: +2988%  |  Trades: 902/30d  |  MaxDD: 18.8%")
-    print(f"    ⚠ Edge calculation uses fabricated 8¢ Kalshi discount — NOT validated")
-    print(f"    ⚠ RSI(9)/MACD(5,10,3) in backtest vs RSI(14)/MACD(12,26,9) in live code")
-    print(f"\n  Key findings from empirical calibration:")
+    print("\n  Baseline (existing run_backtest.py, 30d):")
+    print("    Win rate: 93.6%  |  Return: +2988%  |  Trades: 902/30d  |  MaxDD: 18.8%")
+    print("    ⚠ Edge calculation uses fabricated 8¢ Kalshi discount — NOT validated")
+    print("    ⚠ RSI(9)/MACD(5,10,3) in backtest vs RSI(14)/MACD(12,26,9) in live code")
+    print("\n  Key findings from empirical calibration:")
     if gated:
         wr_gated = sum(1 for r in gated if r['won']) / len(gated)
         avg_brown = sum(r['p_brownian'] for r in gated) / len(gated)
@@ -1071,16 +1071,16 @@ def main():
         print(f"    Empirical win rate:    {wr_gated:.1%}")
         print(f"    Brownian prediction:   {avg_brown:.1%}")
         print(f"    Calibration lift:      {wr_gated - avg_brown:+.1%}")
-    print(f"\n  Recommended fixes (by impact):")
-    print(f"    1. Fix RSI to use period=14, MACD to use (12,26,9) in run_backtest.py")
-    print(f"    2. Apply vol regime filter: skip GK vol > 0.003 windows")
-    print(f"    3. Apply CUSUM jump filter: skip windows where jump is detected")
-    print(f"    4. Apply adverse momentum filter: skip when mom_score < -0.25")
-    print(f"    5. Use walk-forward optimized d_threshold instead of hardcoded 1.2")
-    print(f"\n  Next steps:")
-    print(f"    - Collect live Kalshi orderbook prices to validate 8¢ discount assumption")
-    print(f"    - Run 90-day backtest with fixed signals for more robust statistics")
-    print(f"    - Consider perp funding rate as regime signal (high positive funding = bull trend)")
+    print("\n  Recommended fixes (by impact):")
+    print("    1. Fix RSI to use period=14, MACD to use (12,26,9) in run_backtest.py")
+    print("    2. Apply vol regime filter: skip GK vol > 0.003 windows")
+    print("    3. Apply CUSUM jump filter: skip windows where jump is detected")
+    print("    4. Apply adverse momentum filter: skip when mom_score < -0.25")
+    print("    5. Use walk-forward optimized d_threshold instead of hardcoded 1.2")
+    print("\n  Next steps:")
+    print("    - Collect live Kalshi orderbook prices to validate 8¢ discount assumption")
+    print("    - Run 90-day backtest with fixed signals for more robust statistics")
+    print("    - Consider perp funding rate as regime signal (high positive funding = bull trend)")
     print()
 
 
