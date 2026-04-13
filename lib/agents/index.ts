@@ -1,12 +1,14 @@
 /**
- * ROMA Pipeline Orchestrator
+ * Agent Pipeline Orchestrator
  * ───────────────────────────
- * Runs all 6 ROMA pipeline agents in dependency order.
+ * Runs all pipeline agents in dependency order.
  * Every LLM step uses the provider set in AI_PROVIDER env var.
  *
  * Pipeline DAG:
  *   MarketDiscovery ──┐
- *   PriceFeed ─────────┼──► SentimentAgent (roma-dspy) ──► ProbabilityModelAgent (roma-dspy) ──► RiskManager ──► Execution
+ *   PriceFeed ─────────┼──► SentimentAgent ──► ProbabilityModelAgent ──► RiskManager ──► Execution
+ *
+ * AI mode (aiRisk=true): stages 3-6 replaced by a single Grok trading agent call.
  */
 
 import type {
@@ -30,7 +32,7 @@ import { runMarketDiscovery } from './market-discovery'
 import { runPriceFeed } from './price-feed'
 import { runSentiment } from './sentiment'
 import { runProbabilityModel } from './probability-model'
-import { runRiskManager, runRomaRiskManager } from './risk-manager'
+import { runRiskManager } from './risk-manager'
 import { runExecution } from './execution'
 import { runGrokTradingAgent } from './grok-trading-agent'
 
@@ -187,34 +189,19 @@ export async function runAgentPipeline(
         ? mdResult.output.activeMarket.yes_ask
         : mdResult.output.activeMarket.no_ask
       : 50
-  const riskResult = aiRisk
-    ? await runRomaRiskManager(
-        probResult.output.edgePct,
-        probResult.output.pModel,
-        probResult.output.recommendation,
-        limitPrice,
-        mdResult.output.minutesUntilExpiry,
-        sentResult.output.signals,
-        provider,
-        romaMode,
-        portfolioValue,
-        orModelOverride,
-        signal,
-        apiKeys,
-      )
-    : runRiskManager(
-        probResult.output.edgePct,
-        probResult.output.pModel,
-        probResult.output.recommendation,
-        limitPrice,
-        sentResult.output.score,
-        probResult.output.gkVol15m,
-        probResult.output.confidence,
-        portfolioValue,
-        mdResult.output.minutesUntilExpiry,
-        pfResult.output.distanceFromStrikePct,
-        probResult.output.volOfVol,
-      )
+  const riskResult = runRiskManager(
+    probResult.output.edgePct,
+    probResult.output.pModel,
+    probResult.output.recommendation,
+    limitPrice,
+    sentResult.output.score,
+    probResult.output.gkVol15m,
+    probResult.output.confidence,
+    portfolioValue,
+    mdResult.output.minutesUntilExpiry,
+    pfResult.output.distanceFromStrikePct,
+    probResult.output.volOfVol,
+  )
   emit?.('risk', riskResult)
 
   // ── Stage 6: Execution ─────────────────────────────────────────────────
