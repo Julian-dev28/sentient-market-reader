@@ -9,7 +9,7 @@ import { tryLockPipeline, releasePipelineLock } from '@/lib/pipeline-lock'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
-export const maxDuration = 300  // 5 min — blitz ROMA makes ~6 LLM calls per solve (~90-150s)
+export const maxDuration = 60   // 60s fits Vercel Hobby free plan; Grok blitz completes in ~15-30s
 
 /** Compute the current active KXBTC15M event_ticker using ET timezone
  *  Format: KXBTC15M-{YY}{MON}{DD}{HHMM} — date/time in US Eastern Time
