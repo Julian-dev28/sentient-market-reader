@@ -1133,9 +1133,14 @@ class ServerAgent extends EventEmitter {
   }
 }
 
-// Module-level singleton — persists for the lifetime of the Node.js process
-export const serverAgent = new ServerAgent()
-
-// Auto-restore agent state after server restart / Next.js HMR
-// Runs once after module load — gives Node a tick to finish wiring up routes first
-setImmediate(() => { serverAgent['restoreConfig']() })
+// Singleton pinned to globalThis — survives Next.js HMR and is shared across
+// all API routes that run in the same warm Vercel Node.js instance.
+// This ensures /api/agent/start, /api/agent/state, /api/agent/stream all
+// operate on the same agent object rather than independent fresh copies.
+const g = globalThis as typeof globalThis & { _serverAgent?: ServerAgent }
+if (!g._serverAgent) {
+  g._serverAgent = new ServerAgent()
+  // Auto-restore persisted config once on first init
+  setImmediate(() => { g._serverAgent!['restoreConfig']() })
+}
+export const serverAgent = g._serverAgent
