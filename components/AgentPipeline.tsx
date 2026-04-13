@@ -123,8 +123,7 @@ const AGENTS_AI = [
 ]
 
 function shortenProvider(raw: string): string {
-  const cleaned = raw.replace(/^roma-dspy\s*[·•]\s*/i, '')
-  return cleaned.split('+').map(p => {
+  return raw.split('+').map(p => {
     p = p.trim()
     if (p.startsWith('huggingface/')) {
       const model = p.replace('huggingface/', '').split('/').pop() ?? p
@@ -619,11 +618,7 @@ function AgentCard({
           }}>{agent.label}</div>
           {done && (
             <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2, fontFamily: 'var(--font-geist-mono)', opacity: 0.7 }}>
-              {result?.agentName?.includes('roma-dspy')
-                ? shortenProvider(result.agentName.replace(/^.*?\(/, '').replace(/\)$/, ''))
-                : result?.agentName?.includes('Grok')
-                  ? agent.desc  // e.g. "Grok AI", "Grok sizing", "Grok order"
-                  : agent.desc}
+              {agent.desc}
             </div>
           )}
         </div>
