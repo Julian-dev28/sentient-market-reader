@@ -169,7 +169,7 @@ export function usePipeline(
 
       // ── Real order: ONLY when Agent is active ──────────────────────────────
       if (autoTrade && liveMode && exec.action !== 'PASS' && exec.side && exec.limitPrice && exec.marketTicker) {
-        const contracts = Math.max(1, Math.floor(100 / (exec.limitPrice / 100)))
+        const contracts = Math.max(1, exec.contracts ?? Math.floor(100 / (exec.limitPrice / 100)))
         // Fetch fresh quote right before submitting — use current ask, not stale pipeline price
         let submitPrice = exec.limitPrice
         try {
