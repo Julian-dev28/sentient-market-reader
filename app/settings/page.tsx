@@ -23,7 +23,6 @@ interface ConfigData {
   aiProvider:        string | null
   romaMode:          string | null
   romaMaxDepth:      string | null
-  pythonRomaUrl:     string | null
   openrouterKeySet:  boolean
   openrouterKeyHint: string | null
   xaiKeySet:         boolean
@@ -584,8 +583,7 @@ export default function SettingsPage() {
               { label: 'LLM Provider',    key: 'AI_PROVIDER',         value: config.aiProvider,        desc: 'Primary reasoning provider for ROMA' },
               { label: 'ROMA Mode',       key: 'ROMA_MODE',           value: config.romaMode,          desc: 'Default analysis depth' },
               { label: 'Max Depth',       key: 'ROMA_MAX_DEPTH',      value: config.romaMaxDepth,      desc: 'Decomposition levels (1=fast, 2+=deeper)' },
-              { label: 'Python ROMA URL', key: 'PYTHON_ROMA_URL',     value: config.pythonRomaUrl,     desc: 'roma-dspy microservice endpoint' },
-              { label: 'OpenRouter Key',  key: 'OPENROUTER_API_KEY',  value: config.openrouterKeySet ? (config.openrouterKeyHint ?? '✓ set') : '✗ not set', desc: 'Required when AI_PROVIDER=openrouter' },
+{ label: 'OpenRouter Key',  key: 'OPENROUTER_API_KEY',  value: config.openrouterKeySet ? (config.openrouterKeyHint ?? '✓ set') : '✗ not set', desc: 'Required when AI_PROVIDER=openrouter' },
               { label: 'xAI / Grok Key', key: 'XAI_API_KEY',         value: config.xaiKeySet ? '✓ set' : '✗ not set',         desc: 'Required when AI_PROVIDER=grok' },
               { label: 'Anthropic Key',   key: 'ANTHROPIC_API_KEY',   value: config.anthropicKeySet ? '✓ set' : '✗ not set',   desc: 'Required when AI_PROVIDER=anthropic' },
               { label: 'Kalshi API Key',  key: 'KALSHI_API_KEY',      value: config.kalshiApiKey ?? '✗ not set',               desc: 'Kalshi key ID (env var fallback)' },
