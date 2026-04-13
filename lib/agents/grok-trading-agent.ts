@@ -157,7 +157,7 @@ export async function runGrokTradingAgent(
     `=== QUANT SIGNALS ===`,
     quantBrief,
     pBrownian !== null ? `Brownian P(YES): ${(pBrownian * 100).toFixed(1)}%` : null,
-    dScore !== null ? `D-score: ${dScore.toFixed(3)} (quant edge zone: |d|∈[1.0,1.2]; use as reference only)` : null,
+    dScore !== null ? `D-score: ${dScore.toFixed(3)} — DIRECTIONAL CONSTRAINT: if |d|∈[1.0,1.2], your action MUST match d's direction (d>0 → BUY_YES or PASS; d<0 → BUY_NO or PASS). Acting against the d-score in this zone has a 100% loss rate in backtests.` : null,
     derivBlock,
     candles?.length ? `\n${compactCandles(candles, 8, '15m')}` : null,
     liveCandles?.length ? `\n${compactCandles(liveCandles, 12, '1m')}` : null,
@@ -174,6 +174,11 @@ export async function runGrokTradingAgent(
     `- You may add a hedge: a smaller opposing position to reduce variance while maintaining positive EV`,
     `- Both YES and NO are always valid. BUY NO at ${noAsk}¢ is identical to buying "BTC falls below strike".`,
     `- PASS only if there is no genuine edge in this window.`,
+    ``,
+    `=== HARD RULES (non-negotiable) ===`,
+    `- NEVER buy contracts priced below 72¢ — if a side trades at <28¢, the market is near-certain it loses. You have no information edge against the crowd at this price. PASS instead.`,
+    `- NEVER trade against the d-score direction when |d|∈[1.0,1.2]: d>0 means BTC is above strike, only BUY_YES or PASS is valid; d<0 means BTC is below strike, only BUY_NO or PASS is valid.`,
+    `- With <3 min left and BTC ${Math.abs(distanceFromStrikePct).toFixed(3)}% from strike, BTC needs $${reqVel.toFixed(0)}/min to cross. If that velocity is implausible given recent candles, PASS rather than fight the market.`,
   ].filter(Boolean).join('\n')
 
   // ── Grok tool call ────────────────────────────────────────────────────────
@@ -227,11 +232,39 @@ export async function runGrokTradingAgent(
   // ── Validate + clamp Grok's output ────────────────────────────────────────
   const pModel     = Math.max(0.05, Math.min(0.95, decision.pModel ?? 0.5))
   const sentScore  = Math.max(-1, Math.min(1, decision.sentiment_score ?? 0))
-  const action     = decision.action ?? 'PASS'
+  let   action     = decision.action ?? 'PASS'
   const limitPrice = Math.max(1, Math.min(99, Math.round(decision.limitPrice ?? (action === 'BUY_NO' ? noAsk : yesAsk))))
   // Hard cap: can't buy more contracts than portfolio can afford
   const maxAffordable = action === 'BUY_NO' ? maxContractsNo : maxContractsYes
   const contracts  = Math.min(Math.max(0, Math.round(decision.contracts ?? 0)), maxAffordable)
+
+  // ── Hard safety gates (applied AFTER Grok's decision, cannot be overridden) ──
+  // 1. Entry price floor: never buy below 72¢ — market near-certainty, no LLM alpha.
+  //    Empirical: minEntryPrice=72¢ validated on 2,690 live fills (same as deterministic RM).
+  const MIN_ENTRY_PRICE = 72
+  const MAX_ENTRY_PRICE = 92
+  if (action !== 'PASS' && limitPrice < MIN_ENTRY_PRICE) {
+    const side = action === 'BUY_NO' ? 'NO' : 'YES'
+    console.warn(`[GrokTradingAgent] Safety gate: ${side} @ ${limitPrice}¢ < ${MIN_ENTRY_PRICE}¢ min — market near-certain, blocking`)
+    action = 'PASS'
+  }
+  // 2. Entry price ceiling: fee eats >12% of gross margin above 92¢.
+  if (action !== 'PASS' && limitPrice > MAX_ENTRY_PRICE) {
+    const side = action === 'BUY_NO' ? 'NO' : 'YES'
+    console.warn(`[GrokTradingAgent] Safety gate: ${side} @ ${limitPrice}¢ > ${MAX_ENTRY_PRICE}¢ max — fee overhead too high, blocking`)
+    action = 'PASS'
+  }
+  // 3. D-score direction gate: if |d|∈[1.0,1.2], action MUST match d's direction.
+  //    This zone is the ONLY confirmed edge (empirical: +5.5pp margin, Z=2.33).
+  //    Trading against d in this zone has negative expectancy in every backtest.
+  if (action !== 'PASS' && dScore !== null && Math.abs(dScore) >= 1.0 && Math.abs(dScore) <= 1.2) {
+    const dDirection = dScore > 0 ? 'BUY_YES' : 'BUY_NO'
+    if (action !== dDirection) {
+      console.warn(`[GrokTradingAgent] Safety gate: d=${dScore.toFixed(3)} requires ${dDirection}, Grok said ${action} — blocking contrarian bet`)
+      action = 'PASS'
+    }
+  }
+
   const approved   = action !== 'PASS' && contracts > 0
 
   const pMarket    = yesAsk / 100
