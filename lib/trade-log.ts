@@ -6,13 +6,17 @@ import { writeFileSync, readFileSync, mkdirSync, existsSync } from 'fs'
 import { join } from 'path'
 import type { AgentTrade } from './types'
 
-const LOG_PATH    = join(process.cwd(), 'data', 'trade-log.json')
-const CONFIG_PATH = join(process.cwd(), 'data', 'agent-config.json')
+// On Vercel, process.cwd() is read-only — use /tmp which is always writable.
+// Locally, use data/ so files survive across dev restarts.
+const DATA_DIR    = process.env.VERCEL ? '/tmp' : join(process.cwd(), 'data')
+const LOG_PATH    = join(DATA_DIR, 'trade-log.json')
+const CONFIG_PATH = join(DATA_DIR, 'agent-config.json')
 
 export interface PersistedAgentConfig {
   active:      boolean
   allowance:   number
   kellyMode:   boolean
+  aiMode:      boolean
   bankroll:    number
   kellyPct:    number
   orModel?:    string
@@ -31,8 +35,7 @@ export function loadAgentConfig(): PersistedAgentConfig | null {
 }
 
 function ensureDir() {
-  const dir = join(process.cwd(), 'data')
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+  if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true })
 }
 
 export function readTradeLog(): AgentTrade[] {

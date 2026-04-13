@@ -23,6 +23,14 @@ function loadCreds(): { apiKey: string; privateKey: string } | null {
   // 2. Env vars fallback
   const apiKey = process.env.KALSHI_API_KEY
   if (!apiKey) return null
+
+  // Support PEM content directly in env var (required for Vercel/serverless)
+  const privateKeyEnv = process.env.KALSHI_PRIVATE_KEY
+  if (privateKeyEnv) {
+    return { apiKey, privateKey: privateKeyEnv.replace(/\\n/g, '\n') }
+  }
+
+  // Fall back to file path (local dev only)
   const keyPath = process.env.KALSHI_PRIVATE_KEY_PATH
   if (!keyPath) return null
   const resolved = keyPath.startsWith('/') ? keyPath : join(process.cwd(), keyPath.replace(/^\.\//, ''))

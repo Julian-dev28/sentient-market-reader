@@ -21,6 +21,7 @@ const DEFAULT_STATE: AgentStateSnapshot = {
   initialAllowance: 100,
   bankroll:         0,
   kellyMode:        false,
+  aiMode:           false,
   isRunning:        false,
   windowKey:        null,
   windowBetPlaced:  false,
@@ -100,12 +101,12 @@ export function useAgentEngine(orModel?: string) {
 
   // ── Actions (call server API routes) ────────────────────────────────────
 
-  const startAgent = useCallback(async (allowance: number, kellyMode?: boolean, bankroll?: number, kellyPct?: number): Promise<{ ok: boolean; error?: string }> => {
+  const startAgent = useCallback(async (allowance: number, kellyMode?: boolean, bankroll?: number, kellyPct?: number, aiMode?: boolean): Promise<{ ok: boolean; error?: string }> => {
     try {
       const res = await fetch('/api/agent/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ allowance, orModel, kellyMode, bankroll, kellyPct }),
+        body: JSON.stringify({ allowance, orModel, kellyMode, bankroll, kellyPct, aiMode }),
       })
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
@@ -164,6 +165,7 @@ export function useAgentEngine(orModel?: string) {
     gkVol:            serverState.gkVol,
     bankroll:         serverState.bankroll,
     kellyMode:        serverState.kellyMode,
+    aiMode:           serverState.aiMode,
     agentPhase:       serverState.agentPhase,
     windowCloseAt:    serverState.windowCloseAt,
     startAgent,

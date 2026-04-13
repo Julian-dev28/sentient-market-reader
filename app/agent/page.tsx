@@ -26,11 +26,11 @@ export default function AgentPage() {
       .catch(() => {})
   }, [])
 
-  async function handleStart(kellyMode: boolean, bankroll: number, kellyPct: number) {
+  async function handleStart(kellyMode: boolean, bankroll: number, kellyPct: number, aiMode: boolean) {
     setStartError(null)
     const frac = kellyPct / 100
     const allowance = kellyMode ? Math.max(1, bankroll * frac) : Math.max(1, engine.allowance)
-    const result = await engine.startAgent(allowance, kellyMode, kellyMode ? bankroll : undefined, kellyMode ? frac : undefined)
+    const result = await engine.startAgent(allowance, kellyMode, kellyMode ? bankroll : undefined, kellyMode ? frac : undefined, aiMode)
     if (!result.ok) setStartError(result.error ?? 'Start failed')
   }
 
@@ -81,6 +81,7 @@ export default function AgentPage() {
               bankroll={engine.kellyMode ? engine.bankroll : (kalshiBalance || engine.bankroll)}
               defaultBankroll={kalshiBalance}
               kellyMode={engine.kellyMode}
+              aiMode={engine.aiMode ?? false}
               nextCycleIn={engine.nextCycleIn}
               windowKey={engine.windowKey}
               windowBetPlaced={engine.windowBetPlaced}

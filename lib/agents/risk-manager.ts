@@ -3,21 +3,25 @@ import type { AIProvider } from '../llm-client'
 import { llmToolCall } from '../llm-client'
 import { callPythonRoma, formatRomaTrace } from '../roma/python-client'
 
-// In-memory session risk state — resets automatically at midnight ET
-const sessionState = {
-  dailyPnl: 0,
-  tradeCount: 0,
-  peakPnl: 0,
+// In-memory session risk state — pinned to globalThis so it survives across
+// Next.js hot-reloads locally AND persists on warm Vercel serverless instances.
+// Cold starts reset to zero (unavoidable on serverless), but warm reuse retains state.
+const g = globalThis as typeof globalThis & {
+  _riskSessionState?: { dailyPnl: number; tradeCount: number; peakPnl: number }
+  _riskLastResetDate?: string
 }
-let lastResetDate = new Date().toDateString()
+if (!g._riskSessionState) g._riskSessionState = { dailyPnl: 0, tradeCount: 0, peakPnl: 0 }
+if (!g._riskLastResetDate) g._riskLastResetDate = new Date().toDateString()
 
-function checkDailyReset(): void {
+const sessionState = g._riskSessionState
+
+export function checkDailyReset(): void {
   const today = new Date().toDateString()
-  if (today !== lastResetDate) {
-    lastResetDate = today
-    sessionState.dailyPnl  = 0
-    sessionState.tradeCount = 0
-    sessionState.peakPnl   = 0
+  if (today !== g._riskLastResetDate) {
+    g._riskLastResetDate = today
+    g._riskSessionState!.dailyPnl  = 0
+    g._riskSessionState!.tradeCount = 0
+    g._riskSessionState!.peakPnl   = 0
   }
 }
 

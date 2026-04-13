@@ -21,14 +21,15 @@ interface AgentAllowancePanelProps {
   gkVol?: number
   agentPhase?: AgentPhase
   windowCloseAt?: number
-  onStart: (kellyMode: boolean, bankroll: number, kellyPct: number) => void
+  aiMode: boolean
+  onStart: (kellyMode: boolean, bankroll: number, kellyPct: number, aiMode: boolean) => void
   onStop: () => void
   onSetAllowance: (amount: number, kellyMode?: boolean, bankroll?: number) => void
   onRunCycle: () => void
 }
 
 export default function AgentAllowancePanel({
-  active, isRunning, allowance, bankroll, defaultBankroll, kellyMode, nextCycleIn,
+  active, isRunning, allowance, bankroll, defaultBankroll, kellyMode, aiMode, nextCycleIn,
   windowKey, windowBetPlaced, orderError, currentD: serverD, confidenceThreshold = 1.0,
   lastPollAt, strikePrice, gkVol = 0.002, agentPhase = 'idle', windowCloseAt = 0,
   onStart, onStop, onSetAllowance,
@@ -36,6 +37,7 @@ export default function AgentAllowancePanel({
   const [editingBankroll, setEditingBankroll] = useState(false)
   const [editVal, setEditVal] = useState('')
   const [localKelly, setLocalKelly] = useState(kellyMode)
+  const [localAiMode, setLocalAiMode] = useState(aiMode)
   const [localBankroll, setLocalBankroll] = useState(defaultBankroll || bankroll || 400)
   const [kellyPct, setKellyPct] = useState(20)
   const [liveD, setLiveD] = useState<number | undefined>(serverD)
@@ -43,6 +45,7 @@ export default function AgentAllowancePanel({
 
   useEffect(() => { setLiveD(serverD); liveDRef.current = serverD }, [serverD])
   useEffect(() => { setLocalKelly(kellyMode) }, [kellyMode])
+  useEffect(() => { setLocalAiMode(aiMode) }, [aiMode])
   // Prefer defaultBankroll (live Kalshi balance) over server bankroll for initial display
   useEffect(() => {
     if (defaultBankroll && defaultBankroll > 0 && !active) setLocalBankroll(defaultBankroll)
@@ -114,27 +117,47 @@ export default function AgentAllowancePanel({
               KELLY
             </span>
           )}
+          {(active ? aiMode : localAiMode) && (
+            <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 4, background: 'rgba(100,60,180,0.12)', border: '1px solid #7c4dcc', color: '#7c4dcc' }}>
+              GROK AI
+            </span>
+          )}
         </div>
         {active && isRunning && (
           <span style={{ animation: 'spin-slow 1s linear infinite', display: 'inline-block', color: 'var(--blue)', fontSize: 11 }}>◌</span>
         )}
       </div>
 
-      {/* Kelly / Fixed toggle — only show when not active */}
+      {/* Kelly / Fixed + AI Mode toggles — only show when not active */}
       {!active && (
-        <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
-          {(['Fixed', 'Kelly'] as const).map(mode => (
-            <button key={mode} onClick={() => setLocalKelly(mode === 'Kelly')} style={{
-              flex: 1, padding: '5px 0', borderRadius: 7, cursor: 'pointer', fontSize: 11, fontWeight: 700,
-              border: `1px solid ${(mode === 'Kelly') === localKelly ? 'var(--brown)' : 'var(--border)'}`,
-              background: (mode === 'Kelly') === localKelly ? 'var(--brown-pale)' : 'transparent',
-              color: (mode === 'Kelly') === localKelly ? 'var(--brown-dark)' : 'var(--text-muted)',
-              transition: 'all 0.15s',
-            }}>
-              {mode}
-            </button>
-          ))}
-        </div>
+        <>
+          <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+            {(['Fixed', 'Kelly'] as const).map(mode => (
+              <button key={mode} onClick={() => setLocalKelly(mode === 'Kelly')} style={{
+                flex: 1, padding: '5px 0', borderRadius: 7, cursor: 'pointer', fontSize: 11, fontWeight: 700,
+                border: `1px solid ${(mode === 'Kelly') === localKelly ? 'var(--brown)' : 'var(--border)'}`,
+                background: (mode === 'Kelly') === localKelly ? 'var(--brown-pale)' : 'transparent',
+                color: (mode === 'Kelly') === localKelly ? 'var(--brown-dark)' : 'var(--text-muted)',
+                transition: 'all 0.15s',
+              }}>
+                {mode}
+              </button>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+            {([['ROMA', false], ['Grok AI', true]] as const).map(([label, val]) => (
+              <button key={label} onClick={() => setLocalAiMode(val)} style={{
+                flex: 1, padding: '5px 0', borderRadius: 7, cursor: 'pointer', fontSize: 11, fontWeight: 700,
+                border: `1px solid ${localAiMode === val ? (val ? '#7c4dcc' : 'var(--blue)') : 'var(--border)'}`,
+                background: localAiMode === val ? (val ? 'rgba(100,60,180,0.12)' : 'rgba(74,127,165,0.12)') : 'transparent',
+                color: localAiMode === val ? (val ? '#7c4dcc' : 'var(--blue-dark)') : 'var(--text-muted)',
+                transition: 'all 0.15s',
+              }}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </>
       )}
 
       {/* Bet config */}
@@ -344,7 +367,7 @@ export default function AgentAllowancePanel({
       {/* Start / Stop */}
       {!active ? (
         <button
-          onClick={() => onStart(localKelly, localBankroll, kellyPct)}
+          onClick={() => onStart(localKelly, localBankroll, kellyPct, localAiMode)}
           style={{
             width: '100%', padding: '12px 0', borderRadius: 9, cursor: 'pointer',
             border: '1px solid var(--green)',
@@ -355,7 +378,7 @@ export default function AgentAllowancePanel({
           onMouseEnter={e => { e.currentTarget.style.opacity = '0.88' }}
           onMouseLeave={e => { e.currentTarget.style.opacity = '1' }}
         >
-          ▶ Start Agent {localKelly ? `· Kelly ${kellyPct}%` : '· Fixed'}
+          ▶ Start Agent {localKelly ? `· Kelly ${kellyPct}%` : '· Fixed'} {localAiMode ? '· Grok AI' : '· ROMA'}
         </button>
       ) : (
         <button onClick={onStop} style={{

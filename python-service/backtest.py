@@ -70,7 +70,6 @@ def _student_t_cdf(t_val: float, nu: float) -> float:
         # Simple approximation for small nu
         x = nu / (nu + t_val * t_val)
         # Use beta function approximation
-        import math
         ib = _inc_beta(x, nu / 2.0, 0.5)
         return (1.0 - ib / 2.0) if t_val >= 0 else (ib / 2.0)
 
@@ -494,10 +493,9 @@ def _process_market(mkt: dict, candles_oldest_first: list[dict], p_llm: Optional
     # candles_left = fraction of a 15-min candle remaining at entry
     candles_left = minutes_left / 15.0  # = 0.333 at 5 min left
 
-    # Three independent quant estimates of P(YES)
+    # Two independent quant estimates of P(YES) used for blending
     p_brownian = brownian_p_yes(current_price, floor_strike, gk_vol, candles_left)
     p_ln       = lognormal_p_yes(current_price, floor_strike, gk_vol, candles_left)
-    p_fat      = fat_tail_p_yes(current_price, floor_strike, gk_vol, candles_left, nu=4.0)
 
     # ── Pure Brownian reachability model (mirrors new live probability-model.ts) ─
     # P(YES) = Φ(d) where d = log(S/K) / (σ√T)

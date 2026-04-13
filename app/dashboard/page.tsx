@@ -65,7 +65,7 @@ export default function Home() {
     ? parseFloat(liveMarket.yes_sub_title.replace(/[^0-9.]/g, ''))
     : 0) || liveMarket?.floor_strike || 0
 
-  const { pipeline, history, streamingAgents, isRunning, serverLocked, nextCycleIn, error, runCycle, stopCycle } = usePipeline(
+  const { pipeline, history, streamingAgents, isRunning, serverLocked, nextCycleIn, error, runCycle, stopCycle, monitorDeltaPct } = usePipeline(
     true, botActive, aiRisk, undefined, undefined,
     analysisMode === 'ai' ? (orModel || 'grok-3') : undefined,  // only pass model in AI mode
     liveBTCPrice || undefined, liveStrikePrice || undefined,
@@ -392,16 +392,6 @@ export default function Home() {
           </div>
         )}
 
-        {/* Live mode banner */}
-        <div style={{
-          marginBottom: 14, padding: '10px 16px', borderRadius: 12,
-          background: 'var(--green-pale)', border: '1px solid #164030',
-          fontSize: 12, color: 'var(--green-dark)',
-          display: 'flex', alignItems: 'center', gap: 8,
-        }}>
-          <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--green)', display: 'inline-block', boxShadow: '0 0 6px var(--green)', animation: 'pulse-live 1.5s ease-in-out infinite', flexShrink: 0 }} />
-          <span><strong>Live trading active</strong> — real Kalshi orders will be placed when the pipeline approves a trade. Risk controls: 3% min edge · $150 daily cap · 15% max drawdown.</span>
-        </div>
 
 
         <div style={{ display: 'grid', gridTemplateColumns: '310px 1fr 290px', gap: 14, alignItems: 'start' }}>
@@ -620,6 +610,25 @@ export default function Home() {
                       </div>
                     )
                   })()}
+
+                  {/* AI monitor badge — shows live Δ from last run vs 0.20% trigger */}
+                  {aiRisk && botActive && !isRunning && monitorDeltaPct !== null && (
+                    <div style={{
+                      display: 'flex', alignItems: 'center', gap: 4,
+                      padding: '5px 9px', borderRadius: 8,
+                      background: 'rgba(74,127,165,0.07)', border: '1px solid #8ab4cf',
+                    }} title="Grok re-runs when BTC moves ≥0.20% from last run">
+                      <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--blue)', display: 'inline-block', animation: 'pulse-live 2s ease-in-out infinite', flexShrink: 0 }} />
+                      <span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Δ</span>
+                      <span style={{
+                        fontFamily: 'var(--font-geist-mono)', fontSize: 12, fontWeight: 700,
+                        color: Math.abs(monitorDeltaPct) >= 0.15 ? 'var(--amber)' : 'var(--blue)',
+                      }}>
+                        {monitorDeltaPct >= 0 ? '+' : ''}{monitorDeltaPct.toFixed(2)}%
+                      </span>
+                      <span style={{ fontSize: 9, color: 'var(--text-muted)', opacity: 0.6 }}>/0.20%</span>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -646,7 +655,7 @@ export default function Home() {
             </div>
 
             <PriceChart priceHistory={priceHistory} strikePrice={strikePrice} currentPrice={currentBTCPrice} />
-            <AgentPipeline pipeline={pipeline} isRunning={isRunning} streamingAgents={streamingAgents} />
+            <AgentPipeline pipeline={pipeline} isRunning={isRunning} streamingAgents={streamingAgents} aiMode={analysisMode === 'ai'} />
             <PipelineHistory history={history} />
 
           </div>
