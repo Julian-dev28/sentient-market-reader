@@ -25,6 +25,7 @@ export interface AgentStateSnapshot {
   initialAllowance: number
   bankroll:         number
   kellyMode:        boolean
+  aiMode:           boolean
   isRunning:        boolean
   windowKey:        string | null
   windowBetPlaced:  boolean

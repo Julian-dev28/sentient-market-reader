@@ -16,6 +16,7 @@ export interface PersistedAgentConfig {
   active:      boolean
   allowance:   number
   kellyMode:   boolean
+  aiMode:      boolean
   bankroll:    number
   kellyPct:    number
   orModel?:    string

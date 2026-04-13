@@ -156,6 +156,7 @@ class ServerAgent extends EventEmitter {
   private pipelineError  = false
   private kellyMode      = false
   private kellyPct       = 0.25   // fraction e.g. 0.25 = 25%
+  private aiMode         = false   // true = unified Grok agent; false = ROMA multi-step
   private bankroll       = 0
   private orModel:     string | undefined
   private agentPhase: AgentPhase = 'idle'
@@ -169,6 +170,7 @@ class ServerAgent extends EventEmitter {
       active:    this.active,
       allowance: this.allowance,
       kellyMode: this.kellyMode,
+      aiMode:    this.aiMode,
       bankroll:  this.bankroll,
       kellyPct:  this.kellyPct,
       orModel:   this.orModel,
@@ -179,22 +181,22 @@ class ServerAgent extends EventEmitter {
     // Try KV first (cross-instance persistence), fall back to local file
     agentStore.loadState().then(kvState => {
       if (kvState?.active) {
-        console.log(`[ServerAgent] Restoring from KV — active=${kvState.active} allowance=$${kvState.allowance}`)
+        console.log(`[ServerAgent] Restoring from KV — active=${kvState.active} allowance=$${kvState.allowance} aiMode=${kvState.aiMode}`)
         // Restore trades from KV too
         agentStore.loadTrades().then(kvTrades => {
           if (kvTrades.length) this.trades = kvTrades
         }).catch(() => {})
-        this.start(kvState.allowance, undefined, kvState.kellyMode, kvState.bankroll, undefined)
+        this.start(kvState.allowance, undefined, kvState.kellyMode, kvState.bankroll, undefined, kvState.aiMode ?? false)
         return
       }
       // KV empty — try local file
       const cfg = loadAgentConfig()
       if (!cfg?.active) return
-      console.log(`[ServerAgent] Restoring from disk — kellyMode=${cfg.kellyMode} bankroll=$${cfg.bankroll} allowance=$${cfg.allowance}`)
-      this.start(cfg.allowance, cfg.orModel, cfg.kellyMode, cfg.bankroll, cfg.kellyPct)
+      console.log(`[ServerAgent] Restoring from disk — kellyMode=${cfg.kellyMode} aiMode=${cfg.aiMode} bankroll=$${cfg.bankroll} allowance=$${cfg.allowance}`)
+      this.start(cfg.allowance, cfg.orModel, cfg.kellyMode, cfg.bankroll, cfg.kellyPct, cfg.aiMode)
     }).catch(() => {
       const cfg = loadAgentConfig()
-      if (cfg?.active) this.start(cfg.allowance, cfg.orModel, cfg.kellyMode, cfg.bankroll, cfg.kellyPct)
+      if (cfg?.active) this.start(cfg.allowance, cfg.orModel, cfg.kellyMode, cfg.bankroll, cfg.kellyPct, cfg.aiMode)
     })
   }
 
@@ -210,11 +212,12 @@ class ServerAgent extends EventEmitter {
 
   // ── Public API ─────────────────────────────────────────────────────────────
 
-  start(allowance: number, orModel?: string, kellyMode = false, bankroll?: number, kellyPct = 0.25) {
+  start(allowance: number, orModel?: string, kellyMode = false, bankroll?: number, kellyPct = 0.25, aiMode = false) {
     if (this.active) {
       this.allowance  = allowance
       this.orModel    = orModel
       this.kellyMode  = kellyMode
+      this.aiMode     = aiMode
       this.kellyPct   = kellyPct
       if (kellyMode && bankroll && bankroll > 0) {
         this.bankroll  = bankroll
@@ -224,6 +227,7 @@ class ServerAgent extends EventEmitter {
       return
     }
     this.kellyMode        = kellyMode
+    this.aiMode           = aiMode
     this.kellyPct         = kellyPct
     this.bankroll         = kellyMode && bankroll && bankroll > 0 ? bankroll : 0
     this.allowance        = kellyMode ? Math.max(1, this.bankroll * kellyPct) : allowance
@@ -238,7 +242,7 @@ class ServerAgent extends EventEmitter {
     this.scheduleNextRun()
     this.saveConfig()
     this.pushState(true)  // force KV flush on start
-    console.log(`[ServerAgent] Started — ${kellyMode ? `Kelly ${kellyPct*100}% bankroll=$${this.bankroll} allowance=$${this.allowance.toFixed(2)}` : `fixed allowance=$${allowance}`}`)
+    console.log(`[ServerAgent] Started — ${kellyMode ? `Kelly ${kellyPct*100}% bankroll=$${this.bankroll} allowance=$${this.allowance.toFixed(2)}` : `fixed allowance=$${allowance}`} | mode=${aiMode ? 'Grok AI' : 'ROMA'}`)
   }
 
   stop() {
@@ -285,6 +289,7 @@ class ServerAgent extends EventEmitter {
       initialAllowance: this.initialAllowance,
       bankroll:         this.bankroll,
       kellyMode:        this.kellyMode,
+      aiMode:           this.aiMode,
       isRunning:        this.isRunning,
       windowKey:        this.windowKey,
       windowBetPlaced:  this.windowBetPlaced,
@@ -828,7 +833,7 @@ class ServerAgent extends EventEmitter {
       let result: PipelineState
       try {
         result = await runAgentPipeline(
-          markets, quote, orderbook, provider, romaMode, false,
+          markets, quote, orderbook, provider, romaMode, this.aiMode,
           undefined, undefined,
           candles, liveCandles, derivatives, this.orModel, undefined,
           (key, agentResult) => this.emit('agent', { key, result: agentResult }),
