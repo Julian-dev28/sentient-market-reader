@@ -25,6 +25,7 @@ import type { AIProvider } from './llm-client'
 import { CONFIDENCE_THRESHOLD, KELLY_FRACTION } from './agent-shared'
 import { recordTradeResult } from './agents/risk-manager'
 import type { AgentStateSnapshot, AgentPhase } from './agent-shared'
+import { agentStore } from './agent-store'
 
 export { CONFIDENCE_THRESHOLD }
 export type { AgentStateSnapshot }
@@ -159,6 +160,7 @@ class ServerAgent extends EventEmitter {
   private orModel:     string | undefined
   private agentPhase: AgentPhase = 'idle'
   private windowCloseAt = 0
+  private lastKvSave    = 0   // timestamp of last KV write — throttle to 1/10s
 
   // ── Config persistence ─────────────────────────────────────────────────────
 
@@ -174,10 +176,36 @@ class ServerAgent extends EventEmitter {
   }
 
   private restoreConfig() {
-    const cfg = loadAgentConfig()
-    if (!cfg?.active) return
-    console.log(`[ServerAgent] Restoring from disk — kellyMode=${cfg.kellyMode} bankroll=$${cfg.bankroll} allowance=$${cfg.allowance}`)
-    this.start(cfg.allowance, cfg.orModel, cfg.kellyMode, cfg.bankroll, cfg.kellyPct)
+    // Try KV first (cross-instance persistence), fall back to local file
+    agentStore.loadState().then(kvState => {
+      if (kvState?.active) {
+        console.log(`[ServerAgent] Restoring from KV — active=${kvState.active} allowance=$${kvState.allowance}`)
+        // Restore trades from KV too
+        agentStore.loadTrades().then(kvTrades => {
+          if (kvTrades.length) this.trades = kvTrades
+        }).catch(() => {})
+        this.start(kvState.allowance, undefined, kvState.kellyMode, kvState.bankroll, undefined)
+        return
+      }
+      // KV empty — try local file
+      const cfg = loadAgentConfig()
+      if (!cfg?.active) return
+      console.log(`[ServerAgent] Restoring from disk — kellyMode=${cfg.kellyMode} bankroll=$${cfg.bankroll} allowance=$${cfg.allowance}`)
+      this.start(cfg.allowance, cfg.orModel, cfg.kellyMode, cfg.bankroll, cfg.kellyPct)
+    }).catch(() => {
+      const cfg = loadAgentConfig()
+      if (cfg?.active) this.start(cfg.allowance, cfg.orModel, cfg.kellyMode, cfg.bankroll, cfg.kellyPct)
+    })
+  }
+
+  // Save state to KV — throttled to at most once per 10s to avoid rate limits.
+  // Force=true bypasses throttle for critical events (start, stop, trade placed).
+  private flushToKV(force = false) {
+    const now = Date.now()
+    if (!force && now - this.lastKvSave < 10_000) return
+    this.lastKvSave = now
+    agentStore.saveState(this.getState()).catch(() => {})
+    agentStore.saveTrades(this.trades).catch(() => {})
   }
 
   // ── Public API ─────────────────────────────────────────────────────────────
@@ -209,7 +237,7 @@ class ServerAgent extends EventEmitter {
     this.startSettlementLoop()
     this.scheduleNextRun()
     this.saveConfig()
-    this.pushState()
+    this.pushState(true)  // force KV flush on start
     console.log(`[ServerAgent] Started — ${kellyMode ? `Kelly ${kellyPct*100}% bankroll=$${this.bankroll} allowance=$${this.allowance.toFixed(2)}` : `fixed allowance=$${allowance}`}`)
   }
 
@@ -219,7 +247,7 @@ class ServerAgent extends EventEmitter {
     this.agentPhase = 'idle'
     this.clearTimers()
     this.saveConfig()
-    this.pushState()
+    this.pushState(true)  // force KV flush on stop
     console.log('[ServerAgent] Stopped')
   }
 
@@ -277,8 +305,10 @@ class ServerAgent extends EventEmitter {
 
   // ── Private helpers ────────────────────────────────────────────────────────
 
-  private pushState() {
-    this.emit('state', this.getState())
+  private pushState(forceKv = false) {
+    const state = this.getState()
+    this.emit('state', state)
+    this.flushToKV(forceKv)
   }
 
   private startCountdown() {
@@ -539,7 +569,7 @@ class ServerAgent extends EventEmitter {
       }
 
       console.log(`[ServerAgent] ✓ Fast-path filled — ${side.toUpperCase()} ${actualFilled}× @ ${askPrice}¢ on ${evTicker}`)
-      this.pushState()
+      this.pushState(true)  // force KV flush on trade
 
       // Place limit-sell at 99¢ to lock in profit when contract resolves
       limitSellOrder({ ticker: market.ticker, side, count: actualFilled })
