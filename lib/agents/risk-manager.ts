@@ -33,7 +33,7 @@ const RISK_PARAMS = {
   // Dollar-based giveback = more appropriate for asymmetric binary strategies.
   maxGivebackMult:   1.5,  // stop if daily P&L drops > 1.5× maxDailyLoss from session peak
   maxTradesPerDay:  48,    // caps at one per 15-min window
-  minEdgePct:        6,    // % minimum edge — calibrated to 2,690-trade live analysis + 787-trade backtest
+  minEdgePct:        5,    // % minimum edge — lowered 6→5 to allow trend-boosted bets (pModel = market+7pp → ~6% edge)
   minMinutesLeft:    3,    // skip if < 3 min left (too late to size)
   maxMinutesLeft:    9,    // live fills: 9-12min window is 69.5% wr (signal not settled); 3-9min is 95.7% wr
   minDistancePct:   0.02,  // skip near-strike noise (|dist| < 0.02% → ~50/50)
@@ -102,7 +102,7 @@ export function runRiskManager(
 
   if (recommendation === 'NO_TRADE') {
     approved = false
-    rejectionReason = `d-score outside edge zone [1.0, 1.2] — no alpha (live fills: only |d|∈[1.0,1.2] has +5.5pp margin)`
+    rejectionReason = `Quant model: no trade signal — d-score outside edge zone or insufficient model confidence`
   } else if (BLOCKED_UTC_HOURS.has(utcHour)) {
     approved = false
     rejectionReason = `Blocked UTC hour ${utcHour}:00 — empirically bad session (live data: -40 to -57pp margin at d∈[1.0,1.2])`

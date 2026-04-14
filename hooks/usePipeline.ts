@@ -170,56 +170,50 @@ export function usePipeline(
       // ── Real order: ONLY when Agent is active ──────────────────────────────
       if (autoTrade && liveMode && exec.action !== 'PASS' && exec.side && exec.limitPrice && exec.marketTicker) {
         const contracts = Math.max(1, exec.contracts ?? Math.floor(100 / (exec.limitPrice / 100)))
-        // Fetch fresh quote right before submitting — use current ask, not stale pipeline price
-        let submitPrice = exec.limitPrice
+        // Fetch fresh quote right before submitting.
+        // Use the pipeline's limit price as our cap — the IOC order will fill at the
+        // current best-ask if it's ≤ our cap; otherwise it cancels immediately.
+        // This prevents chasing a market that moved dramatically during the 90s pipeline run.
+        let freshAsk: number | null = null
         try {
           const quoteRes = await fetch(`/api/market-quote/${encodeURIComponent(exec.marketTicker)}`)
           if (quoteRes.ok) {
             const quoteData = await quoteRes.json()
-            const freshAsk = exec.side === 'yes'
+            const raw = exec.side === 'yes'
               ? quoteData?.market?.yes_ask
               : quoteData?.market?.no_ask
-            if (typeof freshAsk === 'number' && freshAsk > 0) submitPrice = freshAsk
+            if (typeof raw === 'number' && raw > 0) freshAsk = raw
           }
         } catch { /* fall back to pipeline price */ }
-        const yesPrice = exec.side === 'yes' ? submitPrice : (100 - submitPrice)
-        const clientOrderId = `bot-${data.cycleId}-${Date.now()}`
-        try {
-          const orderRes = await fetch('/api/place-order', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              ticker: exec.marketTicker,
-              side: exec.side,
-              count: contracts,
-              yesPrice,
-              clientOrderId,
-            }),
-          })
-          const orderData = orderRes.ok ? await orderRes.json() : null
-          const orderId = orderData?.order?.order_id ?? orderData?.orderId ?? null
 
-          // Poll every 2s for up to 30s — cancel if still resting after timeout
-          if (orderId) {
-            let filled = false
-            for (let i = 0; i < 15; i++) {
-              await new Promise(r => setTimeout(r, 2000))
-              try {
-                const statusRes = await fetch(`/api/orders/${orderId}`)
-                if (statusRes.ok) {
-                  const s = await statusRes.json()
-                  const status = s?.order?.status ?? s?.status
-                  if (status === 'filled' || status === 'closed') { filled = true; break }
-                  if (status === 'canceled' || status === 'expired') break
-                }
-              } catch { break }
+        // Skip if fresh market has moved more than 20¢ from analyzed price (edge gone)
+        if (freshAsk !== null && Math.abs(freshAsk - exec.limitPrice) > 20) {
+          console.warn(`[bot] Price moved too much (was ${exec.limitPrice}¢, now ${freshAsk}¢ for ${exec.side}) — skipping order`)
+        } else {
+          // Use fresh ask if available and within range; otherwise fall back to pipeline price.
+          // Use side-specific price fields directly (noPrice for NO, yesPrice for YES)
+          // so Kalshi sets the correct limit without the 100-P complement conversion.
+          const submitPrice = freshAsk ?? exec.limitPrice
+          const clientOrderId = `bot-${data.cycleId}-${Date.now()}`
+          const orderBody = exec.side === 'yes'
+            ? { ticker: exec.marketTicker, side: 'yes', count: contracts, yesPrice: submitPrice, ioc: true, clientOrderId }
+            : { ticker: exec.marketTicker, side: 'no',  count: contracts, noPrice: submitPrice, ioc: true, clientOrderId }
+          try {
+            const orderRes = await fetch('/api/place-order', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(orderBody),
+            })
+            if (!orderRes.ok) {
+              const errData = await orderRes.json().catch(() => ({}))
+              console.error(`[bot] Order failed ${orderRes.status}:`, errData)
+            } else {
+              const orderData = await orderRes.json()
+              console.log(`[bot] Order placed: ${exec.side.toUpperCase()} ${contracts}× @ ${submitPrice}¢ IOC — id=${orderData?.order?.order_id ?? 'n/a'}`)
             }
-            // Cancel unfilled resting order after 30s
-            if (!filled) {
-              fetch(`/api/cancel-order/${orderId}`, { method: 'DELETE' }).catch(() => {})
-            }
-          }
-        } catch { /* live order failed — continue */ }
+            // IOC orders either fill immediately or cancel — no polling loop needed
+          } catch (e) { console.error('[bot] Order exception:', e) }
+        }
       }
 
     } catch (err) {

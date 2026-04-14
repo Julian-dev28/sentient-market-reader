@@ -100,14 +100,29 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'No active KXBTC15M markets found' }, { status: 503 })
     }
 
-    // Fetch BTC price — Coinbase primary, Binance fallback
+    // Fetch BTC price — Coinbase Exchange ticker primary (matches Kalshi's index price),
+    // then Coinbase consumer spot, then Binance fallback.
+    // Kalshi KXBTC15M settles against the Coinbase Exchange price — using the exchange
+    // ticker eliminates the ~$20-30 gap vs the consumer API which aggregates/rounds.
     let quote: BTCQuote | null = null
 
-    const cbRes = await fetch('https://api.coinbase.com/v2/prices/BTC-USD/spot', { cache: 'no-store' }).catch(() => null)
-    if (cbRes?.ok) {
-      const cb = await cbRes.json()
-      const price = parseFloat(cb?.data?.amount)
-      if (price > 0) quote = { price, percent_change_1h: 0, percent_change_24h: 0, volume_24h: 0, market_cap: price * 19_700_000, last_updated: new Date().toISOString() }
+    const cbExRes = await fetch('https://api.exchange.coinbase.com/products/BTC-USD/ticker', { cache: 'no-store' }).catch(() => null)
+    if (cbExRes?.ok) {
+      const cb = await cbExRes.json()
+      const price = parseFloat(cb?.price)
+      if (price > 0) {
+        quote = { price, percent_change_1h: 0, percent_change_24h: 0, volume_24h: 0, market_cap: price * 19_700_000, last_updated: new Date().toISOString() }
+        console.log(`[pipeline] BTC spot: $${price.toLocaleString()} (Coinbase Exchange ticker)`)
+      }
+    }
+
+    if (!quote) {
+      const cbRes = await fetch('https://api.coinbase.com/v2/prices/BTC-USD/spot', { cache: 'no-store' }).catch(() => null)
+      if (cbRes?.ok) {
+        const cb = await cbRes.json()
+        const price = parseFloat(cb?.data?.amount)
+        if (price > 0) quote = { price, percent_change_1h: 0, percent_change_24h: 0, volume_24h: 0, market_cap: price * 19_700_000, last_updated: new Date().toISOString() }
+      }
     }
 
     if (!quote) {

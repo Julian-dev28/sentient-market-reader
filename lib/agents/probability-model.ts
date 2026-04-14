@@ -151,8 +151,22 @@ export async function runProbabilityModel(
     }
   }
 
+  // ── Multi-timeframe trend alignment check ────────────────────────────────────
+  // When BOTH the 4h macro trend AND 1h intraday trend agree with BTC's current
+  // position relative to the strike, we have a macro momentum signal that can
+  // override the d-gate. This lets the algo bet on direction when trends are clear,
+  // even if d-score is outside the pure quant edge zone.
+  const _aboveForTrend = distanceFromStrikePct >= 0
+  const _t4h = quant.trend4h?.direction
+  const _t1h = quant.trend1h?.direction
+  const trendAligned = (
+    _t4h && _t1h && _t4h !== 'flat' && _t1h !== 'flat' && _t4h === _t1h &&
+    (_aboveForTrend ? _t4h === 'bullish' : _t4h === 'bearish')
+  )
+
   // ── Quant-only: apply d-gate (AI mode falls through here only on Grok error) ──
-  if (dAbs !== null && (dAbs < D_MIN_THRESHOLD || dAbs > D_MAX_THRESHOLD)) {
+  // TREND OVERRIDE: skip d-gate when both macro timeframes confirm BTC's direction.
+  if (dAbs !== null && (dAbs < D_MIN_THRESHOLD || dAbs > D_MAX_THRESHOLD) && !trendAligned) {
     const reason = dAbs < D_MIN_THRESHOLD
       ? `|d|=${dAbs.toFixed(3)} < ${D_MIN_THRESHOLD} — Kalshi correctly prices near-strike; no alpha`
       : `|d|=${dAbs.toFixed(3)} > ${D_MAX_THRESHOLD} — BTC only ${(Math.abs(distanceFromStrikePct)).toFixed(3)}% from strike with ${minutesUntilExpiry.toFixed(1)}min left; Brownian model overstates edge, Kalshi prices fat-tail reversal risk`
@@ -228,6 +242,21 @@ export async function runProbabilityModel(
   if (aboveStrike && pModel < 0.5) pModel = 1 - pModel   // flip to YES
   if (!aboveStrike && pModel > 0.5) pModel = 1 - pModel  // flip to NO
   pModel = Math.max(0.05, Math.min(0.95, pModel))
+
+  // ── Trend alignment premium ──────────────────────────────────────────────────
+  // When both 4h + 1h macro trends confirm direction AND the d-gate was bypassed,
+  // lift pModel to at least market-implied probability + 7pp so the trade shows
+  // positive edge through the risk manager. This reflects the momentum signal:
+  // the market is pricing this correctly and the trend adds extra confidence.
+  if (trendAligned && dAbs !== null && (dAbs < D_MIN_THRESHOLD || dAbs > D_MAX_THRESHOLD)) {
+    const marketSideProb = aboveStrike ? pMarket : (1 - noAsk)
+    const TREND_PREMIUM = 0.07   // 7pp — just clears the 6% minEdgePct gate
+    const boosted = Math.min(0.92, marketSideProb + TREND_PREMIUM)
+    if (boosted > pModel) {
+      console.log(`[probability] Trend override: 4h=${_t4h} 1h=${_t1h} → pModel ${(pModel * 100).toFixed(1)}% → ${(boosted * 100).toFixed(1)}% (market=${(marketSideProb * 100).toFixed(0)}¢ +7pp)`)
+      pModel = boosted
+    }
+  }
 
   // ── NO MOMENTUM/REGIME ADJUSTMENTS ──────────────────────────────────────────
   // Empirical analysis of 787 backtest trades shows RSI/MACD/Hurst/VoV adjustments
