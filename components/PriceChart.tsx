@@ -13,7 +13,7 @@ function CustomTooltip({ active, payload }: { active?: boolean; payload?: Toolti
     <div style={{
       background: 'rgba(255,255,255,0.96)', border: '1px solid var(--border)', borderRadius: 10,
       padding: '8px 12px', fontSize: 11, fontFamily: 'var(--font-geist-mono)',
-      boxShadow: '0 4px 20px rgba(155,118,83,0.12)',
+      boxShadow: '0 4px 20px rgba(74,124,142,0.12)',
       backdropFilter: 'blur(8px)',
     }}>
       <div style={{ color: 'var(--text-muted)', marginBottom: 2 }}>{time}</div>
@@ -37,8 +37,8 @@ export default function PriceChart({ priceHistory, strikePrice, currentPrice }: 
   const above = strikePrice > 0 && currentPrice > strikePrice
 
   const lineColor = above ? 'var(--green)' : 'var(--pink)'
-  const gradStop1 = above ? '#3a9e72' : '#d4738e'
-  const gradStop2 = above ? '#8dc49a' : '#e8a0b4'
+  const gradStop1 = above ? '#2D9E6B' : '#C0453E'
+  const gradStop2 = above ? '#2D9E6B' : '#C0453E'
 
   return (
     <div className="card" style={{ padding: '18px 14px 10px 14px' }}>
@@ -59,7 +59,7 @@ export default function PriceChart({ priceHistory, strikePrice, currentPrice }: 
           <div style={{
             padding: '6px 12px', borderRadius: 9,
             background: above ? 'var(--green-pale)' : 'var(--pink-pale)',
-            border: `1px solid ${above ? '#b8dfc3' : '#e0b0bf'}`,
+            border: `1px solid ${above ? 'rgba(45,158,107,0.25)' : 'rgba(192,69,62,0.25)'}`,
             transition: 'all 0.5s ease',
           }}>
             <div style={{

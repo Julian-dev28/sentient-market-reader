@@ -56,14 +56,16 @@ export async function runSentiment(
   romaMode?: string,
   providers?: AIProvider[],  // multi-provider parallel solve
   prevContext?: string,
-  candles?: OHLCVCandle[],       // last 12 completed 15-min candles
-  liveCandles?: OHLCVCandle[],   // last 16 × 1-min candles (live window)
+  candles?: OHLCVCandle[],         // last 12 completed 15-min candles
+  liveCandles?: OHLCVCandle[],     // last 16 × 1-min candles (live window)
   derivatives?: DerivativesSignal, // perp funding rate + basis
   extractionProvider?: AIProvider, // provider for JSON extraction step (defaults to provider)
   orModelOverride?: string,        // override OpenRouter model ID for this call
   signal?: AbortSignal,            // abort signal from the HTTP request
   apiKeys?: Record<string, string>, // per-provider API keys from user settings
   aiMode?: boolean,                // true = Grok-powered sentiment instead of pure quant
+  candles1h?: OHLCVCandle[],       // 1h candles — intraday trend
+  candles4h?: OHLCVCandle[],       // 4h candles — macro trend
 ): Promise<AgentResult<SentimentOutput>> {
   const start = Date.now()
 
@@ -96,7 +98,7 @@ export async function runSentiment(
   const reqVel  = minutesUntilExpiry > 0 ? distUSD / minutesUntilExpiry : 0
 
   // Pre-compute quantitative signals
-  const quant      = computeQuantSignals(candles, liveCandles, orderbook, quote.price, strikePrice, distanceFromStrikePct, minutesUntilExpiry)
+  const quant      = computeQuantSignals(candles, liveCandles, orderbook, quote.price, strikePrice, distanceFromStrikePct, minutesUntilExpiry, candles1h, candles4h)
   const quantBrief = formatQuantBrief(quant, quote.price, distanceFromStrikePct, minutesUntilExpiry)
 
   const context = [

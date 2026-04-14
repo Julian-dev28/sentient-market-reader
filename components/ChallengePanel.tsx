@@ -41,9 +41,9 @@ function MeterBar({ value, max, color, glow }: { value: number; max: number; col
         position: 'relative',
       }}>
         <div style={{
-          position: 'absolute', inset: 0,
-          background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.35) 50%, transparent 100%)',
-          backgroundSize: '200% 100%', animation: 'shimmer 2.2s ease infinite', borderRadius: 5,
+          position: 'absolute', inset: 0, borderRadius: 5,
+          background: 'rgba(255,255,255,0.5)',
+          animation: 'shimmer 2.2s ease infinite',
         }} />
       </div>
     </div>
@@ -243,7 +243,7 @@ export default function ChallengePanel({ stats, trades }: { stats: PerformanceSt
               <div key={r.label} style={{
                 display: 'flex', alignItems: 'center', gap: 7,
                 padding: '4px 8px', borderRadius: 6,
-                background: isCurrent ? 'rgba(74,127,165,0.08)' : 'transparent',
+                background: isCurrent ? 'rgba(58,114,168,0.08)' : 'transparent',
                 opacity: reached ? 1 : 0.4,
               }}>
                 <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 12, flexShrink: 0, color: reached ? r.color : 'var(--text-muted)' }}>{r.icon}</span>

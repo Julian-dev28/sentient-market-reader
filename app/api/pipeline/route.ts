@@ -96,10 +96,11 @@ export async function GET(req: NextRequest) {
     }
 
     if (!markets.length) {
+      console.warn('[pipeline] No active KXBTC15M markets found for', eventTicker)
       return NextResponse.json({ error: 'No active KXBTC15M markets found' }, { status: 503 })
     }
 
-    // Fetch BTC price — Coinbase primary, fallbacks
+    // Fetch BTC price — Coinbase primary, Binance fallback
     let quote: BTCQuote | null = null
 
     const cbRes = await fetch('https://api.coinbase.com/v2/prices/BTC-USD/spot', { cache: 'no-store' }).catch(() => null)
@@ -110,33 +111,16 @@ export async function GET(req: NextRequest) {
     }
 
     if (!quote) {
-      const cgRes = await fetch(
-        'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd&include_24hr_change=true',
-        { cache: 'no-store' }
-      ).catch(() => null)
-      if (cgRes?.ok) {
-        const data = await cgRes.json()
-        const price = data?.bitcoin?.usd
-        if (price > 0) quote = { price, percent_change_1h: 0, percent_change_24h: data?.bitcoin?.usd_24h_change ?? 0, volume_24h: 0, market_cap: price * 19_700_000, last_updated: new Date().toISOString() }
+      const bnRes = await fetch('https://data-api.binance.vision/api/v3/ticker/24hr?symbol=BTCUSDT', { cache: 'no-store' }).catch(() => null)
+      if (bnRes?.ok) {
+        const data = await bnRes.json()
+        const price = parseFloat(data?.lastPrice)
+        if (price > 0) quote = { price, percent_change_1h: 0, percent_change_24h: parseFloat(data?.priceChangePercent ?? '0'), volume_24h: 0, market_cap: price * 19_700_000, last_updated: new Date().toISOString() }
       }
     }
 
     if (!quote) {
-      const jupKey = process.env.JUPITER_API_KEY
-      if (jupKey) {
-        const jupRes = await fetch(
-          'https://api.jup.ag/price/v2?ids=9n4nbM75f5Ui33ZbPYXn59EwSgE8CGsHtAeTH5YFeJ9E',
-          { headers: { Authorization: `Bearer ${jupKey}`, Accept: 'application/json' }, cache: 'no-store' }
-        ).catch(() => null)
-        if (jupRes?.ok) {
-          const data = await jupRes.json()
-          const price = parseFloat(data?.data?.['9n4nbM75f5Ui33ZbPYXn59EwSgE8CGsHtAeTH5YFeJ9E']?.price)
-          if (price > 0) quote = { price, percent_change_1h: 0, percent_change_24h: 0, volume_24h: 0, market_cap: price * 19_700_000, last_updated: new Date().toISOString() }
-        }
-      }
-    }
-
-    if (!quote) {
+      console.warn('[pipeline] BTC price unavailable — all sources failed')
       return NextResponse.json({ error: 'BTC price unavailable — all sources failed' }, { status: 503 })
     }
 
@@ -147,10 +131,27 @@ export async function GET(req: NextRequest) {
       portfolioValueCents = (balResult.data.balance ?? 0) + (balResult.data.portfolio_value ?? 0)
     }
 
-    // Fetch candles, live candles, derivatives, orderbook in parallel
-    const [candleRes, liveCandleRes, bybitRes, obRes] = await Promise.all([
-      fetch('https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=900&limit=13', { cache: 'no-store' }).catch(() => null),
-      fetch('https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=60&limit=16', { cache: 'no-store' }).catch(() => null),
+    // Binance klines → OHLCVCandle (Coinbase format: [time_s, low, high, open, close, vol])
+    // Binance returns: [openTime_ms, open, high, low, close, volume, ...]  oldest-first
+    function binanceToCoinbase(k: (string | number)[]): OHLCVCandle {
+      return [
+        Number(k[0]) / 1000,
+        parseFloat(k[3] as string),  // low
+        parseFloat(k[2] as string),  // high
+        parseFloat(k[1] as string),  // open
+        parseFloat(k[4] as string),  // close
+        parseFloat(k[5] as string),  // volume
+      ] as OHLCVCandle
+    }
+
+    // Fetch candles, live candles, 1h/4h trend candles, derivatives, orderbook — all in parallel
+    const [candleRes, liveCandleRes, bnCandleRes, bnLiveCandleRes, bn1hRes, bn4hRes, bybitRes, obRes] = await Promise.all([
+      fetch('https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=900&limit=14', { cache: 'no-store' }).catch(() => null),
+      fetch('https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=60&limit=17', { cache: 'no-store' }).catch(() => null),
+      fetch('https://data-api.binance.vision/api/v3/klines?symbol=BTCUSDT&interval=15m&limit=14', { cache: 'no-store' }).catch(() => null),
+      fetch('https://data-api.binance.vision/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=17', { cache: 'no-store' }).catch(() => null),
+      fetch('https://data-api.binance.vision/api/v3/klines?symbol=BTCUSDT&interval=1h&limit=13', { cache: 'no-store' }).catch(() => null),
+      fetch('https://data-api.binance.vision/api/v3/klines?symbol=BTCUSDT&interval=4h&limit=8', { cache: 'no-store' }).catch(() => null),
       fetch('https://api.bybit.com/v5/market/tickers?category=linear&symbol=BTCUSDT', { cache: 'no-store' }).catch(() => null),
       fetch(`https://api.elections.kalshi.com/trade-api/v2/markets/${markets[0].ticker}/orderbook`, {
         headers: { ...buildKalshiHeaders('GET', `/trade-api/v2/markets/${markets[0].ticker}/orderbook`), Accept: 'application/json' },
@@ -162,12 +163,33 @@ export async function GET(req: NextRequest) {
     if (candleRes?.ok) {
       const raw = await candleRes.json()
       candles = Array.isArray(raw) ? raw.slice(1, 13) as OHLCVCandle[] : []
+    } else if (bnCandleRes?.ok) {
+      const raw = await bnCandleRes.json() as (string | number)[][]
+      // Binance oldest-first; drop last (incomplete) candle, convert, reverse to newest-first
+      candles = raw.slice(0, -1).map(binanceToCoinbase).reverse().slice(0, 12)
     }
 
     let liveCandles: OHLCVCandle[] = []
     if (liveCandleRes?.ok) {
       const raw = await liveCandleRes.json()
       liveCandles = Array.isArray(raw) ? raw as OHLCVCandle[] : []
+    } else if (bnLiveCandleRes?.ok) {
+      const raw = await bnLiveCandleRes.json() as (string | number)[][]
+      liveCandles = raw.slice(0, -1).map(binanceToCoinbase).reverse().slice(0, 16)
+    }
+
+    // 1h candles — intraday trend (last 12 complete hours)
+    let candles1h: OHLCVCandle[] = []
+    if (bn1hRes?.ok) {
+      const raw = await bn1hRes.json() as (string | number)[][]
+      candles1h = raw.slice(0, -1).map(binanceToCoinbase).reverse().slice(0, 12)
+    }
+
+    // 4h candles — macro trend (last 7 complete 4h bars = ~28h)
+    let candles4h: OHLCVCandle[] = []
+    if (bn4hRes?.ok) {
+      const raw = await bn4hRes.json() as (string | number)[][]
+      candles4h = raw.slice(0, -1).map(binanceToCoinbase).reverse().slice(0, 7)
     }
 
     let derivatives: DerivativesSignal | null = null
@@ -230,6 +252,8 @@ export async function GET(req: NextRequest) {
             (key, result) => enc('agent', { key, result }),
             portfolioValueCents,
             apiKeys,
+            candles1h,
+            candles4h,
           )
           enc('done', pipeline)
         } catch (err) {

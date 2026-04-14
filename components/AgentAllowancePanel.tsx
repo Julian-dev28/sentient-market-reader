@@ -89,7 +89,7 @@ export default function AgentAllowancePanel({
     <div className="card bracket-card" style={{
       padding: '14px 16px',
       border: `1.5px solid ${active ? accentBdr : '#8ab4cf'}`,
-      background: active ? accentPale : 'rgba(74,127,165,0.04)',
+      background: active ? accentPale : 'rgba(58,114,168,0.04)',
       transition: 'all 0.3s ease',
     }}>
 
@@ -149,7 +149,7 @@ export default function AgentAllowancePanel({
               <button key={label} onClick={() => setLocalAiMode(val)} style={{
                 flex: 1, padding: '5px 0', borderRadius: 7, cursor: 'pointer', fontSize: 11, fontWeight: 700,
                 border: `1px solid ${localAiMode === val ? (val ? '#7c4dcc' : 'var(--blue)') : 'var(--border)'}`,
-                background: localAiMode === val ? (val ? 'rgba(100,60,180,0.12)' : 'rgba(74,127,165,0.12)') : 'transparent',
+                background: localAiMode === val ? (val ? 'rgba(100,60,180,0.12)' : 'rgba(58,114,168,0.12)') : 'transparent',
                 color: localAiMode === val ? (val ? '#7c4dcc' : 'var(--blue-dark)') : 'var(--text-muted)',
                 transition: 'all 0.15s',
               }}>
@@ -371,7 +371,7 @@ export default function AgentAllowancePanel({
           style={{
             width: '100%', padding: '12px 0', borderRadius: 9, cursor: 'pointer',
             border: '1px solid var(--green)',
-            background: 'linear-gradient(135deg, #164030 0%, var(--green) 100%)',
+            background: 'var(--green)',
             fontSize: 13, fontWeight: 800, color: '#fff', letterSpacing: '0.03em',
             boxShadow: '0 2px 12px rgba(80,168,120,0.25)', transition: 'all 0.15s',
           }}

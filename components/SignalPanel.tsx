@@ -85,7 +85,7 @@ export default function SignalPanel({ probability, sentiment }: SignalPanelProps
   const rec      = probability?.recommendation ?? 'NO_TRADE'
   const recColor = rec === 'YES' ? 'var(--green)' : rec === 'NO' ? 'var(--blue)' : 'var(--text-muted)'
   const recBg    = rec === 'YES' ? 'var(--green-pale)' : rec === 'NO' ? 'var(--blue-pale)' : 'var(--cream)'
-  const recBdr   = rec === 'YES' ? '#9ecfb8' : rec === 'NO' ? '#a8cce0' : 'var(--border)'
+  const recBdr   = rec === 'YES' ? 'rgba(45,158,107,0.3)' : rec === 'NO' ? 'rgba(58,114,168,0.3)' : 'var(--border)'
 
   const sentScore  = sentiment?.score ?? 0
   const conviction = probability
@@ -212,7 +212,7 @@ export default function SignalPanel({ probability, sentiment }: SignalPanelProps
           {sentimentContradictsRec && (
             <div style={{
               padding: '7px 10px', borderRadius: 8, marginBottom: 12,
-              background: 'var(--pink-pale)', border: '1px solid #f0a0b8',
+              background: 'var(--pink-pale)', border: '1px solid rgba(192,69,62,0.3)',
               fontSize: 11, color: 'var(--pink)', fontWeight: 600,
               display: 'flex', alignItems: 'center', gap: 6,
             }}>
@@ -346,7 +346,7 @@ export default function SignalPanel({ probability, sentiment }: SignalPanelProps
                   <span style={{ fontSize: 11, color: 'var(--text-secondary)', fontWeight: 600 }}>Market sentiment</span>
                   <span style={{ fontSize: 12, fontWeight: 800, color: sent.color }}>{sent.text}</span>
                 </div>
-                <div style={{ position: 'relative', height: 8, borderRadius: 4, background: 'linear-gradient(90deg, var(--pink) 0%, var(--amber) 50%, var(--green) 100%)' }}>
+                <div style={{ position: 'relative', height: 8, borderRadius: 4, background: 'var(--bg-secondary)' }}>
                   <div style={{
                     position: 'absolute', top: -4, width: 16, height: 16, borderRadius: '50%',
                     background: sent.color, border: '3px solid var(--bg-card)',
@@ -370,7 +370,7 @@ export default function SignalPanel({ probability, sentiment }: SignalPanelProps
               return (
                 <span
                   key={i}
-                  className={`pill ${tone === 'bull' ? 'pill-green' : tone === 'bear' ? 'pill-pink' : 'pill-cream'}`}
+                  style={{ fontSize: 9, fontWeight: 700, color: tone === 'bull' ? 'var(--green-dark)' : tone === 'bear' ? 'var(--pink-dark)' : 'var(--text-muted)', animation: `slideUpFade 0.35s ${i * 50}ms ease both` }}
                   style={{ fontSize: 9, animation: `slideUpFade 0.35s ${i * 50}ms ease both` }}
                 >{sig}</span>
               )
@@ -391,7 +391,7 @@ export default function SignalPanel({ probability, sentiment }: SignalPanelProps
                     fontSize: 8, fontFamily: 'var(--font-geist-mono)', fontWeight: isOR ? 700 : 400,
                     color:      isOR ? 'var(--blue-dark)'  : 'var(--text-muted)',
                     background: isOR ? 'var(--blue-pale)'  : 'transparent',
-                    border:     isOR ? '1px solid #a8cce0' : 'none',
+                    border:     isOR ? '1px solid rgba(58,114,168,0.3)' : 'none',
                     padding:    isOR ? '1px 5px' : '0',
                     borderRadius: 3,
                   }}>

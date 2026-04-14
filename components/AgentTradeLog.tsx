@@ -57,7 +57,7 @@ export default function AgentTradeLog({ trades, onClearHistory }: { trades: Agen
         <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>Agent Trade Log</div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           {trades.length > 0 && (
-            <span className="pill pill-brown" style={{ animation: 'scaleIn 0.25s ease' }}>
+            <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 500 }}>
               {trades.length} bet{trades.length !== 1 ? 's' : ''}
             </span>
           )}
@@ -110,15 +110,18 @@ export default function AgentTradeLog({ trades, onClearHistory }: { trades: Agen
               }}>
                 {/* Window header row */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 6 }}>
-                  <span className={`pill ${side === 'yes' ? 'pill-green' : 'pill-pink'}`} style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 9 }}>
-                    {side?.toUpperCase()}
+                  <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 10, fontWeight: 700, color: side === 'yes' ? 'var(--green-dark)' : 'var(--pink-dark)' }}>
+                    {side === 'yes' ? 'Yes' : 'No'}
                   </span>
                   <span style={{ fontSize: 9, fontFamily: 'var(--font-geist-mono)', color: 'var(--text-muted)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {wk}
                   </span>
-                  <span className={`pill ${anyOpen ? 'pill-cream' : allWon ? 'pill-green' : anyLost ? 'pill-pink' : 'pill-cream'}`}
-                    style={{ animation: 'scaleIn 0.25s cubic-bezier(0.34,1.56,0.64,1)' }}>
-                    {anyOpen ? 'OPEN' : allWon ? 'WIN' : anyLost ? 'LOSS' : '—'}
+                  <span style={{
+                    fontSize: 10, fontWeight: 700,
+                    color: anyOpen ? 'var(--text-muted)' : allWon ? 'var(--green-dark)' : anyLost ? 'var(--pink-dark)' : 'var(--text-muted)',
+                    animation: 'scaleIn 0.25s cubic-bezier(0.34,1.56,0.64,1)',
+                  }}>
+                    {anyOpen ? 'Open' : allWon ? 'Win' : anyLost ? 'Loss' : '—'}
                   </span>
                   {!anyOpen && totalPnl !== 0 && (
                     <span style={{

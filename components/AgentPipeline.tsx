@@ -86,8 +86,9 @@ function ScanLoader({ elapsed, aiMode }: { elapsed: number; aiMode?: boolean }) 
       <div style={{ position: 'relative', height: 2, borderRadius: 1, background: 'var(--border)', overflow: 'hidden', marginBottom: 20 }}>
         <div style={{
           position: 'absolute', top: 0, left: 0, height: '100%', width: '40%',
-          background: `linear-gradient(90deg, transparent, ${scanColor}, transparent)`,
+          background: scanColor,
           animation: 'scanLine 1.2s ease-in-out infinite',
+          opacity: 0.7,
         }} />
       </div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -105,21 +106,21 @@ function ScanLoader({ elapsed, aiMode }: { elapsed: number; aiMode?: boolean }) 
 
 // ── Agent cards (post-run results) ──────────────────────────────────────────
 const AGENTS_QUANT = [
-  { key: 'marketDiscovery' as const, label: 'Market Discovery', short: 'MARKET',    icon: '◎', desc: 'KXBTC15M scan',     color: 'var(--brown)',  rgb: '125,112,96',  bg: 'var(--brown-pale)', border: '#cbc6be' },
-  { key: 'priceFeed'       as const, label: 'Price Feed',       short: 'PRICE',     icon: '◈', desc: 'Coinbase BTC feed', color: 'var(--green)',  rgb: '74,148,112',  bg: 'var(--green-pale)', border: '#9ecfb8' },
-  { key: 'sentiment'       as const, label: 'Sentiment',        short: 'SENTIMENT', icon: '◉', desc: 'quant signals',     color: 'var(--blue)',   rgb: '74,127,165',  bg: 'var(--blue-pale)',  border: '#a8cce0' },
-  { key: 'probability'     as const, label: 'Probability',      short: 'PROB',      icon: '⬟', desc: 'Brownian + d-gate', color: 'var(--amber)',  rgb: '160,120,64',  bg: 'var(--amber-pale)', border: '#d0b888' },
-  { key: 'risk'            as const, label: 'Risk Manager',     short: 'RISK',      icon: '⬡', desc: 'Kelly + limits',    color: 'var(--brown)',  rgb: '125,112,96',  bg: 'var(--brown-pale)', border: '#cbc6be' },
-  { key: 'execution'       as const, label: 'Execution',        short: 'EXEC',      icon: '▶', desc: 'paper order',       color: 'var(--green)',  rgb: '74,148,112',  bg: 'var(--green-pale)', border: '#9ecfb8' },
+  { key: 'marketDiscovery' as const, label: 'Market Discovery', short: 'MARKET',    icon: '◎', desc: 'KXBTC15M scan',     color: 'var(--brown)',  rgb: '74,124,142',  bg: 'var(--brown-pale)', border: 'rgba(74,124,142,0.22)' },
+  { key: 'priceFeed'       as const, label: 'Price Feed',       short: 'PRICE',     icon: '◈', desc: 'Coinbase BTC feed', color: 'var(--green)',  rgb: '45,158,107',     bg: 'var(--green-pale)', border: 'rgba(45,158,107,0.22)'    },
+  { key: 'sentiment'       as const, label: 'Sentiment',        short: 'SENTIMENT', icon: '◉', desc: 'quant signals',     color: 'var(--blue)',   rgb: '58,114,168',   bg: 'var(--blue-pale)',  border: 'rgba(58,114,168,0.22)'  },
+  { key: 'probability'     as const, label: 'Probability',      short: 'PROB',      icon: '⬟', desc: 'Brownian + d-gate', color: 'var(--amber)',  rgb: '184,121,10',   bg: 'var(--amber-pale)', border: 'rgba(184,121,10,0.22)'  },
+  { key: 'risk'            as const, label: 'Risk Manager',     short: 'RISK',      icon: '⬡', desc: 'Kelly + limits',    color: 'var(--brown)',  rgb: '74,124,142',  bg: 'var(--brown-pale)', border: 'rgba(74,124,142,0.22)' },
+  { key: 'execution'       as const, label: 'Execution',        short: 'EXEC',      icon: '▶', desc: 'paper order',       color: 'var(--green)',  rgb: '45,158,107',     bg: 'var(--green-pale)', border: 'rgba(45,158,107,0.22)'    },
 ]
 
 const AGENTS_AI = [
-  { key: 'marketDiscovery' as const, label: 'Market Discovery', short: 'MARKET',    icon: '◎', desc: 'KXBTC15M scan',     color: 'var(--brown)',  rgb: '125,112,96',  bg: 'var(--brown-pale)', border: '#cbc6be' },
-  { key: 'priceFeed'       as const, label: 'Price Feed',       short: 'PRICE',     icon: '◈', desc: 'Coinbase BTC feed', color: 'var(--green)',  rgb: '74,148,112',  bg: 'var(--green-pale)', border: '#9ecfb8' },
-  { key: 'sentiment'       as const, label: 'Sentiment',        short: 'SENTIMENT', icon: '◉', desc: 'Grok AI',           color: 'var(--blue)',   rgb: '74,127,165',  bg: 'var(--blue-pale)',  border: '#a8cce0' },
-  { key: 'probability'     as const, label: 'Probability',      short: 'PROB',      icon: '⬟', desc: 'Grok AI',           color: 'var(--amber)',  rgb: '160,120,64',  bg: 'var(--amber-pale)', border: '#d0b888' },
-  { key: 'risk'            as const, label: 'Risk Manager',     short: 'RISK',      icon: '⬡', desc: 'Grok sizing',       color: 'var(--brown)',  rgb: '125,112,96',  bg: 'var(--brown-pale)', border: '#cbc6be' },
-  { key: 'execution'       as const, label: 'Execution',        short: 'EXEC',      icon: '▶', desc: 'Grok order',        color: 'var(--green)',  rgb: '74,148,112',  bg: 'var(--green-pale)', border: '#9ecfb8' },
+  { key: 'marketDiscovery' as const, label: 'Market Discovery', short: 'MARKET',    icon: '◎', desc: 'KXBTC15M scan',     color: 'var(--brown)',  rgb: '74,124,142',  bg: 'var(--brown-pale)', border: 'rgba(74,124,142,0.22)' },
+  { key: 'priceFeed'       as const, label: 'Price Feed',       short: 'PRICE',     icon: '◈', desc: 'Coinbase BTC feed', color: 'var(--green)',  rgb: '45,158,107',     bg: 'var(--green-pale)', border: 'rgba(45,158,107,0.22)'    },
+  { key: 'sentiment'       as const, label: 'Sentiment',        short: 'SENTIMENT', icon: '◉', desc: 'Grok AI',           color: 'var(--blue)',   rgb: '58,114,168',   bg: 'var(--blue-pale)',  border: 'rgba(58,114,168,0.22)'  },
+  { key: 'probability'     as const, label: 'Probability',      short: 'PROB',      icon: '⬟', desc: 'Grok AI',           color: 'var(--amber)',  rgb: '184,121,10',   bg: 'var(--amber-pale)', border: 'rgba(184,121,10,0.22)'  },
+  { key: 'risk'            as const, label: 'Risk Manager',     short: 'RISK',      icon: '⬡', desc: 'Grok sizing',       color: 'var(--brown)',  rgb: '74,124,142',  bg: 'var(--brown-pale)', border: 'rgba(74,124,142,0.22)' },
+  { key: 'execution'       as const, label: 'Execution',        short: 'EXEC',      icon: '▶', desc: 'Grok order',        color: 'var(--green)',  rgb: '45,158,107',     bg: 'var(--green-pale)', border: 'rgba(45,158,107,0.22)'    },
 ]
 
 function shortenProvider(raw: string): string {
@@ -194,14 +195,9 @@ function PriceFeedBody({ output, color }: { output: any; color: string }) {
       </div>
 
       {/* vs Strike */}
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '6px 10px', borderRadius: 8, marginBottom: 8,
-        background: above ? 'rgba(74,148,112,0.08)' : 'rgba(181,96,112,0.08)',
-        border: `1px solid ${above ? 'rgba(74,148,112,0.2)' : 'rgba(181,96,112,0.2)'}`,
-      }}>
-        <span style={{ fontSize: 10, color: 'var(--text-secondary)', fontWeight: 600 }}>vs strike</span>
-        <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 12, fontWeight: 800, color: above ? 'var(--green)' : 'var(--pink)' }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 8 }}>
+        <span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>vs strike</span>
+        <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 14, fontWeight: 800, color: above ? 'var(--green-dark)' : 'var(--pink)' }}>
           {dist >= 0 ? '+' : ''}{dist.toFixed(3)}%
         </span>
       </div>
@@ -225,8 +221,8 @@ function SentimentBody({ output, color }: { output: any; color: string }) {
   // Map score -1→+1 to 0→1 fill
   const barFill = (score + 1) / 2
 
-  const labelBg    = bullish ? 'rgba(74,148,112,0.12)'  : bearish ? 'rgba(181,96,112,0.12)'  : 'rgba(0,0,0,0.06)'
-  const labelBdr   = bullish ? 'rgba(74,148,112,0.25)'  : bearish ? 'rgba(181,96,112,0.25)'  : 'transparent'
+  const labelBg    = bullish ? 'rgba(45,158,107,0.12)'  : bearish ? 'rgba(192,69,62,0.12)'  : 'rgba(0,0,0,0.06)'
+  const labelBdr   = bullish ? 'rgba(45,158,107,0.25)'  : bearish ? 'rgba(192,69,62,0.25)'  : 'transparent'
   const labelColor = bullish ? 'var(--green-dark)'       : bearish ? 'var(--pink)'             : 'var(--text-muted)'
 
   return (
@@ -239,21 +235,16 @@ function SentimentBody({ output, color }: { output: any; color: string }) {
             {score >= 0 ? '+' : ''}{score.toFixed(3)}
           </div>
         </div>
-        <div style={{
-          padding: '4px 10px', borderRadius: 8,
-          background: labelBg, border: `1px solid ${labelBdr}`,
-        }}>
-          <span style={{ fontSize: 9, fontWeight: 800, color: labelColor, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
-            {label || '—'}
-          </span>
-        </div>
+        <span style={{ fontSize: 10, fontWeight: 800, color: labelColor, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+          {label || '—'}
+        </span>
       </div>
 
-      {/* Gradient bar: bear → bull */}
+      {/* Sentiment bar: bear → bull */}
       <div style={{ marginBottom: 10 }}>
         <div style={{
           position: 'relative', height: 8, borderRadius: 4,
-          background: 'linear-gradient(90deg, var(--pink) 0%, rgba(200,190,180,0.3) 50%, var(--green) 100%)',
+          background: 'var(--bg-secondary)',
           marginBottom: 4,
         }}>
           {/* Needle */}
@@ -314,11 +305,11 @@ function ProbabilityBody({ output, color, aiMode }: { output: any; color: string
 
   const recColor  = rec === 'YES' ? 'var(--green)' : rec === 'NO' ? 'var(--blue)' : 'var(--text-muted)'
   const edgeColor = edgePct >= 0 ? 'var(--green-dark)' : 'var(--pink)'
-  const edgeBg    = edgePct >= 0 ? 'rgba(74,148,112,0.1)' : 'rgba(181,96,112,0.1)'
-  const edgeBdr   = edgePct >= 0 ? 'rgba(74,148,112,0.22)' : 'rgba(181,96,112,0.22)'
+  const edgeBg    = edgePct >= 0 ? 'rgba(45,158,107,0.1)' : 'rgba(192,69,62,0.1)'
+  const edgeBdr   = edgePct >= 0 ? 'rgba(45,158,107,0.22)' : 'rgba(192,69,62,0.22)'
 
   const confColor = conf === 'high' ? 'var(--green-dark)' : conf === 'medium' ? 'var(--amber)' : 'var(--text-muted)'
-  const confBg    = conf === 'high' ? 'rgba(74,148,112,0.1)' : conf === 'medium' ? 'rgba(160,120,64,0.1)' : 'rgba(0,0,0,0.05)'
+  const confBg    = conf === 'high' ? 'rgba(45,158,107,0.1)' : conf === 'medium' ? 'rgba(184,121,10,0.1)' : 'rgba(0,0,0,0.05)'
 
   return (
     <div>
@@ -331,14 +322,9 @@ function ProbabilityBody({ output, color, aiMode }: { output: any; color: string
           </div>
         </div>
 
-        {/* Edge badge */}
-        <div style={{
-          padding: '6px 12px', borderRadius: 10,
-          background: edgeBg, border: `1px solid ${edgeBdr}`,
-          textAlign: 'center',
-        }}>
+        <div style={{ textAlign: 'right' }}>
           <div style={{ fontSize: 8, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>Edge</div>
-          <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 16, fontWeight: 900, color: edgeColor, lineHeight: 1 }}>
+          <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 18, fontWeight: 900, color: edgeColor, lineHeight: 1 }}>
             {edgePct >= 0 ? '+' : ''}{edgePct.toFixed(1)}%
           </div>
         </div>
@@ -367,23 +353,12 @@ function ProbabilityBody({ output, color, aiMode }: { output: any; color: string
         </div>
       </div>
 
-      {/* Rec + Conf badges */}
-      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-        <div style={{
-          padding: '3px 10px', borderRadius: 6,
-          background: rec === 'YES' ? 'rgba(74,148,112,0.15)' : rec === 'NO' ? 'rgba(74,127,165,0.15)' : 'rgba(0,0,0,0.06)',
-          border: `1px solid ${rec === 'YES' ? 'rgba(74,148,112,0.3)' : rec === 'NO' ? 'rgba(74,127,165,0.3)' : 'transparent'}`,
-        }}>
-          <span style={{ fontSize: 9, fontWeight: 900, color: recColor, letterSpacing: '0.05em' }}>
-            {rec === 'YES' ? 'BUY YES' : rec === 'NO' ? 'BUY NO' : 'PASS'}
-          </span>
-        </div>
-        <div style={{
-          padding: '3px 8px', borderRadius: 6,
-          background: confBg,
-        }}>
-          <span style={{ fontSize: 9, fontWeight: 700, color: confColor, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{conf}</span>
-        </div>
+      {/* Rec + Conf */}
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+        <span style={{ fontSize: 10, fontWeight: 900, color: recColor, letterSpacing: '0.04em' }}>
+          {rec === 'YES' ? 'BUY YES' : rec === 'NO' ? 'BUY NO' : 'PASS'}
+        </span>
+        <span style={{ fontSize: 9, fontWeight: 700, color: confColor, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{conf}</span>
         {output.gkVol15m != null && (
           <span style={{ fontSize: 9, color: 'var(--text-muted)', fontFamily: 'var(--font-geist-mono)', marginLeft: 'auto' }}>
             σ={((output.gkVol15m ?? 0) * 100).toFixed(2)}%
@@ -405,28 +380,22 @@ function ProbabilityBody({ output, color, aiMode }: { output: any; color: string
 function RiskBody({ output, color, aiMode }: { output: any; color: string; aiMode?: boolean }) {
   const approved = output.approved
   const approvedColor = approved ? 'var(--green)' : 'var(--pink)'
-  const approvedBg    = approved ? 'rgba(74,148,112,0.1)' : 'rgba(181,96,112,0.1)'
-  const approvedBdr   = approved ? 'rgba(74,148,112,0.25)' : 'rgba(181,96,112,0.25)'
+  const approvedBg    = approved ? 'rgba(45,158,107,0.1)' : 'rgba(192,69,62,0.1)'
+  const approvedBdr   = approved ? 'rgba(45,158,107,0.25)' : 'rgba(192,69,62,0.25)'
 
   return (
     <div>
       {/* Approved / Rejected hero */}
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 10,
-        padding: '8px 12px', borderRadius: 10, marginBottom: 12,
-        background: approvedBg, border: `1px solid ${approvedBdr}`,
-      }}>
-        <span style={{ fontSize: 18 }}>{approved ? '✓' : '✕'}</span>
-        <div>
-          <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 16, fontWeight: 900, color: approvedColor, letterSpacing: '0.03em' }}>
-            {approved ? 'APPROVED' : 'BLOCKED'}
-          </div>
-          <div style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 600 }}>
-            {approved
-              ? (aiMode ? 'Grok AI sizing' : 'Kelly sizing applied')
-              : (output.rejectionReason?.slice(0, 60) ?? 'Risk limit exceeded')}
-          </div>
-        </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+        <span style={{ fontSize: 15, color: approvedColor }}>{approved ? '✓' : '✕'}</span>
+        <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 15, fontWeight: 900, color: approvedColor, letterSpacing: '0.03em' }}>
+          {approved ? 'APPROVED' : 'BLOCKED'}
+        </span>
+        {approved && (
+          <span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 600 }}>
+            {aiMode ? 'Grok AI sizing' : 'Kelly sizing applied'}
+          </span>
+        )}
       </div>
 
       {approved && (
@@ -448,8 +417,9 @@ function RiskBody({ output, color, aiMode }: { output: any; color: string; aiMod
 
       {!approved && output.rejectionReason && (
         <div style={{
-          fontSize: 10, color: 'var(--pink)', lineHeight: 1.45,
-          borderLeft: '2px solid var(--pink)', paddingLeft: 8,
+          fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', lineHeight: 1.65,
+          borderLeft: '2px solid var(--border-bright)', paddingLeft: 8,
+          whiteSpace: 'pre-wrap',
         }}>
           {output.rejectionReason}
         </div>
@@ -467,8 +437,8 @@ function ExecutionBody({ output, color }: { output: any; color: string }) {
   const isPass  = action === 'PASS'
 
   const actionColor = action === 'BUY_YES' ? 'var(--green)' : action === 'BUY_NO' ? 'var(--blue)' : 'var(--text-muted)'
-  const actionBg    = action === 'BUY_YES' ? 'rgba(74,148,112,0.12)' : action === 'BUY_NO' ? 'rgba(74,127,165,0.12)' : 'rgba(0,0,0,0.05)'
-  const actionBdr   = action === 'BUY_YES' ? 'rgba(74,148,112,0.28)' : action === 'BUY_NO' ? 'rgba(74,127,165,0.28)' : 'transparent'
+  const actionBg    = action === 'BUY_YES' ? 'rgba(45,158,107,0.12)' : action === 'BUY_NO' ? 'rgba(58,114,168,0.12)' : 'rgba(0,0,0,0.05)'
+  const actionBdr   = action === 'BUY_YES' ? 'rgba(45,158,107,0.28)' : action === 'BUY_NO' ? 'rgba(58,114,168,0.28)' : 'transparent'
 
   // Cost bar: cost as fraction of payout
   const costFill  = payout > 0 ? Math.min(1, cost / payout) : 0
@@ -479,12 +449,8 @@ function ExecutionBody({ output, color }: { output: any; color: string }) {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
         <div>
           <div style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 5 }}>Order</div>
-          <div style={{
-            display: 'inline-flex', alignItems: 'center', gap: 8,
-            padding: '5px 14px', borderRadius: 9,
-            background: actionBg, border: `1px solid ${actionBdr}`,
-          }}>
-            <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 14, fontWeight: 900, color: actionColor, letterSpacing: '0.04em' }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+            <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 16, fontWeight: 900, color: actionColor, letterSpacing: '0.02em' }}>
               {action.replace('_', ' ')}
             </span>
             {output.limitPrice != null && (
@@ -581,9 +547,7 @@ function AgentCard({
       {(done || skipped) && (
         <div style={{
           position: 'absolute', top: 0, left: 0, right: 0, height: 3,
-          background: done
-            ? `linear-gradient(90deg, ${agent.color}, rgba(${agent.rgb},0.12))`
-            : 'var(--amber)',
+          background: done ? agent.color : 'var(--amber)',
           borderRadius: '14px 14px 0 0',
         }} />
       )}
@@ -705,7 +669,7 @@ export default function AgentPipeline({
               : <><span style={{ color: 'var(--brown)', fontSize: 11 }}>∑</span> Quant Pipeline</>}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            {pipeline && <span className="pill pill-brown">cycle #{pipeline.cycleId}</span>}
+            {pipeline && <span style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--font-geist-mono)' }}>cycle #{pipeline.cycleId}</span>}
           </div>
         </div>
         {/* Scan bar — visible whenever pipeline is running */}
@@ -713,8 +677,9 @@ export default function AgentPipeline({
           <div style={{ position: 'relative', height: 2, borderRadius: 1, background: 'var(--border)', overflow: 'hidden' }}>
             <div style={{
               position: 'absolute', top: 0, left: 0, height: '100%', width: '40%',
-              background: 'linear-gradient(90deg, transparent, var(--green), transparent)',
+              background: 'var(--green)',
               animation: 'scanLine 1.2s ease-in-out infinite',
+              opacity: 0.7,
             }} />
           </div>
         )}
@@ -772,8 +737,8 @@ export default function AgentPipeline({
                   <div style={{
                     display: 'inline-flex', alignItems: 'center', gap: 6,
                     padding: '4px 10px', borderRadius: 7,
-                    background: 'rgba(74,148,112,0.07)',
-                    border: '1px solid rgba(74,148,112,0.18)',
+                    background: 'rgba(45,158,107,0.07)',
+                    border: '1px solid rgba(45,158,107,0.18)',
                   }}>
                     <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 10, color: 'var(--green-dark)' }}>
                       › {runStr}

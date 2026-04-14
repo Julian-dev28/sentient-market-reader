@@ -20,6 +20,8 @@ export async function runProbabilityModel(
   signal?: AbortSignal,             // abort signal from the HTTP request
   apiKeys?: Record<string, string>, // per-provider API keys from user settings
   aiMode?: boolean,                 // true = Grok-powered probability instead of pure quant
+  candles1h?: OHLCVCandle[],        // 1h candles — intraday trend
+  candles4h?: OHLCVCandle[],        // 4h candles — macro trend
 ): Promise<AgentResult<ProbabilityOutput>> {
   const start = Date.now()
 
@@ -31,7 +33,7 @@ export async function runProbabilityModel(
   const spotApprox  = strikePrice > 0 ? strikePrice * (1 + distanceFromStrikePct / 100) : 0
 
   // Pre-compute quant signal suite
-  const quant      = computeQuantSignals(candles, liveCandles, null, spotApprox, strikePrice, distanceFromStrikePct, minutesUntilExpiry)
+  const quant      = computeQuantSignals(candles, liveCandles, null, spotApprox, strikePrice, distanceFromStrikePct, minutesUntilExpiry, candles1h, candles4h)
   const quantBrief = formatQuantBrief(quant, spotApprox, distanceFromStrikePct, minutesUntilExpiry)
 
   // ── Pure quant model — no LLM call ───────────────────────────────────────────

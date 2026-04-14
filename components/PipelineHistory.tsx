@@ -52,7 +52,7 @@ export default function PipelineHistory({ history }: Props) {
 
           const recColor = rec === 'YES' ? 'var(--green-dark)' : rec === 'NO' ? 'var(--blue-dark)' : 'var(--text-muted)'
           const recBg    = rec === 'YES' ? 'var(--green-pale)' : rec === 'NO' ? 'var(--blue-pale)' : 'var(--bg-secondary)'
-          const recBdr   = rec === 'YES' ? '#9ecfb8' : rec === 'NO' ? '#a8cce0' : 'var(--border)'
+          const recBdr   = rec === 'YES' ? 'rgba(0,200,5,0.3)' : rec === 'NO' ? 'rgba(0,102,204,0.3)' : 'var(--border)'
           const recLabel = rec === 'YES' ? 'BUY YES' : rec === 'NO' ? 'BUY NO' : 'PASS'
 
           return (

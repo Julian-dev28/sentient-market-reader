@@ -1,57 +1,61 @@
 @import "tailwindcss";
 
 :root {
-  /* ── Dark palette ── */
-  --bg-primary:    #080810;
-  --bg-secondary:  #0f0f18;
-  --bg-card:       #12121c;
-  --bg-card-hover: #181824;
+  /* ── Gen Z–friendly light palette ────────────────────────────────────
+     Warm-neutral base. Muted analogous accents — no saturated primaries.
+     Inspired by Vercel, Linear, Fey, and Robinhood's clean language.
+     Hue family: warm gray page · sage green · terracotta · slate · amber
+  ────────────────────────────────────────────────────────────────────── */
 
-  /* Borders — visible but subtle */
-  --border:        #252535;
-  --border-bright: #353548;
+  /* Page & surfaces */
+  --bg-primary:    #F7F6F4;   /* warm off-white — not clinical */
+  --bg-secondary:  #EEECEA;   /* subtle chip / row background */
+  --bg-card:       #FFFFFF;
+  --bg-card-hover: #FAFAF8;
 
-  /* Accent — slate blue (was brown) */
-  --brown:         #7b9bb8;
-  --brown-light:   #9abbd4;
-  --brown-dark:    #5a8fb5;
-  --brown-pale:    #0e1a26;
+  /* Borders — warm gray */
+  --border:        #E5E3DF;
+  --border-bright: #CCCAC5;
 
-  /* Rose — bearish */
-  --pink:          #d06878;
-  --pink-light:    #e090a0;
-  --pink-pale:     #220c14;
-  --pink-dark:     #ee88a0;
+  /* Brand slate — teal-adjacent, desaturated */
+  --brown:         #4E7A8A;
+  --brown-light:   #6E9AAA;
+  --brown-dark:    #305E6E;
+  --brown-pale:    #EEF4F6;
 
-  /* Blue */
-  --blue:          #5a90b8;
-  --blue-light:    #8ab8d8;
-  --blue-pale:     #0e1a26;
-  --blue-dark:     #8ab8d8;
+  /* Gain / YES — sage green, earthy not neon */
+  --green:         #2E9E68;
+  --green-light:   #50BE88;
+  --green-pale:    #EAF7F1;
+  --green-dark:    #1C7A4E;
 
-  /* Green — bullish */
-  --green:         #50a878;
-  --green-light:   #78c898;
-  --green-pale:    #0c2018;
-  --green-dark:    #68d090;
+  /* Loss / NO — terracotta, warm not harsh */
+  --pink:          #BE4A40;
+  --pink-light:    #D86A60;
+  --pink-pale:     #FBF0EF;
+  --pink-dark:     #983530;
 
-  /* Neutral darks */
-  --cream:         #131320;
-  --cream-dark:    #1c1c2c;
+  /* Neutral / PASS — dusty slate blue */
+  --blue:          #3C6EA0;
+  --blue-light:    #5C8EC0;
+  --blue-pale:     #EEF3FA;
+  --blue-dark:     #264E7A;
 
-  /* Amber */
-  --amber:         #d0a040;
-  --amber-pale:    #201808;
+  /* Warning — warm ochre */
+  --amber:         #B07610;
+  --amber-pale:    #FBF6E8;
 
-  /* Red */
-  --red:           #d06868;
-  --red-pale:      #200c0c;
+  /* Aliases */
+  --cream:         #F7F6F4;
+  --cream-dark:    #EEECEA;
+  --red:           #BE4A40;
+  --red-pale:      #FBF0EF;
 
-  /* Text — clear, readable contrast */
-  --text-primary:   #e8e8f0;
-  --text-secondary: #a0a0c0;
-  --text-muted:     #686880;
-  --text-light:     #383850;
+  /* Text — warm gray scale */
+  --text-primary:   #18181A;   /* near-black with warm tint */
+  --text-secondary: #52504D;
+  --text-muted:     #96938E;
+  --text-light:     #C5C3BE;
 }
 
 * { box-sizing: border-box; }
@@ -75,20 +79,21 @@ html, body {
 
 .mono { font-family: var(--font-geist-mono), 'Courier New', monospace; }
 
-/* ── Cards ─────────────────────────────── */
+/* ── Cards ────────────────────────────────────────────────────────────── */
 .card {
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 14px;
   padding: 20px;
-  box-shadow: none;
-  transition: border-color 0.2s ease;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05), 0 1px 2px rgba(0,0,0,0.03);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 .card:hover {
   border-color: var(--border-bright);
+  box-shadow: 0 2px 10px rgba(0,0,0,0.07);
 }
 
-/* ── Floating orbs ─────────────────────── */
+/* ── Animations ───────────────────────────────────────────────────────── */
 @keyframes float1 {
   0%, 100% { transform: translateY(0px) translateX(0px) scale(1); }
   33%       { transform: translateY(-45px) translateX(18px) scale(1.04); }
@@ -140,11 +145,11 @@ html, body {
   0%, 100% { transform: scaleY(0.4); }
   50%       { transform: scaleY(1); }
 }
-@keyframes nodeGlowBrown  { 0%,100% { box-shadow: 0 0 0 0 rgba(155,118,83,0);   } 50% { box-shadow: 0 0 10px 3px rgba(155,118,83,0.35);   } }
-@keyframes nodeGlowPink   { 0%,100% { box-shadow: 0 0 0 0 rgba(212,115,142,0);  } 50% { box-shadow: 0 0 10px 3px rgba(212,115,142,0.35);  } }
-@keyframes nodeGlowGreen  { 0%,100% { box-shadow: 0 0 0 0 rgba(106,170,122,0);  } 50% { box-shadow: 0 0 10px 3px rgba(106,170,122,0.35);  } }
-@keyframes nodeGlowAmber  { 0%,100% { box-shadow: 0 0 0 0 rgba(200,135,74,0);   } 50% { box-shadow: 0 0 10px 3px rgba(200,135,74,0.35);   } }
-@keyframes nodeGlowBlue   { 0%,100% { box-shadow: 0 0 0 0 rgba(74,127,165,0);   } 50% { box-shadow: 0 0 10px 3px rgba(74,127,165,0.35);   } }
+@keyframes nodeGlowBrown  { 0%,100% { box-shadow: 0 0 0 0 rgba(91,122,153,0);   } 50% { box-shadow: 0 0 10px 3px rgba(91,122,153,0.25);   } }
+@keyframes nodeGlowPink   { 0%,100% { box-shadow: 0 0 0 0 rgba(217,48,48,0);    } 50% { box-shadow: 0 0 10px 3px rgba(217,48,48,0.25);    } }
+@keyframes nodeGlowGreen  { 0%,100% { box-shadow: 0 0 0 0 rgba(0,200,5,0);      } 50% { box-shadow: 0 0 10px 3px rgba(0,200,5,0.25);      } }
+@keyframes nodeGlowAmber  { 0%,100% { box-shadow: 0 0 0 0 rgba(224,120,0,0);    } 50% { box-shadow: 0 0 10px 3px rgba(224,120,0,0.25);    } }
+@keyframes nodeGlowBlue   { 0%,100% { box-shadow: 0 0 0 0 rgba(0,102,204,0);    } 50% { box-shadow: 0 0 10px 3px rgba(0,102,204,0.25);    } }
 @keyframes romaTyping {
   0%,100% { opacity: 1; }
   50%      { opacity: 0.5; }
@@ -233,7 +238,7 @@ html, body {
 .animate-slide-up  { animation: slideUpFade 0.4s ease both; }
 .animate-scale-in  { animation: scaleIn 0.35s cubic-bezier(0.34,1.56,0.64,1) both; }
 
-/* ── Status dots ───────────────────────── */
+/* ── Status dots ──────────────────────────────────────────────────────── */
 .status-dot {
   width: 7px; height: 7px;
   border-radius: 50%;
@@ -246,61 +251,41 @@ html, body {
 .status-dot.error   { background: var(--red); }
 .status-dot.skipped { background: var(--amber); }
 
-/* ── Pill badges ───────────────────────── */
+/* ── Pill badges ──────────────────────────────────────────────────────── */
 .pill {
   display: inline-flex; align-items: center; gap: 4px;
   padding: 3px 10px; border-radius: 100px;
   font-size: 10px; font-weight: 600; letter-spacing: 0.03em;
 }
-.pill-brown { background: var(--brown-pale);  border: 1px solid #243850;  color: var(--brown-dark); }
-.pill-pink  { background: var(--pink-pale);   border: 1px solid #4a1828;  color: var(--pink-dark); }
-.pill-blue  { background: var(--blue-pale);   border: 1px solid #243850;  color: var(--blue-dark); }
-.pill-green { background: var(--green-pale);  border: 1px solid #164030;  color: var(--green-dark); }
-.pill-red   { background: var(--red-pale);    border: 1px solid #481818;  color: var(--red); }
-.pill-amber { background: var(--amber-pale);  border: 1px solid #483010;  color: var(--amber); }
-.pill-cream { background: var(--cream-dark);  border: 1px solid var(--border);  color: var(--text-secondary); }
+.pill-brown { background: var(--brown-pale);  border: 1px solid rgba(91,122,153,0.25);   color: var(--brown-dark); }
+.pill-pink  { background: var(--pink-pale);   border: 1px solid rgba(217,48,48,0.25);    color: var(--pink-dark); }
+.pill-blue  { background: var(--blue-pale);   border: 1px solid rgba(0,102,204,0.25);    color: var(--blue-dark); }
+.pill-green { background: var(--green-pale);  border: 1px solid rgba(0,200,5,0.25);      color: var(--green-dark); }
+.pill-red   { background: var(--red-pale);    border: 1px solid rgba(217,48,48,0.25);    color: var(--red); }
+.pill-amber { background: var(--amber-pale);  border: 1px solid rgba(224,120,0,0.25);    color: var(--amber); }
+.pill-cream { background: var(--bg-secondary); border: 1px solid var(--border);          color: var(--text-secondary); }
 
-/* ── Gradient text ─────────────────────── */
-.grad-brown-pink {
-  background: linear-gradient(135deg, var(--brown) 0%, var(--pink) 100%);
-  -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
-}
-.grad-pink-green {
-  background: linear-gradient(135deg, var(--pink) 0%, var(--green) 100%);
-  -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
-}
-.grad-green-brown {
-  background: linear-gradient(135deg, var(--green) 0%, var(--brown) 100%);
-  -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
-}
-/* SF editorial annotation style */
+/* ── Accent text colors ───────────────────────────────────────────────── */
+.grad-brown-pink  { color: var(--pink); }
+.grad-pink-green  { color: var(--green); }
+.grad-green-brown { color: var(--green); }
+
 .annotation {
   font-size: 9px; font-weight: 600; letter-spacing: 0.07em;
   text-transform: uppercase; color: var(--text-muted);
 }
 
-/* ── Bracket corner accent ─────────────── */
+/* ── Bracket card — removed decorative corners (too AI-gen) ──────────── */
 .bracket-card { position: relative; }
-.bracket-card::before, .bracket-card::after {
-  content: ''; position: absolute;
-  width: 14px; height: 14px;
-  border-color: var(--border-bright);
-  border-style: solid; pointer-events: none;
-  transition: border-color 0.2s;
-}
-.bracket-card::before { top: -1px; left: -1px; border-width: 2px 0 0 2px; border-radius: 4px 0 0 0; }
-.bracket-card::after  { bottom: -1px; right: -1px; border-width: 0 2px 2px 0; border-radius: 0 0 4px 0; }
-.bracket-card:hover::before, .bracket-card:hover::after { border-color: var(--brown); }
 
-/* ── Hide number input spinners ────────── */
+/* ── Hide number input spinners ───────────────────────────────────────── */
 input[type=number]::-webkit-inner-spin-button,
 input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 input[type=number] { -moz-appearance: textfield; }
 
-/* ── Noise overlay ─────────────────────── */
+/* ── Subtle dot grid background overlay ──────────────────────────────── */
 .noise-overlay {
   position: fixed; inset: 0; pointer-events: none; z-index: 0;
-  opacity: 0.015;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-  background-size: 180px 180px;
+  background-image: url("data:image/svg+xml,%3Csvg width='28' height='28' viewBox='0 0 28 28' xmlns='http://www.w3.org/2000/svg'%3E%3Ccircle cx='1' cy='1' r='1' fill='rgba(0,0,0,0.04)'/%3E%3C/svg%3E");
+  background-size: 28px 28px;
 }
