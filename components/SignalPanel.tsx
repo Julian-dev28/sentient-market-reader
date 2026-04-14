@@ -84,8 +84,6 @@ export default function SignalPanel({ probability, sentiment }: SignalPanelProps
 
   const rec      = probability?.recommendation ?? 'NO_TRADE'
   const recColor = rec === 'YES' ? 'var(--green)' : rec === 'NO' ? 'var(--blue)' : 'var(--text-muted)'
-  const recBg    = rec === 'YES' ? 'var(--green-pale)' : rec === 'NO' ? 'var(--blue-pale)' : 'var(--cream)'
-  const recBdr   = rec === 'YES' ? 'rgba(45,158,107,0.3)' : rec === 'NO' ? 'rgba(58,114,168,0.3)' : 'var(--border)'
 
   const sentScore  = sentiment?.score ?? 0
   const conviction = probability
@@ -95,9 +93,6 @@ export default function SignalPanel({ probability, sentiment }: SignalPanelProps
   const confColor = probability?.confidence === 'high'   ? 'var(--green-dark)'
                   : probability?.confidence === 'medium' ? 'var(--amber)'
                   : 'var(--text-muted)'
-  const confBg    = probability?.confidence === 'high'   ? 'var(--green-pale)'
-                  : probability?.confidence === 'medium' ? 'var(--amber-pale)'
-                  : 'var(--bg-secondary)'
 
   const sentimentContradictsRec =
     (rec === 'YES' && sentScore < -0.4) ||
@@ -108,12 +103,12 @@ export default function SignalPanel({ probability, sentiment }: SignalPanelProps
       <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
         Signal Analysis
         {probability && rec === 'NO_TRADE' && (
-          <span style={{ marginLeft: 'auto', fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', background: 'var(--bg-secondary)', padding: '2px 7px', borderRadius: 4 }}>
+          <span style={{ marginLeft: 'auto', fontSize: 9, fontWeight: 700, color: 'var(--text-muted)' }}>
             outside edge zone
           </span>
         )}
         {probability && rec !== 'NO_TRADE' && (
-          <span style={{ marginLeft: 'auto', fontSize: 9, fontWeight: 700, color: confColor, background: confBg, padding: '2px 7px', borderRadius: 4 }}>
+          <span style={{ marginLeft: 'auto', fontSize: 9, fontWeight: 700, color: confColor }}>
             {probability.confidence} confidence
           </span>
         )}
@@ -121,14 +116,9 @@ export default function SignalPanel({ probability, sentiment }: SignalPanelProps
 
       {probability ? (
         <>
-          {/* ── Verdict card ── */}
-          <div style={{
-            padding: '14px 16px', borderRadius: 14, marginBottom: 14,
-            background: recBg, border: `1px solid ${recBdr}`,
-            animation: 'scaleIn 0.35s cubic-bezier(0.34,1.56,0.64,1)',
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-              {/* Action */}
+          {/* ── Verdict ── */}
+          <div style={{ marginBottom: 14, animation: 'scaleIn 0.35s cubic-bezier(0.34,1.56,0.64,1)' }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 6 }}>
               <div>
                 <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 3 }}>
                   {rec === 'NO_TRADE' ? 'Status' : 'ROMA Recommendation'}
@@ -137,7 +127,6 @@ export default function SignalPanel({ probability, sentiment }: SignalPanelProps
                   {rec === 'YES' ? 'BUY YES' : rec === 'NO' ? 'BUY NO' : 'PASS'}
                 </div>
               </div>
-              {/* Edge — only show when there's a real signal */}
               {rec !== 'NO_TRADE' && (
                 <div style={{ textAlign: 'right' }}>
                   <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 3 }}>After-fee EV</div>
@@ -149,10 +138,7 @@ export default function SignalPanel({ probability, sentiment }: SignalPanelProps
             </div>
 
             {/* Plain-English explanation */}
-            <div style={{
-              fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5,
-              marginTop: 2,
-            }}>
+            <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5, marginTop: 6 }}>
               {rec === 'YES' && (
                 <>
                   ROMA thinks YES wins at{' '}
@@ -179,45 +165,32 @@ export default function SignalPanel({ probability, sentiment }: SignalPanelProps
                 </>
               )}
               {rec === 'NO_TRADE' && (() => {
-                // d-score is outside [1.0, 1.2] — Kalshi correctly prices this zone.
-                // No alpha, no manual edge. Do not suggest acting on this.
                 const mktPct = Math.round(probability.pMarket * 100)
                 const mktDir = probability.pMarket >= 0.5 ? 'YES' : 'NO'
                 const mktClr = mktDir === 'YES' ? 'var(--green)' : 'var(--blue)'
                 return (
                   <>
-                    d-score is outside the [1.0, 1.2] edge zone —{' '}
+                    d-score outside the [1.0, 1.2] edge zone —{' '}
                     <strong>no proven alpha here</strong>.{' '}
-                    Kalshi correctly prices this setup (market{' '}
+                    Market{' '}
                     <strong style={{ color: mktClr }}>{mktDir} @ {mktPct}¢</strong>
-                    ).{' '}Waiting for BTC to move into the 3–9 min entry window with d ∈ [1.0, 1.2].
+                    .{' '}Waiting for BTC to enter the 3–9 min entry window.
                   </>
                 )
               })()}
             </div>
 
             {conviction && conviction.label !== 'no edge' && (
-              <div style={{
-                marginTop: 8, display: 'inline-block',
-                fontSize: 9, fontWeight: 700,
-                color: conviction.color, background: conviction.bg,
-                padding: '2px 6px', borderRadius: 4,
-                textTransform: 'uppercase', letterSpacing: '0.06em',
-              }}>
-                {conviction.label} conviction
+              <div style={{ marginTop: 6, fontSize: 9, fontWeight: 700, color: conviction.color, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                · {conviction.label} conviction
               </div>
             )}
           </div>
 
           {sentimentContradictsRec && (
-            <div style={{
-              padding: '7px 10px', borderRadius: 8, marginBottom: 12,
-              background: 'var(--pink-pale)', border: '1px solid rgba(192,69,62,0.3)',
-              fontSize: 11, color: 'var(--pink)', fontWeight: 600,
-              display: 'flex', alignItems: 'center', gap: 6,
-            }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 10, fontSize: 11, color: 'var(--pink)', fontWeight: 600 }}>
               <span>⚠</span>
-              <span>Price momentum contradicts the signal — risk manager will block this trade</span>
+              <span>Momentum contradicts signal — risk manager may block</span>
             </div>
           )}
 
@@ -265,11 +238,7 @@ export default function SignalPanel({ probability, sentiment }: SignalPanelProps
                 </div>
 
                 {/* Gap explanation */}
-                <div style={{
-                  fontSize: 10, fontWeight: 700, color: gapColor,
-                  padding: '4px 8px', borderRadius: 5,
-                  background: Math.abs(delta) <= 1 ? 'transparent' : gapColor + '11',
-                }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: gapColor }}>
                   {gapText}
                 </div>
               </div>
@@ -299,12 +268,8 @@ export default function SignalPanel({ probability, sentiment }: SignalPanelProps
             const sent = sentimentLabel(sentiment.score)
 
             return (
-              <div style={{
-                padding: '10px 12px', borderRadius: 10,
-                background: 'var(--bg-secondary)',
-                marginBottom: 4,
-              }}>
-                <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 10 }}>
+              <div style={{ marginBottom: 4 }}>
+                <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>
                   Why this signal
                 </div>
                 {[
@@ -363,39 +328,34 @@ export default function SignalPanel({ probability, sentiment }: SignalPanelProps
             )
           })()}
 
-          {/* Signal pills */}
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+          {/* Signals — flat bullet list */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             {sentiment.signals.map((sig, i) => {
               const tone = getSignalTone(sig)
+              const color = tone === 'bull' ? 'var(--green-dark)' : tone === 'bear' ? 'var(--pink-dark)' : 'var(--text-muted)'
               return (
-                <span
-                  key={i}
-                  style={{ fontSize: 9, fontWeight: 700, color: tone === 'bull' ? 'var(--green-dark)' : tone === 'bear' ? 'var(--pink-dark)' : 'var(--text-muted)', animation: `slideUpFade 0.35s ${i * 50}ms ease both` }}
-                  style={{ fontSize: 9, animation: `slideUpFade 0.35s ${i * 50}ms ease both` }}
-                >{sig}</span>
+                <div key={i} style={{
+                  display: 'flex', alignItems: 'baseline', gap: 6,
+                  animation: `slideUpFade 0.35s ${i * 40}ms ease both`,
+                }}>
+                  <span style={{ fontSize: 9, color, flexShrink: 0, lineHeight: 1.5 }}>·</span>
+                  <span style={{ fontSize: 10, color: 'var(--text-secondary)', lineHeight: 1.5 }}>{sig}</span>
+                </div>
               )
             })}
           </div>
 
           {/* Provider attribution */}
           {probability && (
-            <div style={{ marginTop: 10, display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+            <div style={{ marginTop: 8, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
               {[
                 { label: 'prob', provider: probability.provider },
                 { label: 'sent', provider: sentiment.provider },
               ].map(({ label, provider }) => {
-                const isOR  = provider.startsWith('openrouter')
                 const model = provider.split('/').pop()
                 return (
-                  <span key={label} style={{
-                    fontSize: 8, fontFamily: 'var(--font-geist-mono)', fontWeight: isOR ? 700 : 400,
-                    color:      isOR ? 'var(--blue-dark)'  : 'var(--text-muted)',
-                    background: isOR ? 'var(--blue-pale)'  : 'transparent',
-                    border:     isOR ? '1px solid rgba(58,114,168,0.3)' : 'none',
-                    padding:    isOR ? '1px 5px' : '0',
-                    borderRadius: 3,
-                  }}>
-                    {label} · {isOR ? `OR/${model}` : model}
+                  <span key={label} style={{ fontSize: 8, fontFamily: 'var(--font-geist-mono)', color: 'var(--text-muted)' }}>
+                    {label} · {model}
                   </span>
                 )
               })}

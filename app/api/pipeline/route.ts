@@ -192,6 +192,8 @@ export async function GET(req: NextRequest) {
       candles4h = raw.slice(0, -1).map(binanceToCoinbase).reverse().slice(0, 7)
     }
 
+    console.log(`[pipeline] candles: 15m=${candles.length} 1m=${liveCandles.length} 1h=${candles1h.length} 4h=${candles4h.length} | bn1h=${bn1hRes?.status ?? 'fail'} bn4h=${bn4hRes?.status ?? 'fail'}`)
+
     let derivatives: DerivativesSignal | null = null
     if (bybitRes?.ok) {
       const data = await bybitRes.json()
