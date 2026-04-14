@@ -9,7 +9,7 @@ export default function PerformancePanel({ stats, trades }: { stats: Performance
   let cum = 0
   const curve    = settled.map((t, i) => { cum += t.pnl ?? 0; return { i, pnl: cum } })
   const pnlColor = stats.totalPnl >= 0 ? 'var(--green)' : 'var(--pink)'
-  const pnlGrad  = stats.totalPnl >= 0 ? ['#3a9e72', '#8dc49a'] : ['#d4738e', '#e8a0b4']
+  const pnlGrad  = stats.totalPnl >= 0 ? ['#00C805', '#00C805'] : ['#D93030', '#D93030']
 
   // Animate the headline P&L and win rate
   const animatedPnl     = useCountUp(stats.totalPnl, 900)
@@ -40,7 +40,7 @@ export default function PerformancePanel({ stats, trades }: { stats: Performance
       <div style={{
         padding: '14px 16px', borderRadius: 14, marginBottom: 12,
         background: stats.totalPnl >= 0 ? 'var(--green-pale)' : 'var(--pink-pale)',
-        border: `1px solid ${stats.totalPnl >= 0 ? '#b8dfc3' : '#e0b0bf'}`,
+        border: `1px solid ${stats.totalPnl >= 0 ? 'rgba(45,158,107,0.3)' : 'rgba(192,69,62,0.3)'}`,
         transition: 'background 0.5s ease, border-color 0.5s ease',
       }}>
         <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: 600, marginBottom: 3 }}>
@@ -85,7 +85,7 @@ export default function PerformancePanel({ stats, trades }: { stats: Performance
               <ReferenceLine y={0} stroke="var(--border-bright)" strokeDasharray="3 3" />
               <Tooltip
                 formatter={(v: number | undefined) => [`$${(v ?? 0).toFixed(2)}`, 'P&L']}
-                contentStyle={{ background: '#fff', border: '1px solid var(--border)', borderRadius: 8, fontSize: 10, boxShadow: '0 4px 16px rgba(155,118,83,0.1)' }}
+                contentStyle={{ background: '#fff', border: '1px solid var(--border)', borderRadius: 8, fontSize: 10, boxShadow: '0 4px 16px rgba(74,124,142,0.1)' }}
               />
               <Area
                 type="monotone" dataKey="pnl" stroke={pnlColor} strokeWidth={2.5}

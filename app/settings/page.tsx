@@ -203,7 +203,7 @@ export default function SettingsPage() {
         borderBottom: '1px solid var(--border)',
         padding: '10px 24px',
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        background: 'rgba(5,5,7,0.85)', backdropFilter: 'blur(20px)',
+        background: 'var(--bg-card)',
         position: 'sticky', top: 0, zIndex: 100,
       }}>
         <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: '-0.03em', color: 'var(--text-primary)' }}>
