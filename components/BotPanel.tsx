@@ -24,14 +24,14 @@ export default function BotPanel({
   // Always navy-blue themed (ROMA brand color) — live adds a green glow when active
   const accentCol  = active && liveMode ? 'var(--green)'    : 'var(--blue)'
   const accentDark = active && liveMode ? 'var(--green-dark)': '#2e5f82'
-  const accentPale = active && liveMode ? 'var(--green-pale)': 'rgba(74,127,165,0.08)'
+  const accentPale = active && liveMode ? 'var(--green-pale)': 'rgba(58,114,168,0.08)'
   const accentBdr  = active && liveMode ? '#9ecfb8'          : '#8ab4cf'
 
   return (
     <div className="card bracket-card" style={{
       padding: '14px 16px',
       border: active ? `1.5px solid ${accentBdr}` : '1.5px solid #8ab4cf',
-      background: active ? accentPale : 'rgba(74,127,165,0.04)',
+      background: active ? accentPale : 'rgba(58,114,168,0.04)',
       transition: 'all 0.3s ease',
     }}>
       {/* Header row */}
@@ -51,7 +51,7 @@ export default function BotPanel({
           </span>
           <span style={{
             fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 4,
-            background: active && liveMode ? 'var(--green-pale)' : 'rgba(74,127,165,0.12)',
+            background: active && liveMode ? 'var(--green-pale)' : 'rgba(58,114,168,0.12)',
             border: `1px solid ${active ? accentBdr : '#8ab4cf'}`,
             color: active ? accentDark : 'var(--blue)',
           }}>
@@ -73,9 +73,9 @@ export default function BotPanel({
         <button onClick={onStart} style={{
           width: '100%', padding: '12px 0', borderRadius: 9, cursor: 'pointer',
           border: '1px solid #2e5f82',
-          background: 'linear-gradient(135deg, #2e5f82 0%, var(--blue) 100%)',
+          background: 'var(--blue)',
           fontSize: 13, fontWeight: 800, color: '#fff', letterSpacing: '0.03em',
-          boxShadow: '0 2px 12px rgba(74,127,165,0.35)',
+          boxShadow: '0 2px 12px rgba(58,114,168,0.35)',
           transition: 'all 0.15s',
         }}
           onMouseEnter={e => { e.currentTarget.style.opacity = '0.88' }}

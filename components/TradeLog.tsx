@@ -10,9 +10,7 @@ export default function TradeLog({ trades }: { trades: TradeRecord[] }) {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
         <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>Paper Trade Log</div>
         {trades.length > 0 && (
-          <span className="pill pill-brown" style={{ animation: 'scaleIn 0.25s ease' }}>
-            {trades.length} trades
-          </span>
+          <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 500 }}>{trades.length} trades</span>
         )}
       </div>
 
@@ -38,8 +36,8 @@ export default function TradeLog({ trades }: { trades: TradeRecord[] }) {
           >
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 3 }}>
-                <span className={`pill ${sideUp ? 'pill-green' : 'pill-pink'}`} style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 9 }}>
-                  BUY {trade.side.toUpperCase()}
+                <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 10, fontWeight: 700, color: sideUp ? 'var(--green-dark)' : 'var(--pink-dark)' }}>
+                  Buy {sideUp ? 'Yes' : 'No'}
                 </span>
                 <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 9, color: 'var(--text-muted)' }}>
                   {trade.contracts}× @ {trade.limitPrice}¢
@@ -47,7 +45,7 @@ export default function TradeLog({ trades }: { trades: TradeRecord[] }) {
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2 }}>
                 {trade.liveMode && (
-                  <span style={{ fontSize: 8, fontWeight: 700, color: 'var(--green-dark)', background: 'var(--green-pale)', border: '1px solid #a8d8b5', borderRadius: 3, padding: '0px 4px' }}>LIVE</span>
+                  <span style={{ fontSize: 8, fontWeight: 700, color: 'var(--green-dark)', background: 'var(--green-pale)', borderRadius: 3, padding: '0px 4px' }}>LIVE</span>
                 )}
                 {trade.liveOrderId && (
                   <span style={{ fontSize: 8, color: 'var(--text-muted)', fontFamily: 'var(--font-geist-mono)' }} title={`Order ID: ${trade.liveOrderId}`}>
@@ -62,11 +60,12 @@ export default function TradeLog({ trades }: { trades: TradeRecord[] }) {
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
-              <span
-                className={`pill ${open ? 'pill-cream' : win ? 'pill-green' : 'pill-pink'}`}
-                style={{ animation: 'scaleIn 0.25s cubic-bezier(0.34,1.56,0.64,1)' }}
-              >
-                {open ? 'OPEN' : win ? 'WIN' : 'LOSS'}
+              <span style={{
+                fontSize: 10, fontWeight: 700, letterSpacing: '0.02em',
+                color: open ? 'var(--text-muted)' : win ? 'var(--green-dark)' : 'var(--pink-dark)',
+                animation: 'scaleIn 0.25s cubic-bezier(0.34,1.56,0.64,1)',
+              }}>
+                {open ? 'Open' : win ? 'Win' : 'Loss'}
               </span>
               {trade.pnl !== undefined && !open && (
                 <span style={{

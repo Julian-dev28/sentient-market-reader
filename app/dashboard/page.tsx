@@ -194,7 +194,7 @@ export default function Home() {
       {showBotWarning && (
         <div style={{
           position: 'fixed', inset: 0, zIndex: 1000,
-          background: 'rgba(5,5,7,0.80)', backdropFilter: 'blur(12px)',
+          background: 'rgba(0,0,0,0.35)', backdropFilter: 'blur(8px)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}>
           <div className="card animate-fade-in" style={{ maxWidth: 420, width: '90%', padding: '28px 28px' }}>
@@ -224,7 +224,7 @@ export default function Home() {
                 style={{
                   flex: 1, padding: '10px 0', borderRadius: 9, cursor: 'pointer',
                   border: '1px solid var(--green-dark)',
-                  background: 'linear-gradient(135deg, var(--green-dark) 0%, var(--green) 100%)',
+                  background: 'var(--green)',
                   fontSize: 13, fontWeight: 700, color: '#fff',
                   boxShadow: '0 2px 10px rgba(78,138,94,0.35)',
                 }}
@@ -240,7 +240,7 @@ export default function Home() {
       {showLateWarning && (
         <div style={{
           position: 'fixed', inset: 0, zIndex: 1000,
-          background: 'rgba(5,5,7,0.80)', backdropFilter: 'blur(12px)',
+          background: 'rgba(0,0,0,0.35)', backdropFilter: 'blur(8px)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}>
           <div className="card animate-fade-in" style={{ maxWidth: 400, width: '90%', padding: '28px 28px' }}>
@@ -269,7 +269,7 @@ export default function Home() {
                 style={{
                   flex: 1, padding: '10px 0', borderRadius: 9, cursor: 'pointer',
                   border: '1px solid var(--amber)',
-                  background: 'linear-gradient(135deg, #b8720f 0%, var(--amber) 100%)',
+                  background: 'var(--amber)',
                   fontSize: 13, fontWeight: 700, color: '#fff',
                   boxShadow: '0 2px 10px rgba(212,135,44,0.35)',
                 }}
@@ -286,12 +286,12 @@ export default function Home() {
       {tradeAlert && (
         <div style={{
           position: 'fixed', inset: 0, zIndex: 1100,
-          background: 'rgba(5,5,7,0.82)', backdropFilter: 'blur(12px)',
+          background: 'rgba(0,0,0,0.35)', backdropFilter: 'blur(8px)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}>
           <div className="card animate-fade-in" style={{
             maxWidth: 360, width: '90%', padding: '26px 24px',
-            border: tradeAlert.side === 'yes' ? '1.5px solid #9ecfb8' : '1.5px solid #e0b0bf',
+            border: tradeAlert.side === 'yes' ? '1.5px solid rgba(45,158,107,0.3)' : '1.5px solid rgba(192,69,62,0.3)',
             boxShadow: '0 12px 48px rgba(0,0,0,0.22)',
           }}>
             {/* Header */}
@@ -299,7 +299,7 @@ export default function Home() {
               <div style={{
                 width: 42, height: 42, borderRadius: '50%', flexShrink: 0,
                 background: tradeAlert.side === 'yes' ? 'var(--green-pale)' : 'var(--pink-pale)',
-                border: tradeAlert.side === 'yes' ? '1.5px solid #9ecfb8' : '1.5px solid #e0b0bf',
+                border: tradeAlert.side === 'yes' ? '1.5px solid rgba(45,158,107,0.3)' : '1.5px solid rgba(192,69,62,0.3)',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 fontSize: 22, color: tradeAlert.side === 'yes' ? 'var(--green)' : 'var(--pink)',
                 animation: 'iconBeat 2s ease infinite',
@@ -343,10 +343,10 @@ export default function Home() {
                   flex: 2, padding: '10px 0', borderRadius: 9, cursor: 'pointer',
                   border: tradeAlert.side === 'yes' ? '1px solid var(--green-dark)' : '1px solid var(--pink)',
                   background: tradeAlert.side === 'yes'
-                    ? 'linear-gradient(135deg, var(--green-dark) 0%, var(--green) 100%)'
-                    : 'linear-gradient(135deg, #c24f78 0%, var(--pink) 100%)',
+                    ? 'var(--green)'
+                    : 'var(--pink)',
                   fontSize: 14, fontWeight: 800, color: '#fff',
-                  boxShadow: tradeAlert.side === 'yes' ? '0 2px 12px rgba(74,148,112,0.35)' : '0 2px 12px rgba(212,85,130,0.35)',
+                  boxShadow: tradeAlert.side === 'yes' ? '0 2px 12px rgba(45,158,107,0.35)' : '0 2px 12px rgba(212,85,130,0.35)',
                   letterSpacing: '0.01em',
                 }}>
                   Buy $40
@@ -379,7 +379,7 @@ export default function Home() {
         {error && (
           <div style={{
             marginBottom: 14, padding: '10px 16px', borderRadius: 12,
-            background: 'var(--red-pale)', border: '1px solid #e0b0b0',
+            background: 'var(--red-pale)', border: '1px solid rgba(192,69,62,0.3)',
             fontSize: 12, color: 'var(--red)',
             display: 'flex', justifyContent: 'space-between', alignItems: 'center',
           }}>
@@ -411,14 +411,14 @@ export default function Home() {
 
             {exec && exec.action !== 'PASS' && (
               <div className="card bracket-card animate-fade-in" style={{
-                borderColor: exec.action === 'BUY_YES' ? '#1a4030' : '#1a2e40',
+                borderColor: exec.action === 'BUY_YES' ? 'rgba(45,158,107,0.3)' : 'rgba(58,114,168,0.3)',
                 background: 'var(--bg-card)',
               }}>
                 <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6,
                   color: exec.action === 'BUY_YES' ? 'var(--green-dark)' : 'var(--blue-dark)' }}>
                   <span style={{ fontSize: 16 }}>{exec.action === 'BUY_YES' ? '↑' : '↓'}</span>
                   {exec.action === 'BUY_YES' ? 'BUY YES' : 'BUY NO'} — Latest Signal
-                  <span style={{ marginLeft: 'auto', fontSize: 9, fontWeight: 700, color: 'var(--green-dark)', background: 'var(--green-pale)', border: '1px solid #164030', borderRadius: 4, padding: '1px 5px' }}>LIVE</span>
+                  <span style={{ marginLeft: 'auto', fontSize: 9, fontWeight: 700, color: 'var(--green-dark)', background: 'var(--green-pale)', border: '1px solid rgba(45,158,107,0.25)', borderRadius: 4, padding: '1px 5px' }}>LIVE</span>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 7 }}>
                   {[
@@ -502,7 +502,7 @@ export default function Home() {
                           width: '100%', textAlign: 'left', cursor: 'pointer',
                           padding: '6px 12px', borderRadius: 8,
                           border: '1px solid var(--blue)',
-                          background: 'rgba(74,127,165,0.08)',
+                          background: 'rgba(58,114,168,0.08)',
                           color: 'var(--blue-dark)',
                           display: 'flex', alignItems: 'center', gap: 8,
                         }}
@@ -528,7 +528,7 @@ export default function Home() {
                               onClick={() => handleGrokModelChange(m.id)}
                               style={{
                                 padding: '7px 14px', cursor: 'pointer',
-                                background: orModel === m.id ? 'rgba(74,127,165,0.1)' : 'transparent',
+                                background: orModel === m.id ? 'rgba(58,114,168,0.1)' : 'transparent',
                                 borderLeft: orModel === m.id ? '2px solid var(--blue)' : '2px solid transparent',
                                 transition: 'background 0.1s',
                               }}
@@ -616,7 +616,7 @@ export default function Home() {
                     <div style={{
                       display: 'flex', alignItems: 'center', gap: 4,
                       padding: '5px 9px', borderRadius: 8,
-                      background: 'rgba(74,127,165,0.07)', border: '1px solid #8ab4cf',
+                      background: 'rgba(58,114,168,0.07)', border: '1px solid #8ab4cf',
                     }} title="Grok re-runs when BTC moves ≥0.20% from last run">
                       <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--blue)', display: 'inline-block', animation: 'pulse-live 2s ease-in-out infinite', flexShrink: 0 }} />
                       <span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Δ</span>

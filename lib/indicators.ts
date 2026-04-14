@@ -666,8 +666,10 @@ export function computePriceVelocity(liveCandles: OHLCVCandle[], n = 5): {
   const ys = recent.map(c => c[4])
   const mx = xs.reduce((a, b) => a + b, 0) / xs.length
   const my = ys.reduce((a, b) => a + b, 0) / ys.length
-  const slope = xs.reduce((s, x, i) => s + (x - mx) * (ys[i] - my), 0) /
-                xs.reduce((s, x) => s + (x - mx) ** 2, 0)
+  const ssx   = xs.reduce((s, x) => s + (x - mx) ** 2, 0)
+  const slope = ssx > 0
+    ? xs.reduce((s, x, i) => s + (x - mx) * (ys[i] - my), 0) / ssx
+    : 0  // all candles same timestamp — flat, treat as zero velocity
   // Acceleration: compare slope of first half vs second half
   const half   = Math.floor(recent.length / 2)
   const slope1 = recent[half][4] - recent[0][4]           // early slope
@@ -775,6 +777,9 @@ export interface QuantSignals {
   volumeTrend:    { avgVolume: number; latestVolume: number; trend: string; ratio: number } | null
   microMomentum:  { greenFraction: number; streak: number; direction: string } | null  // 1-min micro-momentum
   intraVwap:      number | null  // VWAP over current window (1-min candles)
+  // Multi-timeframe trend (1h and 4h candles)
+  trend1h:        { direction: 'bullish' | 'bearish' | 'flat'; netChangePct: number; upFraction: number; streak: number } | null
+  trend4h:        { direction: 'bullish' | 'bearish' | 'flat'; netChangePct: number; upFraction: number; streak: number } | null
   // Extended signals (no external API needed)
   obv:            { trend: 'rising' | 'falling' | 'flat'; changeRate: number } | null
   mfi:            number | null  // Money Flow Index 0-100
@@ -794,6 +799,29 @@ function calibrateStudentNu(skewKurt: { skew: number; excessKurt: number }): num
   return Math.max(4, Math.min(20, 4 + 6 / skewKurt.excessKurt))
 }
 
+// ── Multi-timeframe trend helper ──────────────────────────────────────────────
+function computeTrend(
+  candles: OHLCVCandle[] | undefined,
+): { direction: 'bullish' | 'bearish' | 'flat'; netChangePct: number; upFraction: number; streak: number } | null {
+  if (!candles || candles.length < 2) return null
+  // candles are newest-first; reverse to oldest-first for streak calc
+  const ordered = [...candles].reverse()
+  const upCount = ordered.filter(c => c[4] >= c[3]).length
+  const netChangePct = ordered.length
+    ? ((ordered[ordered.length - 1][4] - ordered[0][3]) / ordered[0][3]) * 100
+    : 0
+  const direction: 'bullish' | 'bearish' | 'flat' =
+    netChangePct >= 0.15 ? 'bullish' : netChangePct <= -0.15 ? 'bearish' : 'flat'
+  // Consecutive streak from newest (candles[0])
+  let streak = 1
+  const isUp = candles[0][4] >= candles[0][3]
+  for (let i = 1; i < candles.length; i++) {
+    if ((candles[i][4] >= candles[i][3]) === isUp) streak++
+    else break
+  }
+  return { direction, netChangePct, upFraction: upCount / ordered.length, streak }
+}
+
 const quantCache = new Map<string, QuantSignals>()
 
 export function computeQuantSignals(
@@ -804,8 +832,10 @@ export function computeQuantSignals(
   strike:      number,
   distancePct: number,
   minutesLeft: number,
+  candles1h?:  OHLCVCandle[],  // 1h candles, newest first — intraday trend
+  candles4h?:  OHLCVCandle[],  // 4h candles, newest first — macro trend
 ): QuantSignals {
-  const input = {candles, liveCandles, orderbook, spot, strike, distancePct, minutesLeft}
+  const input = {candles, liveCandles, orderbook, spot, strike, distancePct, minutesLeft, candles1h, candles4h}
   const key = crypto.createHash('sha256').update(JSON.stringify(input)).digest('hex')
   if (quantCache.has(key)) return quantCache.get(key)!
   const gkVol15m        = candles ? computeGarmanKlassVol(candles) : null
@@ -901,6 +931,8 @@ export function computeQuantSignals(
     skewKurt,
     volOfVol,
     obImpliedProb,
+    trend1h: computeTrend(candles1h),
+    trend4h: computeTrend(candles4h),
   }
   quantCache.set(key, result)
   return result
@@ -915,6 +947,35 @@ export function formatQuantBrief(
 ): string {
   const ds    = distancePct >= 0 ? '+' : ''
   const lines: string[] = ['══════ QUANTITATIVE SIGNALS ══════']
+
+  // ── Multi-timeframe trend ───────────────────────────────────────────────────
+  if (sig.trend4h || sig.trend1h) {
+    lines.push('\n[MULTI-TIMEFRAME TREND — anchor your directional prior here]')
+    if (sig.trend4h) {
+      const t = sig.trend4h
+      const streak = `${t.streak}-candle ${t.direction === 'bullish' ? '▲' : t.direction === 'bearish' ? '▼' : '—'} streak`
+      lines.push(
+        `  4h macro trend:   ${t.direction.toUpperCase().padEnd(7)} | net ${t.netChangePct >= 0 ? '+' : ''}${t.netChangePct.toFixed(2)}% | ${Math.round(t.upFraction * 100)}% candles up | ${streak}`
+      )
+    }
+    if (sig.trend1h) {
+      const t = sig.trend1h
+      const streak = `${t.streak}-candle ${t.direction === 'bullish' ? '▲' : t.direction === 'bearish' ? '▼' : '—'} streak`
+      lines.push(
+        `  1h intraday trend: ${t.direction.toUpperCase().padEnd(7)} | net ${t.netChangePct >= 0 ? '+' : ''}${t.netChangePct.toFixed(2)}% | ${Math.round(t.upFraction * 100)}% candles up | ${streak}`
+      )
+    }
+    // Alignment note
+    const t4 = sig.trend4h?.direction
+    const t1 = sig.trend1h?.direction
+    if (t4 && t1) {
+      if (t4 === t1 && t4 !== 'flat') {
+        lines.push(`  → ALIGNED ${t4.toUpperCase()}: Both timeframes agree — strong prior. A single 15m counter-move is likely noise.`)
+      } else if (t4 !== 'flat' && t1 !== 'flat' && t4 !== t1) {
+        lines.push(`  → CONFLICTED: 4h is ${t4.toUpperCase()}, 1h is ${t1.toUpperCase()}. Intraday trend is reversing vs macro. Weight d-score + orderbook heavily.`)
+      }
+    }
+  }
 
   // ── Pricing models ──────────────────────────────────────────────────────────
   lines.push('\n[PRICING MODELS — use as calibrated prior]')

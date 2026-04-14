@@ -57,6 +57,8 @@ export async function runAgentPipeline(
   emit?: (key: string, result: AgentResult<any>) => void,  // SSE streaming callback
   portfolioValueCents: number = 0,  // live Kalshi balance (cash + positions) in cents
   apiKeys?: Record<string, string>, // per-provider API keys from user settings
+  candles1h?: OHLCVCandle[],  // last 12 × 1h candles — intraday trend context
+  candles4h?: OHLCVCandle[],  // last 7 × 4h candles — macro trend context
 ): Promise<PipelineState> {
   const cycleId = ++cycleCounter
   const cycleStartedAt = new Date().toISOString()
@@ -104,6 +106,8 @@ export async function runAgentPipeline(
       orModelOverride,
       signal,
       prevContext,
+      candles1h,
+      candles4h,
     )
     emit?.('sentiment',   grok.sentiment)
     emit?.('probability', grok.probability)
@@ -158,6 +162,8 @@ export async function runAgentPipeline(
     signal,
     apiKeys,
     aiRisk,      // true = Grok-powered sentiment
+    candles1h,
+    candles4h,
   )
   emit?.('sentiment', sentResult)
 
@@ -178,6 +184,8 @@ export async function runAgentPipeline(
     signal,
     apiKeys,
     aiRisk,      // true = Grok-powered probability
+    candles1h,
+    candles4h,
   )
   emit?.('probability', probResult)
 
