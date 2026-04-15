@@ -1,75 +1,77 @@
 import { NextResponse } from 'next/server'
+import https from 'node:https'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
+// ── In-memory price cache (survives warm instances, resets on cold start) ─────
+const g = globalThis as typeof globalThis & {
+  _btcPriceCache?: { price: number; change24h: number; source: string; at: number }
+}
+const CACHE_TTL_MS = 30_000  // 30s
+
+function coinbaseFetch(url: string): Promise<Response> {
+  // Local Node.js often can't verify Coinbase's intermediate cert chain.
+  // Skip TLS verification in dev only; Vercel production is unaffected.
+  if (process.env.NODE_ENV === 'production') {
+    return fetch(url, { cache: 'no-store' })
+  }
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, { rejectUnauthorized: false }, (res) => {
+      const chunks: Buffer[] = []
+      res.on('data', (c: Buffer) => chunks.push(c))
+      res.on('end', () => {
+        const body = Buffer.concat(chunks).toString('utf-8')
+        resolve(new Response(body, { status: res.statusCode ?? 200 }))
+      })
+    })
+    req.on('error', reject)
+    req.end()
+  })
+}
+
 export async function GET() {
-  // ── Primary: Coinbase (no key required) ─────────────────────────────────
-  try {
-    const res = await fetch('https://api.coinbase.com/v2/prices/BTC-USD/spot', { cache: 'no-store' })
-    if (res.ok) {
-      const cb = await res.json()
-      const price = parseFloat(cb?.data?.amount)
-      if (price > 0) {
-        return NextResponse.json({
-          price,
-          percent_change_1h:  0,
-          percent_change_24h: 0,
-          source: 'coinbase',
-          last_updated: new Date().toISOString(),
-        })
-      }
-    }
-  } catch { /* fall through */ }
-
-  // ── Fallback: CoinGecko (no key, generous free tier) ─────────────────────
-  try {
-    const res = await fetch(
-      'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd&include_24hr_change=true',
-      { cache: 'no-store' }
-    )
-    if (res.ok) {
-      const data = await res.json()
-      const price = data?.bitcoin?.usd
-      if (price > 0) {
-        return NextResponse.json({
-          price,
-          percent_change_1h:  0,
-          percent_change_24h: data?.bitcoin?.usd_24h_change ?? 0,
-          source: 'coingecko',
-          last_updated: new Date().toISOString(),
-        })
-      }
-    }
-  } catch { /* fall through */ }
-
-  // ── Fallback 2: Jupiter DEX price API (Solana wBTC/USDC) ─────────────────
-  const jupKey = process.env.JUPITER_API_KEY
-  if (jupKey) {
-    try {
-      // wBTC on Solana (Wormhole): 9n4nbM75f5Ui33ZbPYXn59EwSgE8CGsHtAeTH5YFeJ9E
-      const res = await fetch(
-        'https://api.jup.ag/price/v2?ids=9n4nbM75f5Ui33ZbPYXn59EwSgE8CGsHtAeTH5YFeJ9E',
-        {
-          headers: { Authorization: `Bearer ${jupKey}`, Accept: 'application/json' },
-          cache: 'no-store',
-        }
-      )
-      if (res.ok) {
-        const data = await res.json()
-        const price = data?.data?.['9n4nbM75f5Ui33ZbPYXn59EwSgE8CGsHtAeTH5YFeJ9E']?.price
-        if (price > 0) {
-          return NextResponse.json({
-            price: parseFloat(price),
-            percent_change_1h:  0,
-            percent_change_24h: 0,
-            source: 'jupiter',
-            last_updated: new Date().toISOString(),
-          })
-        }
-      }
-    } catch { /* fall through */ }
+  // ── Serve cache if fresh ───────────────────────────────────────────────────
+  const cached = g._btcPriceCache
+  if (cached && Date.now() - cached.at < CACHE_TTL_MS) {
+    return NextResponse.json({
+      price:              cached.price,
+      percent_change_1h:  0,
+      percent_change_24h: cached.change24h,
+      source:             cached.source,
+      last_updated:       new Date(cached.at).toISOString(),
+    })
   }
 
-  return NextResponse.json({ error: 'All BTC price sources failed' }, { status: 502 })
+  // ── Coinbase Exchange — same feed Kalshi settles KXBTC15M against ──────────
+  try {
+    const res = await coinbaseFetch('https://api.exchange.coinbase.com/products/BTC-USD/ticker')
+    if (res.ok) {
+      const cb = await res.json()
+      const price = parseFloat(cb?.price)
+      if (price > 0) {
+        g._btcPriceCache = { price, change24h: 0, source: 'coinbase-exchange', at: Date.now() }
+        return NextResponse.json({
+          price, percent_change_1h: 0, percent_change_24h: 0,
+          source: 'coinbase-exchange', last_updated: new Date().toISOString(),
+        })
+      }
+    } else {
+      console.warn(`[btc-price] Coinbase Exchange ${res.status}`)
+    }
+  } catch (e) { console.warn('[btc-price] Coinbase Exchange threw:', e) }
+
+  // ── Stale cache beats a 502 ────────────────────────────────────────────────
+  if (cached) {
+    console.warn('[btc-price] Coinbase Exchange failed — serving stale cache')
+    return NextResponse.json({
+      price:              cached.price,
+      percent_change_1h:  0,
+      percent_change_24h: cached.change24h,
+      source:             `${cached.source}:stale`,
+      last_updated:       new Date(cached.at).toISOString(),
+    })
+  }
+
+  return NextResponse.json({ error: 'BTC price unavailable' }, { status: 502 })
 }
