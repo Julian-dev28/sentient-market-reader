@@ -190,8 +190,8 @@ export async function runGrokTradingAgent(
 
     // ── Multi-timeframe trend context ────────────────────────────────────
     (candles1h?.length || candles4h?.length) ? `\n=== MULTI-TIMEFRAME TREND ===` : null,
-    candles4h?.length ? trendSummary(candles4h, 7, '4h') : null,
-    candles1h?.length ? trendSummary(candles1h, 12, '1h') : null,
+    candles4h?.length ? (() => { const s = trendSummary(candles4h, 7, '4h'); console.log(`[grok] ${s}`); return s })() : (console.log('[grok] 4h candles: MISSING'), null),
+    candles1h?.length ? (() => { const s = trendSummary(candles1h, 12, '1h'); console.log(`[grok] ${s}`); return s })() : (console.log('[grok] 1h candles: MISSING'), null),
     candles4h?.length ? `\n${compactCandles(candles4h, 7, '4h')}` : null,
     candles1h?.length ? `\n${compactCandles(candles1h, 12, '1h')}` : null,
     (candles1h?.length || candles4h?.length) ? [

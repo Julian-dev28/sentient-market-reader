@@ -154,9 +154,9 @@ function MarketDiscoveryBody({ output, color }: { output: any; color: string }) 
       </div>
 
       {/* Strike hero */}
-      <div style={{ marginBottom: 12 }}>
-        <div style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>Strike price</div>
-        <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 22, fontWeight: 900, color: 'var(--text-primary)', letterSpacing: '-0.02em', lineHeight: 1 }}>
+      <div style={{ marginBottom: 10 }}>
+        <div style={{ fontSize: 8, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 2 }}>Strike price</div>
+        <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 20, fontWeight: 900, color: 'var(--text-primary)', letterSpacing: '-0.03em', lineHeight: 1 }}>
           {output.strikePrice ? `$${output.strikePrice.toLocaleString('en-US', { maximumFractionDigits: 2 })}` : '—'}
         </div>
       </div>
@@ -185,12 +185,12 @@ function PriceFeedBody({ output, color }: { output: any; color: string }) {
     <div>
       {/* BTC price hero */}
       <div style={{ marginBottom: 10 }}>
-        <div style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>BTC / USD</div>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-          <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 22, fontWeight: 900, color: 'var(--text-primary)', letterSpacing: '-0.02em', lineHeight: 1 }}>
+        <div style={{ fontSize: 8, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 2 }}>BTC / USD</div>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+          <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 20, fontWeight: 900, color: 'var(--text-primary)', letterSpacing: '-0.03em', lineHeight: 1 }}>
             {output.currentPrice ? `$${output.currentPrice.toLocaleString('en-US', { maximumFractionDigits: 2 })}` : '—'}
           </span>
-          <span style={{ fontSize: 14, color: dir1h ? 'var(--green)' : 'var(--pink)' }}>{dir1h ? '▲' : '▼'}</span>
+          <span style={{ fontSize: 12, color: dir1h ? 'var(--green)' : 'var(--pink)' }}>{dir1h ? '▲' : '▼'}</span>
         </div>
       </div>
 
@@ -221,23 +221,21 @@ function SentimentBody({ output, color }: { output: any; color: string }) {
   // Map score -1→+1 to 0→1 fill
   const barFill = (score + 1) / 2
 
-  const labelBg    = bullish ? 'rgba(45,158,107,0.12)'  : bearish ? 'rgba(192,69,62,0.12)'  : 'rgba(0,0,0,0.06)'
-  const labelBdr   = bullish ? 'rgba(45,158,107,0.25)'  : bearish ? 'rgba(192,69,62,0.25)'  : 'transparent'
-  const labelColor = bullish ? 'var(--green-dark)'       : bearish ? 'var(--pink)'             : 'var(--text-muted)'
+  const labelColor = bullish ? 'var(--green-dark)' : bearish ? 'var(--pink)' : 'var(--text-muted)'
 
   return (
     <div>
       {/* Score hero */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-        <div>
-          <div style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>Conviction score</div>
-          <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 28, fontWeight: 900, color: scoreColor, letterSpacing: '-0.03em', lineHeight: 1 }}>
+      <div style={{ marginBottom: 8 }}>
+        <div style={{ fontSize: 8, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 3 }}>Conviction score</div>
+        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
+          <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 28, fontWeight: 900, color: scoreColor, letterSpacing: '-0.04em', lineHeight: 1 }}>
             {score >= 0 ? '+' : ''}{score.toFixed(3)}
           </div>
+          <span style={{ fontSize: 11, fontWeight: 800, color: labelColor, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            {label || '—'}
+          </span>
         </div>
-        <span style={{ fontSize: 10, fontWeight: 800, color: labelColor, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
-          {label || '—'}
-        </span>
       </div>
 
       {/* Sentiment bar: bear → bull */}
@@ -266,12 +264,12 @@ function SentimentBody({ output, color }: { output: any; color: string }) {
       {/* Sub-signals */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
         <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 8, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>Momentum</div>
-          <MiniBar value={(output.momentum + 1) / 2} color={output.momentum > 0 ? 'var(--green)' : 'var(--pink)'} height={4} delay={200} />
+          <div style={{ fontSize: 8, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>Momentum</div>
+          <MiniBar value={(output.momentum + 1) / 2} color={output.momentum > 0 ? 'var(--green)' : 'var(--pink)'} height={5} delay={200} />
         </div>
         <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 8, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>Order flow</div>
-          <MiniBar value={(output.orderbookSkew + 1) / 2} color={output.orderbookSkew > 0 ? 'var(--green)' : 'var(--pink)'} height={4} delay={260} />
+          <div style={{ fontSize: 8, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>Order flow</div>
+          <MiniBar value={(output.orderbookSkew + 1) / 2} color={output.orderbookSkew > 0 ? 'var(--green)' : 'var(--pink)'} height={5} delay={260} />
         </div>
       </div>
 
@@ -305,25 +303,21 @@ function ProbabilityBody({ output, color, aiMode }: { output: any; color: string
 
   const recColor  = rec === 'YES' ? 'var(--green)' : rec === 'NO' ? 'var(--blue)' : 'var(--text-muted)'
   const edgeColor = edgePct >= 0 ? 'var(--green-dark)' : 'var(--pink)'
-  const edgeBg    = edgePct >= 0 ? 'rgba(45,158,107,0.1)' : 'rgba(192,69,62,0.1)'
-  const edgeBdr   = edgePct >= 0 ? 'rgba(45,158,107,0.22)' : 'rgba(192,69,62,0.22)'
-
   const confColor = conf === 'high' ? 'var(--green-dark)' : conf === 'medium' ? 'var(--amber)' : 'var(--text-muted)'
-  const confBg    = conf === 'high' ? 'rgba(45,158,107,0.1)' : conf === 'medium' ? 'rgba(184,121,10,0.1)' : 'rgba(0,0,0,0.05)'
 
   return (
     <div>
       {/* Recommendation + pModel hero */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 10 }}>
         <div>
-          <div style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>P(YES) — model</div>
-          <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 28, fontWeight: 900, color: recColor, letterSpacing: '-0.03em', lineHeight: 1 }}>
+          <div style={{ fontSize: 8, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 2 }}>P(YES) — model</div>
+          <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 28, fontWeight: 900, color: recColor, letterSpacing: '-0.04em', lineHeight: 1 }}>
             {(pModel * 100).toFixed(1)}%
           </div>
         </div>
 
         <div style={{ textAlign: 'right' }}>
-          <div style={{ fontSize: 8, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>Edge</div>
+          <div style={{ fontSize: 8, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 2 }}>Edge</div>
           <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 18, fontWeight: 900, color: edgeColor, lineHeight: 1 }}>
             {edgePct >= 0 ? '+' : ''}{edgePct.toFixed(1)}%
           </div>
@@ -380,8 +374,6 @@ function ProbabilityBody({ output, color, aiMode }: { output: any; color: string
 function RiskBody({ output, color, aiMode }: { output: any; color: string; aiMode?: boolean }) {
   const approved = output.approved
   const approvedColor = approved ? 'var(--green)' : 'var(--pink)'
-  const approvedBg    = approved ? 'rgba(45,158,107,0.1)' : 'rgba(192,69,62,0.1)'
-  const approvedBdr   = approved ? 'rgba(45,158,107,0.25)' : 'rgba(192,69,62,0.25)'
 
   return (
     <div>
@@ -402,9 +394,9 @@ function RiskBody({ output, color, aiMode }: { output: any; color: string; aiMod
         <>
           {/* Size */}
           <div style={{ marginBottom: 10 }}>
-            <div style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>Position size</div>
+            <div style={{ fontSize: 8, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 2 }}>Position size</div>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 5 }}>
-              <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 22, fontWeight: 900, color, lineHeight: 1 }}>
+              <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 26, fontWeight: 900, color, lineHeight: 1, letterSpacing: '-0.03em' }}>
                 {output.positionSize ?? '—'}
               </span>
               <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>contracts</span>
@@ -417,7 +409,7 @@ function RiskBody({ output, color, aiMode }: { output: any; color: string; aiMod
 
       {!approved && output.rejectionReason && (
         <div style={{
-          fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', lineHeight: 1.65,
+          fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', lineHeight: 1.7,
           borderLeft: '2px solid var(--border-bright)', paddingLeft: 8,
           whiteSpace: 'pre-wrap',
         }}>
@@ -437,8 +429,6 @@ function ExecutionBody({ output, color }: { output: any; color: string }) {
   const isPass  = action === 'PASS'
 
   const actionColor = action === 'BUY_YES' ? 'var(--green)' : action === 'BUY_NO' ? 'var(--blue)' : 'var(--text-muted)'
-  const actionBg    = action === 'BUY_YES' ? 'rgba(45,158,107,0.12)' : action === 'BUY_NO' ? 'rgba(58,114,168,0.12)' : 'rgba(0,0,0,0.05)'
-  const actionBdr   = action === 'BUY_YES' ? 'rgba(45,158,107,0.28)' : action === 'BUY_NO' ? 'rgba(58,114,168,0.28)' : 'transparent'
 
   // Cost bar: cost as fraction of payout
   const costFill  = payout > 0 ? Math.min(1, cost / payout) : 0
@@ -446,25 +436,25 @@ function ExecutionBody({ output, color }: { output: any; color: string }) {
   return (
     <div>
       {/* Action hero */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 10 }}>
         <div>
-          <div style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 5 }}>Order</div>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-            <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 16, fontWeight: 900, color: actionColor, letterSpacing: '0.02em' }}>
+          <div style={{ fontSize: 8, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 3 }}>Order</div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 7 }}>
+            <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 20, fontWeight: 900, color: actionColor, letterSpacing: '-0.01em' }}>
               {action.replace('_', ' ')}
             </span>
             {output.limitPrice != null && (
-              <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)' }}>
+              <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 13, fontWeight: 700, color: 'var(--text-secondary)' }}>
                 {output.limitPrice}¢
               </span>
             )}
           </div>
         </div>
 
-        {/* ROI badge */}
+        {/* ROI */}
         {!isPass && cost > 0 && (
           <div style={{ textAlign: 'right' }}>
-            <div style={{ fontSize: 8, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>ROI if win</div>
+            <div style={{ fontSize: 8, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 2 }}>ROI if win</div>
             <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 18, fontWeight: 900, color, lineHeight: 1 }}>
               +{roi.toFixed(1)}%
             </div>
@@ -475,14 +465,14 @@ function ExecutionBody({ output, color }: { output: any; color: string }) {
       {!isPass && (
         <>
           {/* Cost vs Payout */}
-          <div style={{ display: 'flex', gap: 12, marginBottom: 10 }}>
+          <div style={{ display: 'flex', gap: 12, marginBottom: 8 }}>
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>Cost</div>
-              <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 16, fontWeight: 800, color: 'var(--text-primary)' }}>${cost.toFixed(2)}</div>
+              <div style={{ fontSize: 8, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 2 }}>Cost</div>
+              <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 17, fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.02em' }}>${cost.toFixed(2)}</div>
             </div>
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>Payout</div>
-              <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 16, fontWeight: 800, color }}>
+              <div style={{ fontSize: 8, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 2 }}>Payout</div>
+              <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 17, fontWeight: 800, color, letterSpacing: '-0.02em' }}>
                 ${payout.toFixed(2)}
               </div>
             </div>
@@ -534,65 +524,70 @@ function AgentCard({
 
   return (
     <div style={{
-      padding: '16px 16px 14px',
-      borderRadius: 14,
-      background: (done || skipped) ? agent.bg : pending ? 'var(--bg-secondary)' : 'rgba(255,255,255,0.5)',
+      padding: '14px 14px 12px',
+      borderRadius: 16,
+      background: (done || skipped) ? agent.bg : pending ? 'var(--bg-secondary)' : 'var(--bg-card)',
       border: `1px solid ${(done || skipped) ? agent.border : pending ? 'var(--border-bright)' : 'var(--border)'}`,
       position: 'relative', overflow: 'hidden',
       transition: 'background 0.35s, border-color 0.35s, box-shadow 0.35s',
-      boxShadow: done ? `0 3px 20px rgba(${agent.rgb},0.13)` : 'none',
-      animation: 'none',
+      boxShadow: done ? `0 2px 16px rgba(${agent.rgb},0.10)` : 'none',
     }}>
       {/* Top accent bar */}
       {(done || skipped) && (
         <div style={{
-          position: 'absolute', top: 0, left: 0, right: 0, height: 3,
+          position: 'absolute', top: 0, left: 0, right: 0, height: 2,
           background: done ? agent.color : 'var(--amber)',
-          borderRadius: '14px 14px 0 0',
+          borderRadius: '16px 16px 0 0',
         }} />
       )}
 
-      {/* Step number */}
+      {/* Watermark step number */}
       <div style={{
-        position: 'absolute', top: 13, right: 13,
-        fontFamily: 'var(--font-geist-mono)', fontSize: 9, fontWeight: 700,
-        color: (done || skipped) ? agent.color : 'var(--text-light)',
-        opacity: 0.55, letterSpacing: '0.04em',
+        position: 'absolute', bottom: -4, right: 10,
+        fontFamily: 'var(--font-geist-mono)', fontSize: 60, fontWeight: 900, lineHeight: 1,
+        color: 'var(--text-primary)', opacity: (done || skipped) ? 0.04 : 0.025,
+        letterSpacing: '-0.04em', pointerEvents: 'none', userSelect: 'none',
       }}>
-        {String(index + 1).padStart(2, '0')}
+        {index + 1}
       </div>
 
-      {/* Icon + label row */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+      {/* Header row: circle icon + label + status */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 10 }}>
+        {/* Circle icon — no border, just tinted bg */}
         <div style={{
-          width: 36, height: 36, borderRadius: 9, flexShrink: 0,
-          background: (done || skipped) ? `rgba(${agent.rgb},0.15)` : 'var(--bg-secondary)',
-          border: `1.5px solid ${(done || skipped) ? agent.border : 'var(--border)'}`,
+          width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
+          background: (done || skipped) ? `rgba(${agent.rgb},0.18)` : 'rgba(0,0,0,0.05)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 16, color: done ? agent.color : 'var(--text-light)',
-          animation: 'none',
+          fontSize: 13, color: done ? agent.color : 'var(--text-light)',
           transition: 'all 0.3s',
         }}>{agent.icon}</div>
 
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{
-            fontSize: 13, fontWeight: 800, letterSpacing: '-0.02em',
+            fontSize: 12, fontWeight: 800, letterSpacing: '-0.02em',
             color: (done || skipped) ? 'var(--text-primary)' : 'var(--text-muted)',
             lineHeight: 1.2,
           }}>{agent.label}</div>
           {done && (
-            <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2, fontFamily: 'var(--font-geist-mono)', opacity: 0.7 }}>
+            <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 1, fontFamily: 'var(--font-geist-mono)', opacity: 0.65 }}>
               {agent.desc}
             </div>
           )}
         </div>
 
-        {done    && <span style={{ fontSize: 14, color: agent.color, flexShrink: 0, marginRight: 18 }}>✓</span>}
-        {skipped && <span style={{ fontSize: 12, color: 'var(--amber)', flexShrink: 0, marginRight: 18 }}>—</span>}
+        {/* Status tick */}
+        {done    && <span style={{ fontSize: 11, color: agent.color, flexShrink: 0, opacity: 0.9 }}>✓</span>}
+        {skipped && <span style={{ fontSize: 11, color: 'var(--amber)', flexShrink: 0 }}>—</span>}
+        {/* Duration inline */}
+        {result?.durationMs != null && (
+          <span style={{ fontSize: 8, color: 'var(--text-muted)', fontFamily: 'var(--font-geist-mono)', opacity: 0.5, flexShrink: 0 }}>
+            {result.durationMs >= 1000 ? (result.durationMs / 1000).toFixed(1) + 's' : result.durationMs + 'ms'}
+          </span>
+        )}
       </div>
 
       {/* Card body */}
-      <div style={{ borderTop: `1px solid rgba(${agent.rgb},0.14)`, paddingTop: 12 }}>
+      <div style={{ borderTop: `1px solid rgba(${agent.rgb},0.12)`, paddingTop: 10 }}>
         {result ? (() => {
           const o = result.output
           if (agent.key === 'marketDiscovery') return <MarketDiscoveryBody output={o} color={agent.color} />
@@ -613,13 +608,6 @@ function AgentCard({
           </div>
         )}
       </div>
-
-      {/* Duration */}
-      {result?.durationMs != null && (
-        <div style={{ marginTop: 10, fontSize: 9, color: 'var(--text-muted)', fontFamily: 'var(--font-geist-mono)', opacity: 0.55 }}>
-          {result.durationMs >= 1000 ? (result.durationMs / 1000).toFixed(1) + 's' : result.durationMs + 'ms'}
-        </div>
-      )}
     </div>
   )
 }
