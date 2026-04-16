@@ -33,7 +33,7 @@ async function fetchWithRetry(url: string, retries = 3): Promise<Response> {
  *   2. BTC    — 2s     — /api/btc-price
  *   3. OB     — 1s     — /api/orderbook/{ticker}
  */
-export function useMarketTick(ticker: string | null): MarketTick {
+export function useMarketTick(ticker: string | null, marketMode: '15m' | 'hourly' = '15m'): MarketTick {
   const [liveMarket,       setLiveMarket]       = useState<KalshiMarket | null>(null)
   const [liveOrderbook,    setLiveOrderbook]    = useState<KalshiOrderbook | null>(null)
   const [liveBTCPrice,     setLiveBTCPrice]     = useState<number | null>(null)
@@ -41,6 +41,9 @@ export function useMarketTick(ticker: string | null): MarketTick {
 
   const prevTickerRef   = useRef(ticker)
   const marketCloseRef  = useRef<number | null>(null)  // ms timestamp of current market's close_time
+  const marketModeRef   = useRef(marketMode)
+
+  useEffect(() => { marketModeRef.current = marketMode }, [marketMode])
 
   useEffect(() => {
     if (ticker !== prevTickerRef.current) {
@@ -70,9 +73,13 @@ export function useMarketTick(ticker: string | null): MarketTick {
         const t = prevTickerRef.current
         // If current market has passed its close_time, discover the next one
         const marketClosed = marketCloseRef.current !== null && marketCloseRef.current < Date.now()
+        // In hourly mode: never fall back to /api/markets (which returns KXBTC15M).
+        // Pipeline provides the KXBTCD ticker — just stay quiet until it arrives.
+        const isHourly = marketModeRef.current === 'hourly'
         const url = (t && !marketClosed)
           ? `/api/market-quote/${encodeURIComponent(t)}`
-          : '/api/markets'
+          : isHourly ? null : '/api/markets'
+        if (!url) return  // hourly mode, no ticker yet — skip
 
         const res = await fetchWithRetry(url)
 

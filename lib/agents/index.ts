@@ -59,6 +59,7 @@ export async function runAgentPipeline(
   apiKeys?: Record<string, string>, // per-provider API keys from user settings
   candles1h?: OHLCVCandle[],  // last 12 × 1h candles — intraday trend context
   candles4h?: OHLCVCandle[],  // last 7 × 4h candles — macro trend context
+  kxbtcdMarket?: KalshiMarket | null,  // highest-liquidity KXBTCD hourly strike (AI mode only)
 ): Promise<PipelineState> {
   const cycleId = ++cycleCounter
   const cycleStartedAt = new Date().toISOString()
@@ -71,7 +72,10 @@ export async function runAgentPipeline(
     : undefined
 
   // ── Stage 1: Market Discovery ──────────────────────────────────────────
-  const mdResult = await runMarketDiscovery(markets)
+  // kxbtcdMarket is only non-null when marketMode='hourly' (gated in pipeline/route.ts).
+  // Hourly mode always uses Grok (price-prediction) — quant pipeline stays on 15m.
+  const useKxbtcd = !!kxbtcdMarket
+  const mdResult = await runMarketDiscovery(markets, kxbtcdMarket ?? null)
   emit?.('marketDiscovery', mdResult)
 
   // ── Enrich quote: compute real 1h momentum from candles if source returned 0 ──
@@ -91,7 +95,8 @@ export async function runAgentPipeline(
   // ── AI mode: single Grok agent replaces stages 3-6 ────────────────────────
   // Grok receives the full market picture and makes ALL decisions with full
   // capital authority: direction, probability, sizing, optional hedge.
-  if (aiRisk) {
+  // Hourly mode (useKxbtcd) always runs via Grok — price prediction is required for KXBTCD.
+  if (aiRisk || useKxbtcd) {
     const grok = await runGrokTradingAgent(
       enrichedQuote,
       mdResult.output.strikePrice,
@@ -108,6 +113,7 @@ export async function runAgentPipeline(
       prevContext,
       candles1h,
       candles4h,
+      useKxbtcd,  // isHourly — changes prompt + relaxes 15m-calibrated gates
     )
     emit?.('sentiment',   grok.sentiment)
     emit?.('probability', grok.probability)

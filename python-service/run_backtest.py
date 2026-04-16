@@ -450,7 +450,8 @@ def fetch_settled_markets(days_back):
                 try:
                     markets.append({'ticker': ticker, 'floor_strike': float(fs),
                                     'result': result, 'close_time': ct})
-                except: pass
+                except (ValueError, TypeError) as e:
+                    log.warning(f"Skipping market {ticker}: bad floor_strike value {fs!r}: {e}")
         if done: break
         cursor = data.get('cursor')
         if not cursor: break
@@ -877,7 +878,7 @@ def main():
     close_times = []
     for m in markets:
         try: close_times.append(datetime.fromisoformat(m['close_time'].replace('Z', '+00:00')))
-        except: pass
+        except (ValueError, KeyError) as e: log.warning(f"Skipping market with bad close_time: {m.get('ticker','?')} — {e}")
 
     earliest   = min(close_times) - timedelta(hours=10)
     latest     = max(close_times) + timedelta(minutes=30)

@@ -66,20 +66,40 @@ export default function Header({ cycleId, isRunning, lastCompletedAt, onRunCycle
 
         <div style={{ height: 22, width: 1, background: 'var(--border)', margin: '0 2px' }} />
 
+        {/* Market mode tabs */}
+        <div style={{
+          fontSize: 11, fontWeight: 700,
+          padding: '4px 12px', borderRadius: 7,
+          background: 'var(--bg-secondary)',
+          color: 'var(--text-primary)',
+          border: '1px solid var(--border)',
+        }}>
+          15m
+        </div>
+        <Link href="/dashboard/hourly" style={{
+          fontSize: 11, fontWeight: 500,
+          padding: '4px 12px', borderRadius: 7, textDecoration: 'none',
+          background: 'transparent',
+          color: 'var(--text-muted)',
+          transition: 'all 0.15s',
+        }}>
+          ◷ 1h
+        </Link>
+
+        <div style={{ height: 22, width: 1, background: 'var(--border)', margin: '0 2px' }} />
+
         {/* Page nav */}
-        {(['/dashboard', '/agent'] as const).map((href, i) => {
-          const label = i === 0 ? 'Dashboard' : 'Agent'
+        {(['/agent'] as const).map((href) => {
           const active = pathname === href
           return (
             <Link key={href} href={href} style={{
               fontSize: 11, fontWeight: active ? 700 : 500,
               padding: '4px 12px', borderRadius: 7, textDecoration: 'none',
-              border: 'none',
               background: active ? 'var(--bg-secondary)' : 'transparent',
               color: active ? 'var(--text-primary)' : 'var(--text-muted)',
               transition: 'all 0.15s',
             }}>
-              {label}
+              Agent
             </Link>
           )
         })}
