@@ -23,7 +23,11 @@ export function usePipeline(
   orModel?: string,      // override OpenRouter model ID for sentiment + probability
   btcPrice?: number,     // live BTC price — used for strike-flip detection
   strikePrice?: number,  // current market strike price
+  marketMode: '15m' | 'hourly' = '15m',  // '15m' = KXBTC15M, 'hourly' = KXBTCD
 ) {
+  // Separate storage keys so the hourly page never loads stale 15m state
+  const STORAGE_KEY = marketMode === 'hourly' ? 'sentient-pipeline-hourly' : 'sentient-pipeline'
+  const LAST_CYCLE_KEY = marketMode === 'hourly' ? 'sentient-last-cycle-hourly' : 'sentient-last-cycle'
   // All persisted state inits to empty/null to match SSR — restored in useEffect below.
   // This prevents hydration mismatches where server renders 0/null and client renders
   // real localStorage values.
@@ -54,11 +58,11 @@ export function usePipeline(
   // so SSR and client both start with the same values and hydration passes.
   useEffect(() => {
     try {
-      const savedPipeline = localStorage.getItem('sentient-pipeline')
+      const savedPipeline = localStorage.getItem(STORAGE_KEY)
       if (savedPipeline) setPipeline(JSON.parse(savedPipeline) as PipelineState)
     } catch {}
     try {
-      const lastCycle = localStorage.getItem('sentient-last-cycle')
+      const lastCycle = localStorage.getItem(LAST_CYCLE_KEY)
       if (lastCycle) {
         const elapsed = Math.floor((Date.now() - Number(lastCycle)) / 1000)
         const remaining = Math.max(0, CYCLE_INTERVAL_MS / 1000 - elapsed)
@@ -70,7 +74,7 @@ export function usePipeline(
 
   useEffect(() => {
     if (pipeline) {
-      try { localStorage.setItem('sentient-pipeline', JSON.stringify(pipeline)) } catch {}
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(pipeline)) } catch {}
     }
   }, [pipeline])
 
@@ -98,6 +102,7 @@ export function usePipeline(
     try {
       const params = new URLSearchParams()
       if (aiRisk) params.set('aiRisk', 'true')
+      if (marketMode !== '15m') params.set('marketMode', marketMode)
       if (provider2) params.set('provider2', provider2)
       if (providers && providers.length > 1) params.set('providers', providers.join(','))
       if (orModel) params.set('orModel', orModel)
@@ -121,9 +126,12 @@ export function usePipeline(
         headers: reqHeaders,
       })
       if (!res.ok) {
-        if (res.status === 503) throw new Error('No active KXBTC15M market — trading hours are ~11:30 AM–midnight ET weekdays')
         const body = await res.json().catch(() => ({}))
-        throw new Error(body.error ?? `Pipeline error ${res.status}`)
+        // Preserve the error code so the UI can show targeted messages (e.g. KXBTCD_NO_MARKET)
+        const msg = body.error === 'KXBTCD_NO_MARKET'
+          ? 'KXBTCD_NO_MARKET'
+          : (body.message ?? body.error ?? `Pipeline error ${res.status}`)
+        throw new Error(msg)
       }
 
       // ── Stream SSE events ─────────────────────────────────────────────
@@ -168,7 +176,13 @@ export function usePipeline(
       const exec = data.agents.execution.output
 
       // ── Real order: ONLY when Agent is active ──────────────────────────────
-      if (autoTrade && liveMode && exec.action !== 'PASS' && exec.side && exec.limitPrice && exec.marketTicker) {
+      // Safety guard: hourly mode must only trade KXBTCD; 15m must only trade KXBTC15M
+      const expectedPrefix = marketMode === 'hourly' ? 'KXBTCD' : 'KXBTC15M'
+      const tickerOk = exec.marketTicker?.startsWith(expectedPrefix)
+      if (!tickerOk && exec.marketTicker) {
+        console.error(`[bot] BLOCKED: ticker ${exec.marketTicker} is wrong series for ${marketMode} mode (expected ${expectedPrefix})`)
+      }
+      if (autoTrade && liveMode && exec.action !== 'PASS' && exec.side && exec.limitPrice && exec.marketTicker && tickerOk) {
         const contracts = Math.max(1, exec.contracts ?? Math.floor(100 / (exec.limitPrice / 100)))
         // Fetch fresh quote right before submitting.
         // Use the pipeline's limit price as our cap — the IOC order will fill at the
@@ -206,7 +220,9 @@ export function usePipeline(
             })
             if (!orderRes.ok) {
               const errData = await orderRes.json().catch(() => ({}))
+              const errMsg = errData?.error ?? `Order failed ${orderRes.status}`
               console.error(`[bot] Order failed ${orderRes.status}:`, errData)
+              setError(`Order failed: ${errMsg}`)
             } else {
               const orderData = await orderRes.json()
               console.log(`[bot] Order placed: ${exec.side.toUpperCase()} ${contracts}× @ ${submitPrice}¢ IOC — id=${orderData?.order?.order_id ?? 'n/a'}`)
@@ -232,14 +248,14 @@ export function usePipeline(
       setIsRunning(false)
       setServerLocked(false)
       lastCycleRef.current = Date.now()
-      try { localStorage.setItem('sentient-last-cycle', String(Date.now())) } catch {}
+      try { localStorage.setItem(LAST_CYCLE_KEY, String(Date.now())) } catch {}
       // Snapshot price so the delta watcher can measure movement since this run
       if (btcPriceRef.current)    lastCyclePriceRef.current  = btcPriceRef.current
       if (strikePriceRef.current) lastCycleStrikeRef.current = strikePriceRef.current
       // AI mode shows 90s cooldown; quant shows full 5-min countdown
       setNextCycleIn(aiRisk ? MIN_COOLDOWN_MS / 1000 : CYCLE_INTERVAL_MS / 1000)
     }
-  }, [liveMode, autoTrade, aiRisk, provider2, providers, orModel])
+  }, [liveMode, autoTrade, aiRisk, marketMode, provider2, providers, orModel])
 
   // Check server lock state on mount so the button reflects server reality
   useEffect(() => {

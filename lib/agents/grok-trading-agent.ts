@@ -74,6 +74,7 @@ interface GrokTradeDecision {
   action:           'BUY_YES' | 'BUY_NO' | 'PASS'
   contracts:        number                              // 0 if PASS
   limitPrice:       number                              // ¢ to submit order at
+  predictedPrice?:  number                              // hourly only: Grok's BTC price prediction at close
   hedge: {
     action:    'BUY_YES' | 'BUY_NO'
     contracts: number
@@ -101,6 +102,7 @@ export async function runGrokTradingAgent(
   prevContext?:         string,
   candles1h?:           OHLCVCandle[],   // 1h candles, newest first — intraday trend
   candles4h?:           OHLCVCandle[],   // 4h candles, newest first — macro trend
+  isHourly?:            boolean,          // true = KXBTCD hourly market (price-prediction mode)
 ): Promise<{
   sentiment:   AgentResult<SentimentOutput>
   probability: AgentResult<ProbabilityOutput>
@@ -166,7 +168,75 @@ export async function runGrokTradingAgent(
     `Basis (perp-spot): ${derivatives.basis >= 0 ? '+' : ''}${derivatives.basis.toFixed(4)}% (${derivatives.basis > 0.02 ? 'contango/bullish' : derivatives.basis < -0.02 ? 'backwardation/bearish' : 'flat'})`,
   ].join('\n') : null
 
-  const prompt = [
+  // ── Trend logging (both modes) ────────────────────────────────────────────
+  if (candles4h?.length) console.log(`[grok] ${trendSummary(candles4h, 7, '4h')}`)
+  else console.log('[grok] 4h candles: MISSING')
+  if (candles1h?.length) console.log(`[grok] ${trendSummary(candles1h, 12, '1h')}`)
+  else console.log('[grok] 1h candles: MISSING')
+
+  // ── HOURLY MODE prompt (KXBTCD) ───────────────────────────────────────────
+  // Grok must FIRST predict where BTC will be at the end of the hour,
+  // THEN bet YES if predicted_price > strike, NO if predicted_price < strike.
+  const prompt = isHourly ? [
+    `You are an autonomous BTC price prediction trading agent. Your job: predict where BTC will trade at the END OF THE CURRENT HOUR, then place the correct Kalshi binary bet.`,
+    ``,
+    `=== MARKET (KXBTCD HOURLY) ===`,
+    `Kalshi binary: YES wins if BTC closes ABOVE $${strikePrice.toLocaleString()} | NO wins if BTC closes BELOW | window closes in ${minutesUntilExpiry.toFixed(1)} min`,
+    `BTC spot: $${quote.price.toLocaleString()} — currently ${aboveStrike ? 'ABOVE' : 'BELOW'} strike by $${distUSD.toFixed(0)} (${Math.abs(distanceFromStrikePct).toFixed(3)}%)`,
+    `1h change: ${quote.percent_change_1h >= 0 ? '+' : ''}${quote.percent_change_1h.toFixed(3)}% | 24h: ${quote.percent_change_24h >= 0 ? '+' : ''}${quote.percent_change_24h.toFixed(3)}%`,
+    ``,
+    `=== KALSHI PRICES ===`,
+    `YES: ask=${yesAsk}¢  bid=${yesBid}¢  (buy YES → win ${100 - yesAsk}¢/contract if BTC closes ABOVE $${strikePrice.toLocaleString()})`,
+    `NO:  ask=${noAsk}¢   bid=${noBid}¢   (buy NO  → win ${100 - noAsk}¢/contract if BTC closes BELOW $${strikePrice.toLocaleString()})`,
+    `Fee: 1.75% × P × (1-P) per contract (maker)`,
+    ``,
+    `=== YOUR TASK (3 STEPS) ===`,
+    `STEP 1 — PREDICT: Where will BTC trade at the close of this hour?`,
+    `  - Use 4h macro trend as your primary prior`,
+    `  - Use 1h trend as your intraday prior`,
+    `  - Consider momentum, volume, derivatives (funding/basis), and recent 15m candles as supporting signals`,
+    `  - State a specific price target (e.g. "BTC at $104,500")`,
+    `  - Record this as predictedPrice in your response`,
+    ``,
+    `STEP 2 — DECIDE (from your prediction):`,
+    `  - If predictedPrice > $${strikePrice.toLocaleString()} → BUY YES`,
+    `  - If predictedPrice < $${strikePrice.toLocaleString()} → BUY NO`,
+    `  - PASS only if you genuinely cannot forecast direction (e.g. BTC ±0.01% of strike with 2 min left)`,
+    ``,
+    `STEP 3 — SIZE using quarter-Kelly:`,
+    `  pModel = P(BTC closes above strike) derived from your predicted price and volatility`,
+    `  f = max(0, (b×pWin − (1−pWin)) / b), budget = f × 0.25 × $${portfolioValue.toFixed(0)}, contracts = floor(budget / costPerC)`,
+    `  High conviction hourly call → size assertively.`,
+    ``,
+    `=== MULTI-TIMEFRAME TREND (PRIMARY SIGNALS) ===`,
+    candles4h?.length ? trendSummary(candles4h, 7, '4h') : '4h candles: unavailable',
+    candles1h?.length ? trendSummary(candles1h, 12, '1h') : '1h candles: unavailable',
+    candles4h?.length ? `\n${compactCandles(candles4h, 7, '4h')}` : null,
+    candles1h?.length ? `\n${compactCandles(candles1h, 12, '1h')}` : null,
+    ``,
+    `TREND PRIORITY: For hourly windows, 4h > 1h >> 15m > 1m.`,
+    `A single 15m candle reversal does NOT override the macro trend.`,
+    ``,
+    `=== SUPPORTING SIGNALS ===`,
+    quantBrief,
+    derivBlock,
+    candles?.length ? `\n${compactCandles(candles, 6, '15m')}` : null,
+    liveCandles?.length ? `\n${compactCandles(liveCandles, 8, '1m')}` : null,
+    prevContext ? `\n=== PREVIOUS CYCLE ===\n${prevContext}` : null,
+    ``,
+    `=== YOUR PORTFOLIO ===`,
+    `Balance: $${portfolioValue.toFixed(2)} | Daily P&L: $${session.dailyPnl.toFixed(2)} | Trades today: ${session.tradeCount}/${MAX_DAILY_TRADES}`,
+    `Max contracts if buying YES @ ${yesAsk}¢: ${maxContractsYes}`,
+    `Max contracts if buying NO  @ ${noAsk}¢:  ${maxContractsNo}`,
+    ``,
+    `=== HARD RULES ===`,
+    `- Minimum limit price: 3¢. Maximum: 97¢.`,
+    `- Your predicted price DETERMINES YES/NO — do not second-guess it after computing it.`,
+    `- PASS is only valid if the market is untradeable (extreme spread, no liquidity) or you truly cannot forecast direction.`,
+  ].filter(Boolean).join('\n')
+
+  // ── 15-MINUTE MODE prompt (KXBTC15M) ─────────────────────────────────────
+  : [
     `You are an autonomous quantitative BTC prediction market trading agent with full capital authority.`,
     ``,
     `=== MARKET ===`,
@@ -190,8 +260,8 @@ export async function runGrokTradingAgent(
 
     // ── Multi-timeframe trend context ────────────────────────────────────
     (candles1h?.length || candles4h?.length) ? `\n=== MULTI-TIMEFRAME TREND ===` : null,
-    candles4h?.length ? (() => { const s = trendSummary(candles4h, 7, '4h'); console.log(`[grok] ${s}`); return s })() : (console.log('[grok] 4h candles: MISSING'), null),
-    candles1h?.length ? (() => { const s = trendSummary(candles1h, 12, '1h'); console.log(`[grok] ${s}`); return s })() : (console.log('[grok] 1h candles: MISSING'), null),
+    candles4h?.length ? trendSummary(candles4h, 7, '4h') : null,
+    candles1h?.length ? trendSummary(candles1h, 12, '1h') : null,
     candles4h?.length ? `\n${compactCandles(candles4h, 7, '4h')}` : null,
     candles1h?.length ? `\n${compactCandles(candles1h, 12, '1h')}` : null,
     (candles1h?.length || candles4h?.length) ? [
@@ -243,7 +313,9 @@ export async function runGrokTradingAgent(
       maxTokens:     2048,
       signal,
       toolName:      'trade_decision',
-      toolDescription: 'Make a complete trade decision for this BTC 15-min Kalshi binary window',
+      toolDescription: isHourly
+        ? 'Predict BTC price at end of hour, then make a complete trade decision for this KXBTCD Kalshi hourly binary'
+        : 'Make a complete trade decision for this BTC 15-min Kalshi binary window',
       schema: {
         properties: {
           sentiment_score: { type: 'number', description: 'Directional sentiment: +1.0=strongly bullish (YES favored), -1.0=strongly bearish (NO favored).' },
@@ -252,6 +324,9 @@ export async function runGrokTradingAgent(
           action:          { type: 'string', enum: ['BUY_YES', 'BUY_NO', 'PASS'], description: 'Primary trade action.' },
           contracts:       { type: 'number', description: 'Number of contracts for primary position. 0 if PASS.' },
           limitPrice:      { type: 'number', description: 'Limit price in cents (¢) to submit the primary order at. Use ask for aggressive fill, mid for passive.' },
+          ...(isHourly ? {
+            predictedPrice: { type: 'number', description: 'Your predicted BTC price at the close of the hour. This is the key output of step 1 — it directly determines YES (predicted > strike) or NO (predicted < strike).' },
+          } : {}),
           hedge: {
             anyOf: [
               {
@@ -270,7 +345,9 @@ export async function runGrokTradingAgent(
             description: 'Optional hedge leg, or null if no hedge.',
           },
           key_signals: { type: 'array', items: { type: 'string' }, description: 'Top 3-5 signals driving this decision, most important first.' },
-          reasoning:   { type: 'string', description: 'Trade rationale as 8-10 bullet points, one per line, each starting with "• ". Cover: (1) pModel source & value, (2) d-score interpretation, (3) EV(YES) calc & result, (4) EV(NO) calc & result, (5) chosen action & why that side, (6) quarter-Kelly sizing math, (7) top 3 market signals, (8) confidence level & key uncertainty. Each bullet max 25 words. No prose paragraphs.' },
+          reasoning: isHourly
+            ? { type: 'string', description: 'Hourly trade rationale as 6-8 bullet points, each starting with "• ". Cover: (1) predicted BTC price at hour close & why, (2) 4h macro trend, (3) 1h intraday trend, (4) key supporting signals (derivatives, momentum), (5) YES/NO decision from predicted price vs strike, (6) quarter-Kelly sizing math, (7) confidence & main uncertainty. Max 25 words per bullet.' }
+            : { type: 'string', description: 'Trade rationale as 8-10 bullet points, one per line, each starting with "• ". Cover: (1) pModel source & value, (2) d-score interpretation, (3) EV(YES) calc & result, (4) EV(NO) calc & result, (5) chosen action & why that side, (6) quarter-Kelly sizing math, (7) top 3 market signals, (8) confidence level & key uncertainty. Each bullet max 25 words. No prose paragraphs.' },
         },
         required: ['sentiment_score', 'pModel', 'confidence', 'action', 'contracts', 'limitPrice', 'key_signals', 'reasoning'],
       },
@@ -313,20 +390,35 @@ export async function runGrokTradingAgent(
   const maxAffordable = action === 'BUY_NO' ? maxContractsNo : maxContractsYes
   const kCap = action === 'BUY_NO' ? kellyNo : kellyYes
   let contracts = Math.min(Math.max(0, Math.round(decision.contracts ?? 0)), maxAffordable, Math.max(kCap, 0), 500)
-  if (action !== 'PASS' && decision.contracts > contracts) {
+  if (action !== 'PASS' && (decision.contracts ?? 0) > contracts) {
     console.log(`[GrokTradingAgent] Kelly cap: Grok wanted ${decision.contracts} → ${contracts} contracts (quarter-Kelly budget)`)
   }
 
   // ── Hard safety gates ─────────────────────────────────────────────────────
+  // 0. Hourly mode: predictedPrice must be consistent with action.
+  //    If Grok predicts $X > strike but says BUY_NO (or vice versa), the prediction
+  //    determines the correct direction — override the action rather than blocking.
+  if (isHourly && action !== 'PASS' && decision.predictedPrice && strikePrice > 0) {
+    const predAbove = decision.predictedPrice > strikePrice
+    const actAbove  = action === 'BUY_YES'
+    if (predAbove !== actAbove) {
+      const corrected = predAbove ? 'BUY_YES' : 'BUY_NO'
+      console.warn(`[GrokTradingAgent] Hourly consistency: predicted $${decision.predictedPrice.toLocaleString()} vs strike $${strikePrice.toLocaleString()} → should be ${corrected}, Grok said ${action} — correcting`)
+      action = corrected
+      limitPrice = corrected === 'BUY_YES'
+        ? Math.max(3, Math.min(97, Math.round(yesAsk)))
+        : Math.max(3, Math.min(97, Math.round(noAsk)))
+    }
+  }
   // 1. Absolute price floor/ceiling (3¢/97¢) — catch data errors only
   if (action !== 'PASS' && (limitPrice < 3 || limitPrice > 97)) {
     console.warn(`[GrokTradingAgent] Safety gate: ${action} @ ${limitPrice}¢ — out of valid range [3,97], blocking`)
     action = 'PASS'
   }
-  // 2. D-score direction gate: if |d|∈[1.0,1.2], action MUST match d's direction.
-  //    This zone is the ONLY confirmed edge (empirical: +5.5pp margin, Z=2.33).
-  //    Trading against d in this zone has negative expectancy in every backtest.
-  if (action !== 'PASS' && dScore !== null && Math.abs(dScore) >= 1.0 && Math.abs(dScore) <= 1.2) {
+  // 2. D-score direction gate — 15m mode only.
+  //    D-score is calibrated on 15-min KXBTC15M windows (empirical: +5.5pp margin at |d|∈[1.0,1.2], Z=2.33).
+  //    For hourly KXBTCD, the normalization window is different — gate does not apply.
+  if (!isHourly && action !== 'PASS' && dScore !== null && Math.abs(dScore) >= 1.0 && Math.abs(dScore) <= 1.2) {
     const dDirection = dScore > 0 ? 'BUY_YES' : 'BUY_NO'
     if (action !== dDirection) {
       console.warn(`[GrokTradingAgent] Safety gate: d=${dScore.toFixed(3)} requires ${dDirection}, Grok said ${action} — blocking contrarian bet`)
@@ -371,8 +463,11 @@ export async function runGrokTradingAgent(
   const estimatedPayout = contracts  // $1 per contract if win
   const side            = recFull === 'YES' ? 'yes' : recFull === 'NO' ? 'no' : null
   const execAction      = action === 'BUY_YES' ? 'BUY_YES' : action === 'BUY_NO' ? 'BUY_NO' : 'PASS'
+  const predictedPriceNote = (isHourly && decision.predictedPrice)
+    ? ` | Predicted BTC @ close: $${decision.predictedPrice.toLocaleString()} vs strike $${strikePrice.toLocaleString()} → ${(decision.predictedPrice ?? 0) > strikePrice ? 'ABOVE (YES)' : 'BELOW (NO)'}`
+    : ''
   const execRationale   = approved
-    ? `Grok: ${action} ${contracts}× @ ${limitPrice}¢ on ${ticker}. Cost $${estimatedCost.toFixed(2)} (${pctPort}% of $${portfolioValue.toFixed(0)}). Max profit $${(estimatedPayout - estimatedCost).toFixed(2)}.${hedgeNote}`
+    ? `Grok${isHourly ? ' [HOURLY]' : ''}: ${action} ${contracts}× @ ${limitPrice}¢ on ${ticker}. Cost $${estimatedCost.toFixed(2)} (${pctPort}% of $${portfolioValue.toFixed(0)}). Max profit $${(estimatedPayout - estimatedCost).toFixed(2)}.${predictedPriceNote}${hedgeNote}`
     : `Grok PASS\n${decision.reasoning}`
 
   return {

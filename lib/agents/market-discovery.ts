@@ -2,35 +2,54 @@ import type { AgentResult, MarketDiscoveryOutput } from '../types'
 import { findNearestMarket, minutesUntilExpiry, secondsUntilExpiry } from '../kalshi'
 import type { KalshiMarket } from '../types'
 
+/** Extract strike price from a Kalshi market using available fields in priority order. */
+function extractStrike(m: KalshiMarket): number {
+  if (m.yes_sub_title) {
+    const match = m.yes_sub_title.match(/\$([\d,]+(?:\.\d+)?)/)
+    if (match) return parseFloat(match[1].replace(/,/g, ''))
+  }
+  if (m.floor_strike) return m.floor_strike
+  if (m.title) {
+    const match = m.title.match(/\$([\d,]+(?:\.\d+)?)/)
+    if (match) return parseFloat(match[1].replace(/,/g, ''))
+  }
+  return 0
+}
+
 /**
  * MarketDiscoveryAgent
  * ─────────────────────
- * Scans the KXBTC15M series for the nearest open market window.
- * Identifies the "price to beat" (strike) from the market context.
+ * When kxbtcdMarket is provided (highest-liquidity KXBTCD hourly strike),
+ * it is used directly as the active market — bypassing KXBTC15M discovery.
+ * Otherwise falls back to scanning the KXBTC15M series.
  */
 export async function runMarketDiscovery(
-  markets: KalshiMarket[]
+  markets: KalshiMarket[],
+  kxbtcdMarket?: KalshiMarket | null,
 ): Promise<AgentResult<MarketDiscoveryOutput>> {
   const start = Date.now()
 
+  // ── KXBTCD override (hourly, highest-liquidity strike) ────────────────────
+  if (kxbtcdMarket) {
+    const mins = minutesUntilExpiry(kxbtcdMarket)
+    const secs = secondsUntilExpiry(kxbtcdMarket)
+    const strikePrice = extractStrike(kxbtcdMarket)
+
+    return {
+      agentName: 'MarketDiscoveryAgent',
+      status: 'done',
+      output: { activeMarket: kxbtcdMarket, strikePrice, minutesUntilExpiry: mins, secondsUntilExpiry: secs },
+      reasoning: `KXBTCD hourly: selected ${kxbtcdMarket.ticker} (highest liquidity) — expires in ${mins.toFixed(1)} min. Strike: $${strikePrice.toLocaleString()}.`,
+      durationMs: Date.now() - start,
+      timestamp: new Date().toISOString(),
+    }
+  }
+
+  // ── KXBTC15M discovery (default 15-min window) ────────────────────────────
   const active = findNearestMarket(markets)
   const mins = active ? minutesUntilExpiry(active) : 0
   const secs = active ? secondsUntilExpiry(active) : 0
-
-  // yes_sub_title ("Price to beat: $67,912.26") matches what Kalshi displays — use it first.
-  // floor_strike can diverge from the displayed strike, so treat it as a fallback only.
-  let strikePrice = 0
-  if (active?.yes_sub_title) {
-    const match = active.yes_sub_title.match(/\$([\d,]+(?:\.\d+)?)/)
-    if (match) strikePrice = parseFloat(match[1].replace(/,/g, ''))
-  }
-  if (!strikePrice && active?.floor_strike) {
-    strikePrice = active.floor_strike
-  }
-  if (!strikePrice && active?.title) {
-    const match = active.title.match(/\$([\d,]+(?:\.\d+)?)/)
-    if (match) strikePrice = parseFloat(match[1].replace(/,/g, ''))
-  }
+  const strikePrice = active ? extractStrike(active) : 0
 
   const output: MarketDiscoveryOutput = {
     activeMarket: active,

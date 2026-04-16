@@ -123,6 +123,16 @@ const AGENTS_AI = [
   { key: 'execution'       as const, label: 'Execution',        short: 'EXEC',      icon: '▶', desc: 'Grok order',        color: 'var(--green)',  rgb: '45,158,107',     bg: 'var(--green-pale)', border: 'rgba(45,158,107,0.22)'    },
 ]
 
+// Hourly KXBTCD mode — Grok price-prediction pipeline, different semantics
+const AGENTS_HOURLY = [
+  { key: 'marketDiscovery' as const, label: 'Market Discovery', short: 'MARKET',   icon: '◎', desc: 'KXBTCD hourly scan', color: 'var(--brown)',  rgb: '74,124,142',  bg: 'var(--brown-pale)', border: 'rgba(74,124,142,0.22)' },
+  { key: 'priceFeed'       as const, label: 'Price Feed',       short: 'PRICE',    icon: '◈', desc: 'Coinbase BTC feed',  color: 'var(--green)',  rgb: '45,158,107',  bg: 'var(--green-pale)', border: 'rgba(45,158,107,0.22)'  },
+  { key: 'sentiment'       as const, label: 'Grok Forecast',    short: 'FORECAST', icon: '◉', desc: 'Price prediction',   color: 'var(--blue)',   rgb: '58,114,168',  bg: 'var(--blue-pale)',  border: 'rgba(58,114,168,0.22)'  },
+  { key: 'probability'     as const, label: 'Price Model',      short: 'MODEL',    icon: '⬟', desc: 'Predicted vs strike',color: 'var(--amber)',  rgb: '184,121,10',  bg: 'var(--amber-pale)', border: 'rgba(184,121,10,0.22)'  },
+  { key: 'risk'            as const, label: 'Sizing',           short: 'SIZE',     icon: '⬡', desc: 'Quarter-Kelly',      color: 'var(--brown)',  rgb: '74,124,142',  bg: 'var(--brown-pale)', border: 'rgba(74,124,142,0.22)'  },
+  { key: 'execution'       as const, label: 'Execution',        short: 'EXEC',     icon: '▶', desc: 'Grok order',         color: 'var(--green)',  rgb: '45,158,107',  bg: 'var(--green-pale)', border: 'rgba(45,158,107,0.22)'  },
+]
+
 function shortenProvider(raw: string): string {
   return raw.split('+').map(p => {
     p = p.trim()
@@ -141,10 +151,11 @@ function shortenProvider(raw: string): string {
 // ── Premium card body renderers ──────────────────────────────────────────────
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function MarketDiscoveryBody({ output, color }: { output: any; color: string }) {
+function MarketDiscoveryBody({ output, color, isHourly }: { output: any; color: string; isHourly?: boolean }) {
   const mins  = output.minutesUntilExpiry ?? 0
-  const urgency = mins < 3 ? 'var(--pink)' : mins < 7 ? 'var(--amber)' : color
-  const fillPct = Math.min(1, mins / 15)  // 15-min window
+  const windowMins = isHourly ? 60 : 15
+  const urgency = mins < (isHourly ? 10 : 3) ? 'var(--pink)' : mins < (isHourly ? 20 : 7) ? 'var(--amber)' : color
+  const fillPct = Math.min(1, mins / windowMins)
 
   return (
     <div>
@@ -510,12 +521,14 @@ function AgentCard({
   index,
   pipelineRunning,
   aiMode,
+  isHourly,
 }: {
   agent: typeof AGENTS_QUANT[0]
   result?: PipelineState['agents'][keyof PipelineState['agents']]
   index: number
   pipelineRunning?: boolean
   aiMode?: boolean
+  isHourly?: boolean
 }) {
   const status: AgentStatus = result?.status ?? 'idle'
   const done    = status === 'done'
@@ -590,7 +603,7 @@ function AgentCard({
       <div style={{ borderTop: `1px solid rgba(${agent.rgb},0.12)`, paddingTop: 10 }}>
         {result ? (() => {
           const o = result.output
-          if (agent.key === 'marketDiscovery') return <MarketDiscoveryBody output={o} color={agent.color} />
+          if (agent.key === 'marketDiscovery') return <MarketDiscoveryBody output={o} color={agent.color} isHourly={isHourly} />
           if (agent.key === 'priceFeed')       return <PriceFeedBody       output={o} color={agent.color} />
           if (agent.key === 'sentiment')       return <SentimentBody       output={o} color={agent.color} />
           if (agent.key === 'probability')     return <ProbabilityBody     output={o} color={agent.color} aiMode={aiMode} />
@@ -618,12 +631,15 @@ export default function AgentPipeline({
   isRunning,
   streamingAgents,
   aiMode,
+  marketMode,
 }: {
   pipeline: PipelineState | null
   isRunning: boolean
   streamingAgents?: PartialPipelineAgents
   aiMode?: boolean
+  marketMode?: '15m' | 'hourly'
 }) {
+  const isHourly = marketMode === 'hourly'
   const [elapsedMs, setElapsedMs]   = useState(0)
   const [dataAgeSec, setDataAgeSec] = useState(0)
   const startRef = useRef<number | null>(null)
@@ -652,7 +668,9 @@ export default function AgentPipeline({
       <div style={{ marginBottom: isRunning ? 10 : 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: isRunning ? 8 : 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '-0.01em' }}>
-            {aiMode
+            {isHourly
+              ? <><span style={{ color: 'var(--pink)', fontSize: 12 }}>◷</span> Grok Hourly Agent</>
+              : aiMode
               ? <><span style={{ color: 'var(--blue)', fontSize: 12 }}>✦</span> Grok AI Agent</>
               : <><span style={{ color: 'var(--brown)', fontSize: 11 }}>∑</span> Quant Pipeline</>}
           </div>
@@ -679,11 +697,11 @@ export default function AgentPipeline({
       ) : (isRunning || pipeline) ? (
         <>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            {(aiMode ? AGENTS_AI : AGENTS_QUANT).map((agent, i) => {
+            {(isHourly ? AGENTS_HOURLY : aiMode ? AGENTS_AI : AGENTS_QUANT).map((agent, i) => {
               const result = isRunning
                 ? streamingAgents?.[agent.key]
                 : pipeline?.agents[agent.key]
-              return <AgentCard key={agent.key} agent={agent} result={result} index={i} pipelineRunning={isRunning} aiMode={aiMode} />
+              return <AgentCard key={agent.key} agent={agent} result={result} index={i} pipelineRunning={isRunning} aiMode={aiMode} isHourly={isHourly} />
             })}
           </div>
 

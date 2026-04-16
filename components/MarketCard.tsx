@@ -11,12 +11,14 @@ interface MarketCardProps {
   secondsUntilExpiry: number
   liveMode: boolean
   onRefresh?: () => void
+  marketMode?: '15m' | 'hourly'
+  predictedPrice?: number   // Grok's predicted BTC price (hourly mode only)
 }
 
 const fmt  = (p: number) => p.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })
 const fmtD = (p: number) => p.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 })
 
-function CountdownRing({ seconds, total = 900, urgent }: { seconds: number; total?: number; urgent: boolean }) {
+function CountdownRing({ seconds, total, urgent }: { seconds: number; total: number; urgent: boolean }) {
   const r    = 18
   const circ = 2 * Math.PI * r
   const frac = Math.max(0, Math.min(1, seconds / total))
@@ -216,7 +218,7 @@ function TradeBox({ yesBid, yesAsk, noBid, noAsk, ticker, liveMode, side, onSide
   )
 }
 
-export default function MarketCard({ market, orderbook, strikePrice, currentBTCPrice, secondsUntilExpiry, liveMode, onRefresh }: MarketCardProps) {
+export default function MarketCard({ market, orderbook, strikePrice, currentBTCPrice, secondsUntilExpiry, liveMode, onRefresh, marketMode = '15m', predictedPrice }: MarketCardProps) {
   const [countdown, setCountdown]     = useState(secondsUntilExpiry)
   const [spinning, setSpinning]       = useState(false)
   const [sellingAll, setSellingAll]   = useState(false)
@@ -323,13 +325,18 @@ export default function MarketCard({ market, orderbook, strikePrice, currentBTCP
     return () => clearInterval(id)
   }, [])
 
+  const isHourly = marketMode === 'hourly'
   const mins    = Math.floor(countdown / 60)
   const secs    = Math.floor(countdown % 60)
-  const urgency = countdown > 0 && countdown < 120
-  const above   = strikePrice > 0 && currentBTCPrice > strikePrice
+  const urgencyThreshold = isHourly ? 600 : 120  // 10 min warning for hourly, 2 min for 15m
+  const urgency = countdown > 0 && countdown < urgencyThreshold
+  // In hourly mode, compare Grok's predicted price vs strike; fall back to current price
+  const comparePrice = (isHourly && predictedPrice && predictedPrice > 0) ? predictedPrice : currentBTCPrice
+  const above   = strikePrice > 0 && comparePrice > strikePrice
   const diff    = currentBTCPrice - strikePrice
   const pct     = strikePrice > 0 ? (diff / strikePrice) * 100 : 0
   const trendCol = above ? 'var(--green-dark)' : 'var(--pink-dark)'
+  const ringTotal = isHourly ? 3600 : 900
 
   return (
     <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
@@ -342,7 +349,9 @@ export default function MarketCard({ market, orderbook, strikePrice, currentBTCP
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span className="status-dot live" />
-            <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)', letterSpacing: '0.02em' }}>Active Market</span>
+            <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)', letterSpacing: '0.02em' }}>
+            {isHourly ? 'Hourly Market' : 'Active Market'}
+          </span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             {market && (
@@ -362,18 +371,36 @@ export default function MarketCard({ market, orderbook, strikePrice, currentBTCP
             {/* Strike price */}
             <div style={{ marginBottom: 16 }}>
               <div style={{ fontSize: 9, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 4 }}>
-                Strike Price
+                {isHourly ? 'Strike (Most Liquid)' : 'Strike Price'}
               </div>
               <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 26, fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.03em', lineHeight: 1 }}>
                 {strikePrice > 0 ? fmtD(strikePrice) : '—'}
               </div>
             </div>
 
+            {/* Hourly mode: Grok predicted price row */}
+            {isHourly && predictedPrice && predictedPrice > 0 && (
+              <div style={{
+                marginBottom: 12, padding: '8px 12px', borderRadius: 10,
+                background: above ? 'var(--green-pale)' : 'var(--pink-pale)',
+                border: `1px solid ${above ? 'rgba(45,158,107,0.25)' : 'rgba(224,111,160,0.25)'}`,
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              }}>
+                <div>
+                  <div style={{ fontSize: 8, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 2 }}>Grok Forecast</div>
+                  <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 17, fontWeight: 800, color: trendCol, lineHeight: 1 }}>
+                    {fmt(predictedPrice)}
+                  </div>
+                </div>
+                <div style={{ fontSize: 22, color: trendCol }}>{above ? '↑' : '↓'}</div>
+              </div>
+            )}
+
             {/* BTC vs Strike — flat row, no box */}
             <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', paddingBottom: 14, borderBottom: '1px solid var(--border)', marginBottom: 14 }}>
               <div>
                 <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 3 }}>BTC now</div>
-                <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 20, fontWeight: 800, color: trendCol, lineHeight: 1 }}>
+                <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 20, fontWeight: 800, color: 'var(--text-primary)', lineHeight: 1 }}>
                   {currentBTCPrice > 0 ? fmt(currentBTCPrice) : '—'}
                 </div>
               </div>
@@ -446,9 +473,11 @@ export default function MarketCard({ market, orderbook, strikePrice, currentBTCP
 
             {/* Countdown — inline, no box */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingTop: 4 }}>
-              <CountdownRing seconds={countdown} urgent={urgency} />
+              <CountdownRing seconds={countdown} total={ringTotal} urgent={urgency} />
               <div>
-                <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 1 }}>Expires in</div>
+                <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 1 }}>
+                  {isHourly ? 'Hour closes in' : 'Expires in'}
+                </div>
                 <div style={{
                   fontFamily: 'var(--font-geist-mono)', fontSize: 22, fontWeight: 800, lineHeight: 1,
                   color: urgency ? 'var(--pink-dark)' : 'var(--text-primary)',
@@ -456,7 +485,9 @@ export default function MarketCard({ market, orderbook, strikePrice, currentBTCP
                 }}>
                   {`${mins}:${String(secs).padStart(2, '0')}`}
                 </div>
-                <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2 }}>CF Benchmarks</div>
+                <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2 }}>
+                  {isHourly ? 'KXBTCD hourly' : 'CF Benchmarks'}
+                </div>
               </div>
             </div>
 
@@ -475,7 +506,9 @@ export default function MarketCard({ market, orderbook, strikePrice, currentBTCP
         ) : (
           <div style={{ padding: '32px 0', textAlign: 'center' }}>
             <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>No market</div>
-            <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>No open KXBTC15M markets</div>
+            <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+              {isHourly ? 'Run pipeline to discover KXBTCD market' : 'No open KXBTC15M markets'}
+            </div>
           </div>
         )}
 

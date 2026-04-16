@@ -11,13 +11,10 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300  // 5 min — blitz ROMA makes ~6 LLM calls per solve (~90-150s)
 
-/** Compute the current active KXBTC15M event_ticker using ET timezone
- *  Format: KXBTC15M-{YY}{MON}{DD}{HHMM} — date/time in US Eastern Time
- */
-function getCurrentEventTicker(): string {
-  const MONTHS = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC']
-  // Use formatToParts — avoids the new Date(localeString) re-parse bug where
-  // the locale string is re-interpreted in the server's local TZ instead of ET.
+const MONTHS_ET = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC']
+
+/** Helper: parse ET date/time parts from current moment */
+function getETParts() {
   const now = new Date()
   const parts = Object.fromEntries(
     new Intl.DateTimeFormat('en-US', {
@@ -28,8 +25,14 @@ function getCurrentEventTicker(): string {
       .filter(p => p.type !== 'literal')
       .map(p => [p.type, parseInt(p.value)])
   ) as Record<string, number>
+  return parts
+}
 
-  const { year, month, day, hour, minute } = parts
+/** Compute the current active KXBTC15M event_ticker using ET timezone
+ *  Format: KXBTC15M-{YY}{MON}{DD}{HHMM} — date/time in US Eastern Time
+ */
+function getCurrentEventTicker(): string {
+  const { year, month, day, hour, minute } = getETParts()
 
   // Advance to the end of the current 15-min block
   let blockMin  = Math.ceil((minute + 1) / 15) * 15
@@ -37,12 +40,45 @@ function getCurrentEventTicker(): string {
   if (blockMin >= 60) { blockMin = 0; blockHour += 1 }
 
   const yy  = String(year).slice(-2)
-  const mon = MONTHS[month - 1]
+  const mon = MONTHS_ET[month - 1]
   const dd  = String(day).padStart(2, '0')
   const hh  = String(blockHour).padStart(2, '0')
   const mm  = String(blockMin).padStart(2, '0')
   return `KXBTC15M-${yy}${mon}${dd}${hh}${mm}`
 }
+
+/**
+ * Compute the KXBTCD hourly event_ticker for the current (or next) ET hour.
+ * Format: KXBTCD-{YY}{MON}{DD}{HH}00 — closing hour in US Eastern Time.
+ * e.g. at 12:24 AM ET on Apr 15, the market closes at 1:00 AM ET → KXBTCD-26APR1501
+ * offsetHours=1 gives the next hour's event (fallback when current is near/past expiry).
+ */
+function getCurrentKXBTCDEventTicker(offsetHours: number = 0): string {
+  const { year, month, day, hour } = getETParts()
+  let closeHour  = (hour % 24) + 1 + offsetHours
+  let closeDay   = day
+  let closeMonth = month
+  let closeYear  = year
+
+  while (closeHour >= 24) {
+    closeHour -= 24
+    closeDay  += 1
+    const daysInMonth = new Date(closeYear, closeMonth, 0).getDate()
+    if (closeDay > daysInMonth) {
+      closeDay = 1
+      closeMonth += 1
+      if (closeMonth > 12) { closeMonth = 1; closeYear += 1 }
+    }
+  }
+
+  const yy  = String(closeYear).slice(-2)
+  const mon = MONTHS_ET[closeMonth - 1]
+  const dd  = String(closeDay).padStart(2, '0')
+  const hh  = String(closeHour).padStart(2, '0')
+  // Format matches Kalshi's actual tickers: KXBTCD-26APR1600 (DD+HH, no trailing "00")
+  return `KXBTCD-${yy}${mon}${dd}${hh}`
+}
+
 
 export async function GET(req: NextRequest) {
   // Reject concurrent pipeline runs — each ROMA solve takes ~90-150s; stacking requests
@@ -55,12 +91,46 @@ export async function GET(req: NextRequest) {
   const validProviders = ['anthropic', 'openai', 'grok', 'openrouter', 'huggingface'] as const
   const provider: AIProvider = (validProviders as readonly string[]).includes(p) ? p as AIProvider : 'grok'
 
+  // ── Parse mode params FIRST — determines which data paths are required ──────
+  // Must be before any 503 gates so hourly mode isn't blocked by missing 15m markets.
+  const romaMode    = req.nextUrl.searchParams.get('mode') ?? process.env.ROMA_MODE ?? 'keen'
+  const aiRisk      = req.nextUrl.searchParams.get('aiRisk') === 'true'
+  const marketMode  = (req.nextUrl.searchParams.get('marketMode') ?? '15m') as '15m' | 'hourly'
+  const isHourlyMode = marketMode === 'hourly'
+
+  const p2raw = req.nextUrl.searchParams.get('provider2') ?? process.env.AI_PROVIDER2
+  const provider2: AIProvider | undefined =
+    p2raw && (validProviders as readonly string[]).includes(p2raw) ? p2raw as AIProvider : undefined
+
+  const providersRaw = req.nextUrl.searchParams.get('providers') ?? process.env.AI_PROVIDERS ?? ''
+  const providers: AIProvider[] | undefined = providersRaw
+    ? (providersRaw.split(',').filter(p => (validProviders as readonly string[]).includes(p)) as AIProvider[])
+    : undefined
+
+  const orModelOverride = req.nextUrl.searchParams.get('orModel') || undefined
+
+  let apiKeys: Record<string, string> | undefined
+  const keysHeader = req.headers.get('x-provider-keys')
+  if (keysHeader) {
+    try {
+      apiKeys = JSON.parse(Buffer.from(keysHeader, 'base64').toString('utf8'))
+    } catch { /* ignore malformed header */ }
+  }
+
   // ── Data-fetching phase (before stream starts) ──────────────────────────
   // Any errors here return a plain HTTP response. Once we start the SSE stream,
   // errors are sent as SSE events and the lock is released in the stream's finally.
   let streamStarted = false
   try {
-    // Try to fetch the currently active market using computed event_ticker
+    // Accept markets that Kalshi considers 'active' and have live bid/ask pricing.
+    const now = Date.now()
+    const isTradeable = (m: KalshiMarket) =>
+      m.status === 'active' &&
+      m.yes_ask > 0 &&
+      (m.close_time ? new Date(m.close_time).getTime() > now : true)
+
+    // Try to fetch the currently active KXBTC15M market using computed event_ticker.
+    // In hourly mode this is informational — a missing 15m market is not fatal.
     let markets: KalshiMarket[] = []
 
     const eventTicker = getCurrentEventTicker()
@@ -70,20 +140,13 @@ export async function GET(req: NextRequest) {
       { headers: { ...buildKalshiHeaders('GET', eventPath), Accept: 'application/json' }, cache: 'no-store' }
     ).catch(() => null)
 
-    // Accept markets that Kalshi considers 'active' and have live bid/ask pricing.
-    const now = Date.now()
-    const isTradeable = (m: KalshiMarket) =>
-      m.status === 'active' &&
-      m.yes_ask > 0 &&
-      (m.close_time ? new Date(m.close_time).getTime() > now : true)
-
     if (eventRes?.ok) {
       const data = await eventRes.json()
       markets = (data.markets ?? []).map(normalizeKalshiMarket).filter(isTradeable)
     }
 
-    // Fallback: query recent series markets without status filter
-    if (!markets.length) {
+    // Fallback: series-level query (15m mode only — skip in hourly to avoid serial latency)
+    if (!markets.length && !isHourlyMode) {
       const fallbackPath = '/trade-api/v2/markets?series_ticker=KXBTC15M&limit=100'
       const fallbackRes = await fetch(
         `https://api.elections.kalshi.com${fallbackPath}`,
@@ -95,7 +158,9 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    if (!markets.length) {
+    // In 15m mode, a missing market means we can't trade — abort early.
+    // In hourly mode, we continue and the KXBTCD fetch below provides the market.
+    if (!markets.length && !isHourlyMode) {
       console.warn('[pipeline] No active KXBTC15M markets found for', eventTicker)
       return NextResponse.json({ error: 'No active KXBTC15M markets found' }, { status: 503 })
     }
@@ -126,19 +191,55 @@ export async function GET(req: NextRequest) {
       portfolioValueCents = (balResult.data.balance ?? 0) + (balResult.data.portfolio_value ?? 0)
     }
 
-    // Fetch candles, live candles, 1h/4h trend candles, derivatives, orderbook — all in parallel
+    // KXBTCD: compute event ticker for the current ET hour.
+    // Format: KXBTCD-{YY}{MON}{DD}{HH} where date/hour is the closing time in ET.
+    // e.g. at 12:24 AM ET → closes at 1:00 AM ET → KXBTCD-26APR1501
+    const kxbtcdEventTicker = isHourlyMode ? getCurrentKXBTCDEventTicker() : null
+    const kxbtcdEventPath   = kxbtcdEventTicker
+      ? `/trade-api/v2/markets?event_ticker=${kxbtcdEventTicker}&limit=200`
+      : null
+    // Events API discovery — used as fallback when the computed ticker returns 0 markets.
+    // Kalshi KXBTCD doesn't run 24/7; this finds whatever event is actually open right now.
+    const kxbtcdEventsPath  = isHourlyMode ? '/trade-api/v2/events?series_ticker=KXBTCD&status=open&limit=10' : null
+
+    // 15m orderbook: only fetch when we have a 15m market (not needed in hourly mode).
+    // KXBTCD orderbook is fetched after market selection (ticker not known yet).
+    const ob15mTicker = markets.length > 0 ? markets[0].ticker : null
+    const ob15mPath   = ob15mTicker ? `/trade-api/v2/markets/${ob15mTicker}/orderbook` : null
+
+    // Fetch candles, live candles, 1h/4h trend candles, derivatives, orderbook, KXBTCD — all in parallel
     // All candle sources: Coinbase Exchange (newest-first format: [time_s, low, high, open, close, vol])
     // granularity=900 → 15m, granularity=60 → 1m, granularity=3600 → 1h, granularity=14400 → 4h
-    const [candleRes, liveCandleRes, candle1hRes, candle4hRes, bybitRes, obRes] = await Promise.all([
+    const [candleRes, liveCandleRes, candle1hRes, candle4hRes, bybitRes, obRes, kxbtcdRes, kxbtcdEventsRes] = await Promise.all([
       fetch('https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=900&limit=14', { cache: 'no-store' }).catch(() => null),
       fetch('https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=60&limit=17', { cache: 'no-store' }).catch(() => null),
       fetch('https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=3600&limit=13', { cache: 'no-store' }).catch(() => null),
       fetch('https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=14400&limit=8', { cache: 'no-store' }).catch(() => null),
       fetch('https://api.bybit.com/v5/market/tickers?category=linear&symbol=BTCUSDT', { cache: 'no-store' }).catch(() => null),
-      fetch(`https://api.elections.kalshi.com/trade-api/v2/markets/${markets[0].ticker}/orderbook`, {
-        headers: { ...buildKalshiHeaders('GET', `/trade-api/v2/markets/${markets[0].ticker}/orderbook`), Accept: 'application/json' },
-        cache: 'no-store',
-      }).catch(() => null),
+      // 15m orderbook — null when no 15m markets (hourly mode); avoids markets[0] crash
+      ob15mPath
+        ? fetch(`https://api.elections.kalshi.com${ob15mPath}`, {
+            headers: { ...buildKalshiHeaders('GET', ob15mPath), Accept: 'application/json' },
+            cache: 'no-store',
+          }).catch(() => null)
+        : Promise.resolve(null),
+      // KXBTCD markets — only fetched in hourly mode; queries by computed event_ticker
+      // so we get exactly the current hour's 188+ strike markets (all with yes_ask > 0)
+      kxbtcdEventPath
+        ? fetch(`https://api.elections.kalshi.com${kxbtcdEventPath}`, {
+            headers: { ...buildKalshiHeaders('GET', kxbtcdEventPath), Accept: 'application/json' },
+            cache: 'no-store',
+          }).catch(() => null)
+        : Promise.resolve(null),
+      // KXBTCD events discovery — runs in parallel as a fallback source.
+      // If the computed event ticker finds 0 markets (e.g. off-hours), we use the soonest
+      // open event from this response instead of failing.
+      kxbtcdEventsPath
+        ? fetch(`https://api.elections.kalshi.com${kxbtcdEventsPath}`, {
+            headers: { ...buildKalshiHeaders('GET', kxbtcdEventsPath), Accept: 'application/json' },
+            cache: 'no-store',
+          }).catch(() => null)
+        : Promise.resolve(null),
     ])
 
     let candles: OHLCVCandle[] = []
@@ -183,34 +284,117 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    // ── KXBTCD: select highest-liquidity strike market ─────────────────────
+    // Only relevant in hourly mode — skipped entirely in 15m mode.
+    let kxbtcdMarket: KalshiMarket | null = null
     let orderbook: KalshiOrderbook | null = null
+
     if (obRes?.ok) {
       const data = await obRes.json()
-      orderbook = data.orderbook ?? null
+      orderbook = data.orderbook ?? null  // 15m orderbook (null if no 15m markets)
     }
 
-    // ── Parse query params ────────────────────────────────────────────────
-    const romaMode = req.nextUrl.searchParams.get('mode') ?? process.env.ROMA_MODE ?? 'keen'
-    const aiRisk   = req.nextUrl.searchParams.get('aiRisk') === 'true'
+    if (isHourlyMode) {
+      let kxbtcdMarkets: KalshiMarket[] = []
+      const parseKxbtcdMarkets = (data: { markets?: unknown[] }, label: string): KalshiMarket[] => {
+        const raw: KalshiMarket[] = (data.markets ?? []).map(normalizeKalshiMarket)
+        if (raw.length > 0) {
+          const s = raw[0]
+          console.log(`[pipeline] KXBTCD ${label}[0]: ticker=${s.ticker} status="${s.status}" yes_ask=${s.yes_ask} close_time=${s.close_time}`)
+        }
+        const tradeable = raw.filter(m =>
+          m.status !== 'settled' && m.status !== 'finalized' && m.status !== 'closed' &&
+          m.yes_ask > 0 &&
+          (m.close_time ? new Date(m.close_time).getTime() > now + 60_000 : true)  // ≥1 min remaining
+        )
+        console.log(`[pipeline] KXBTCD ${label}: ${raw.length} raw → ${tradeable.length} tradeable`)
+        return tradeable
+      }
 
-    const p2raw = req.nextUrl.searchParams.get('provider2') ?? process.env.AI_PROVIDER2
-    const provider2: AIProvider | undefined =
-      p2raw && (validProviders as readonly string[]).includes(p2raw) ? p2raw as AIProvider : undefined
+      if (kxbtcdRes?.ok) {
+        const data = await kxbtcdRes.json()
+        kxbtcdMarkets = parseKxbtcdMarkets(data, kxbtcdEventTicker!)
+      } else {
+        console.warn(`[pipeline] KXBTCD fetch failed: HTTP ${kxbtcdRes?.status ?? 'no response'} for ${kxbtcdEventTicker}`)
+      }
 
-    const providersRaw = req.nextUrl.searchParams.get('providers') ?? process.env.AI_PROVIDERS ?? ''
-    const providers: AIProvider[] | undefined = providersRaw
-      ? (providersRaw.split(',').filter(p => (validProviders as readonly string[]).includes(p)) as AIProvider[])
-      : undefined
+      // Fallback 1: try next ET hour (handles the "just expired" edge case)
+      if (!kxbtcdMarkets.length) {
+        const nextTicker = getCurrentKXBTCDEventTicker(1)
+        const nextPath   = `/trade-api/v2/markets?event_ticker=${nextTicker}&limit=200`
+        console.log(`[pipeline] KXBTCD fallback → trying ${nextTicker}`)
+        const nextRes = await fetch(`https://api.elections.kalshi.com${nextPath}`, {
+          headers: { ...buildKalshiHeaders('GET', nextPath), Accept: 'application/json' },
+          cache: 'no-store',
+        }).catch(() => null)
+        if (nextRes?.ok) {
+          const data = await nextRes.json()
+          kxbtcdMarkets = parseKxbtcdMarkets(data, nextTicker)
+        }
+      }
 
-    const orModelOverride  = req.nextUrl.searchParams.get('orModel') || undefined
+      // Fallback 2: events API discovery — finds whatever KXBTCD event is actually open.
+      // Kalshi doesn't create an event for every hour; this discovers the actual schedule.
+      if (!kxbtcdMarkets.length && kxbtcdEventsRes?.ok) {
+        const evData = await kxbtcdEventsRes.json()
+        const events: Array<{ event_ticker: string; close_time?: string }> = evData.events ?? []
 
-    // Read user-provided API keys from request header (base64-encoded JSON)
-    let apiKeys: Record<string, string> | undefined
-    const keysHeader = req.headers.get('x-provider-keys')
-    if (keysHeader) {
-      try {
-        apiKeys = JSON.parse(Buffer.from(keysHeader, 'base64').toString('utf8'))
-      } catch { /* ignore malformed header */ }
+        // Parse close time from event_ticker (KXBTCD-{YY}{MON}{DD}{HH}) when the API
+        // doesn't provide a close_time field directly. EDT = UTC-4 in April.
+        const kxbtcdCloseMs = (ticker: string, apiCloseTime?: string): number => {
+          if (apiCloseTime) return new Date(apiCloseTime).getTime()
+          const m = ticker.match(/^KXBTCD-(\d{2})([A-Z]{3})(\d{2})(\d{2})$/)
+          if (!m) return 0
+          const [, yy, mon, dd, hh] = m
+          const monthIdx = MONTHS_ET.indexOf(mon)
+          if (monthIdx === -1) return 0
+          // EDT offset: -4h (April is always EDT)
+          return Date.UTC(2000 + parseInt(yy), monthIdx, parseInt(dd), parseInt(hh) + 4, 0, 0)
+        }
+
+        const futureEvents = events
+          .map(e => ({ ...e, closeMs: kxbtcdCloseMs(e.event_ticker, e.close_time) }))
+          .filter(e => e.closeMs > now)
+          .sort((a, b) => a.closeMs - b.closeMs)   // soonest first
+
+        if (futureEvents.length > 0) {
+          const discoveredTicker = futureEvents[0].event_ticker
+          console.log(`[pipeline] KXBTCD events API discovered: ${discoveredTicker} (closes ${new Date(futureEvents[0].closeMs).toISOString()})`)
+          const discoveredPath = `/trade-api/v2/markets?event_ticker=${discoveredTicker}&limit=200`
+          const discoveredRes = await fetch(`https://api.elections.kalshi.com${discoveredPath}`, {
+            headers: { ...buildKalshiHeaders('GET', discoveredPath), Accept: 'application/json' },
+            cache: 'no-store',
+          }).catch(() => null)
+          if (discoveredRes?.ok) {
+            const data = await discoveredRes.json()
+            kxbtcdMarkets = parseKxbtcdMarkets(data, discoveredTicker)
+          }
+        } else {
+          console.warn(`[pipeline] KXBTCD events API: ${events.length} events found, none with future close_time`)
+        }
+      }
+
+      if (kxbtcdMarkets.length) {
+        // Sort descending by liquidity (volume + open_interest), pick the most liquid strike
+        kxbtcdMarket = kxbtcdMarkets.sort(
+          (a, b) => (b.volume + b.open_interest) - (a.volume + a.open_interest)
+        )[0]
+        console.log(`[pipeline] KXBTCD: selected ${kxbtcdMarket.ticker} from ${kxbtcdMarkets.length} strikes (vol=${kxbtcdMarket.volume.toFixed(0)} oi=${kxbtcdMarket.open_interest.toFixed(0)})`)
+
+        // Fetch KXBTCD orderbook for the selected market (overrides 15m OB in hourly mode)
+        const kxbtcdObPath = `/trade-api/v2/markets/${kxbtcdMarket.ticker}/orderbook`
+        const kxbtcdObRes = await fetch(
+          `https://api.elections.kalshi.com${kxbtcdObPath}`,
+          { headers: { ...buildKalshiHeaders('GET', kxbtcdObPath), Accept: 'application/json' }, cache: 'no-store' }
+        ).catch(() => null)
+        if (kxbtcdObRes?.ok) {
+          const data = await kxbtcdObRes.json()
+          orderbook = data.orderbook ?? null  // KXBTCD orderbook replaces 15m OB for Grok
+        }
+      } else {
+        console.warn(`[pipeline] KXBTCD: no tradeable markets found (tried ${kxbtcdEventTicker}, next hour, and events API)`)
+        return NextResponse.json({ error: 'KXBTCD_NO_MARKET', message: 'No active KXBTCD market right now — the market may not be open at this hour.' }, { status: 503 })
+      }
     }
 
     // ── SSE stream phase ──────────────────────────────────────────────────
@@ -231,6 +415,7 @@ export async function GET(req: NextRequest) {
             apiKeys,
             candles1h,
             candles4h,
+            isHourlyMode ? kxbtcdMarket : null,  // only activate KXBTCD in hourly mode
           )
           enc('done', pipeline)
         } catch (err) {

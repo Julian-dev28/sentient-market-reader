@@ -142,6 +142,7 @@ export interface ProbabilityOutput {
   gkVol15m?: number | null  // Garman-Klass realized vol (per-candle) — forwarded to risk manager
   volOfVol?: number | null  // vol-of-vol: high = unstable regime → reduce position size
   dScore?: number | null    // precise d-score from pipeline candles (used to sync currentD display)
+  predictedPrice?: number   // hourly mode: Grok's forecasted BTC price at hour close
 }
 
 export interface RiskOutput {
