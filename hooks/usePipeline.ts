@@ -59,7 +59,19 @@ export function usePipeline(
   useEffect(() => {
     try {
       const savedPipeline = localStorage.getItem(STORAGE_KEY)
-      if (savedPipeline) setPipeline(JSON.parse(savedPipeline) as PipelineState)
+      if (savedPipeline) {
+        const parsed = JSON.parse(savedPipeline) as PipelineState
+        // Purge stale state — if the stored market has already closed, don't restore it.
+        // Without this, the hourly page loads yesterday's settled market (YES=100¢/NO=100¢)
+        // on every refresh until the next pipeline run.
+        const closeTime = parsed.agents?.marketDiscovery?.output?.activeMarket?.close_time
+        if (closeTime && new Date(closeTime).getTime() < Date.now()) {
+          localStorage.removeItem(STORAGE_KEY)
+          localStorage.removeItem(LAST_CYCLE_KEY)
+        } else {
+          setPipeline(parsed)
+        }
+      }
     } catch {}
     try {
       const lastCycle = localStorage.getItem(LAST_CYCLE_KEY)
