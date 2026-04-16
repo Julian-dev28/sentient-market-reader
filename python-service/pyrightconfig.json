@@ -1,0 +1,9 @@
+{
+  "pythonVersion": "3.13",
+  "pythonPlatform": "Darwin",
+  "venvPath": "/Users/julian_dev",
+  "venv": ".sentient-venv313",
+  "typeCheckingMode": "basic",
+  "reportMissingImports": "none",
+  "reportMissingModuleSource": "none"
+}
