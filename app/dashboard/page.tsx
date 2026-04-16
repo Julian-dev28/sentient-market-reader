@@ -43,7 +43,7 @@ export default function Home() {
     localStorage.setItem('sentient-analysis-mode', mode)
   }
 
-  // Close Grok dropdown on outside click
+// Close Grok dropdown on outside click
   useEffect(() => {
     if (!grokMenuOpen) return
     function handleClick(e: MouseEvent) {
@@ -69,6 +69,7 @@ export default function Home() {
     true, botActive, aiRisk, undefined, undefined,
     analysisMode === 'ai' ? (orModel || 'grok-3') : undefined,  // only pass model in AI mode
     liveBTCPrice || undefined, liveStrikePrice || undefined,
+    '15m',
   )
 
   // Keep marketTicker in sync with the pipeline's active market

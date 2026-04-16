@@ -10,14 +10,16 @@ Runs the actual Sentient Foundation ROMA recursive solve loop:
 Usage:
   pip install -r requirements.txt
   cp .env.example .env
-  uvicorn main:app --port 8001 --reload
+  uvicorn main:app --port 8001 --host 0.0.0.0
 """
 
 import os
+import re
+import copy
 import time
 import traceback
 import json as _json
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -132,46 +134,14 @@ def build_llm_config(
     raise ValueError(f"Unknown AI_PROVIDER '{provider}' — use: anthropic | openai | grok | openrouter | huggingface")
 
 
-def build_roma_config(llm: LLMConfig) -> ROMAConfig:
-    """
-    Build a ROMAConfig with the given LLMConfig for all agents.
-    Prefer build_roma_config_tiered() for better speed/quality balance.
-    runtime.timeout must be >= max agent LLM timeout (default 600s).
-    """
-    def agent_llm(temperature: float = 0.5, max_tokens: int = 2000) -> LLMConfig:
-        return LLMConfig(
-            model=llm.model,
-            api_key=llm.api_key,
-            base_url=llm.base_url,
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
-
-    agents = AgentsConfig(
-        atomizer=AgentConfig(llm=agent_llm(temperature=0.1, max_tokens=1000)),
-        planner=AgentConfig(llm=agent_llm(temperature=0.3, max_tokens=3000)),
-        executor=AgentConfig(llm=agent_llm(temperature=0.5, max_tokens=2000)),
-        aggregator=AgentConfig(llm=agent_llm(temperature=0.2, max_tokens=4000)),
-        verifier=AgentConfig(llm=agent_llm(temperature=0.1, max_tokens=1000)),
-    )
-
-    return ROMAConfig(
-        runtime=RuntimeConfig(timeout=700),
-        agents=agents,
-    )
-
-
 def build_roma_config_tiered(analysis_llm: LLMConfig, orchestration_llm: LLMConfig, roma_mode: str = "keen") -> ROMAConfig:
     """
     Tiered ROMA config — fastest quality mix:
       Atomizer + Planner  → orchestration_llm (fast/cheap — just task decomposition)
       Executor + Aggregator → analysis_llm (quality model — the actual reasoning)
 
-    Token budgets — just above the truncation point, not so high that generation time blows up:
-      blitz: executor 700,  aggregator 600   (atomic fast signal)
-      sharp: executor 1000, aggregator 800   (~10s/call at 100 tok/s)
-      keen:  executor 1100, aggregator 900
-      smart: executor 1200, aggregator 1000
+    Token budgets tuned to stay above content truncation point without excessive
+    generation time. Tiered by mode for wall-time predictability.
     """
     _token_budgets = {
         "blitz": {"executor": 3000, "aggregator": 1500},
@@ -183,12 +153,10 @@ def build_roma_config_tiered(analysis_llm: LLMConfig, orchestration_llm: LLMConf
 
     def _is_reasoning_model(model: str) -> bool:
         """OpenAI o-series reasoning models require temperature=1.0 and max_tokens>=16000."""
-        import re
         return bool(re.search(r'[/:]o[1-9](-|$|mini|preview|high)', model))
 
     def make_cfg(llm: LLMConfig, temperature: float, max_tokens: int) -> AgentConfig:
-        import copy as _copy
-        cfg_llm = _copy.copy(llm)
+        cfg_llm = copy.copy(llm)
         if _is_reasoning_model(getattr(cfg_llm, 'model', '')):
             temperature = 1.0
             max_tokens  = max(16000, max_tokens)
@@ -206,7 +174,6 @@ def build_roma_config_tiered(analysis_llm: LLMConfig, orchestration_llm: LLMConf
         "The 'sources' field is required — if no sources were used, set it to an empty list: []"
     )
 
-    # Orchestration budgets — enough room to avoid truncation without blowing up generation time
     orch_budgets = {
         "blitz": {"atomizer": 900,  "planner": 1200},
         "sharp": {"atomizer": 1000, "planner": 1400},
@@ -227,21 +194,20 @@ def build_roma_config_tiered(analysis_llm: LLMConfig, orchestration_llm: LLMConf
     )
 
 
-# Build LLM config on startup — each /analyze call rebuilds with the request's provider + keys
+# Configure global DSPy LM on startup — /analyze rebuilds per-request using caller's provider+keys.
+# Startup failure is non-fatal: requests with their own keys will still work.
 try:
-    _llm_config, _provider_label = build_llm_config()
-    # Also configure global DSPy LM for any direct dspy.predict() calls
+    _startup_llm, _provider_label = build_llm_config()
     dspy.configure(lm=dspy.LM(
-        _llm_config.model,
-        api_key=_llm_config.api_key,
-        api_base=_llm_config.base_url,
+        _startup_llm.model,
+        api_key=_startup_llm.api_key,
+        api_base=_startup_llm.base_url,
     ))
-    print(f"[ROMA] LLM configured — provider: {_provider_label}, model: {_llm_config.model}")
+    print(f"[ROMA] LLM configured — provider: {_provider_label}, model: {_startup_llm.model}")
 except Exception as e:
-    _llm_config = None
     _provider_label = "unknown"
-    print(f"[ROMA] Warning: LM configuration failed: {e}")
-    print("[ROMA] Service will start but /analyze will fail until env vars are set.")
+    print(f"[ROMA] Warning: startup LM configuration failed: {e}")
+    print("[ROMA] Service started — /analyze will work if caller provides valid provider+keys.")
 
 
 # ── Request / Response models ─────────────────────────────────────────────────
@@ -250,12 +216,12 @@ class AnalyzeRequest(BaseModel):
     goal: str
     context: str
     max_depth: Optional[int] = 1
-    beam_width: Optional[int] = None       # parallel executor beams; None = SDK default (typically 1-2)
-    roma_mode: Optional[str] = "keen"      # blitz | sharp | keen | smart — controls token budgets only
-    provider: Optional[str] = None         # overrides AI_PROVIDER env (single-provider support)
-    providers: Optional[list[str]] = None  # multi-provider parallel solve — runs each provider simultaneously and merges answers
-    model_override: Optional[str] = None   # override specific model ID (e.g. "google/gemini-2.5-pro")
-    api_keys: Optional[dict] = None        # per-provider API keys {'openrouter': '...', 'anthropic': '...', 'xai': '...', ...}
+    beam_width: Optional[int] = None       # parallel executor beams; None = SDK default
+    roma_mode: Optional[str] = "keen"      # blitz | sharp | keen | smart — controls token budgets
+    provider: Optional[str] = None         # overrides AI_PROVIDER env
+    providers: Optional[list[str]] = None  # multi-provider parallel solve — merges answers
+    model_override: Optional[str] = None   # override specific model ID
+    api_keys: Optional[dict] = None        # per-provider API keys {'openrouter': '...', ...}
 
 
 class SubtaskResult(BaseModel):
@@ -299,21 +265,18 @@ def health():
 def analyze(req: AnalyzeRequest):
     """
     Run the actual ROMA recursive solve loop on a trading goal + market context.
-
-    The goal and context are combined into a single rich prompt that ROMA
-    decomposes into parallel analytical subtasks.
+    Each request builds its own LLM config from the caller's provider + keys —
+    startup env vars are only the default fallback.
     """
-    if _llm_config is None:
-        raise HTTPException(status_code=503, detail="LLM not configured — check env vars")
-
-    # Rebuild LLM config using provider + keys from the caller
-    # provider from request overrides AI_PROVIDER env — enables split-provider pipelines
     roma_mode = req.roma_mode or "keen"
-    analysis_llm, provider_label = build_llm_config(req.provider, req.model_override, req.api_keys)
-    orchestration_llm, _ = build_llm_config(req.provider, None, req.api_keys)
+    active_providers = req.providers if req.providers else [req.provider or os.getenv("AI_PROVIDER", "grok")]
 
-    # Multi-provider mode: providers list takes precedence over single provider
-    active_providers = req.providers if req.providers and len(req.providers) > 0 else [req.provider or os.getenv("AI_PROVIDER", "grok")]
+    # Build LLM configs from request — raises ValueError with a clear message if keys are missing
+    try:
+        analysis_llm, provider_label = build_llm_config(active_providers[0], req.model_override, req.api_keys)
+        orchestration_llm, _         = build_llm_config(active_providers[0], None, req.api_keys)
+    except ValueError as e:
+        raise HTTPException(status_code=503, detail=str(e))
 
     print(f"[ROMA] /analyze  mode={roma_mode}  providers={active_providers}  model={analysis_llm.model}")
 
@@ -324,41 +287,57 @@ def analyze(req: AnalyzeRequest):
 Market context:
 {req.context}"""
 
-    # beam_width: how many parallel executor subtasks ROMA runs simultaneously
-    # Higher = more parallelism, more tokens, faster wall-time for multi-subtask goals
     beam_width = req.beam_width or int(os.getenv("ROMA_BEAM_WIDTH", "2"))
+
+    # Check beam_width support once — avoids silent retry masking real TypeErrors
+    _beam_width_supported: Optional[bool] = None
 
     def run_single_solve(prov: str) -> tuple[str, object]:
         """Run one ROMA solve for a given provider; returns (provider_label, result)."""
+        nonlocal _beam_width_supported
         a_llm, p_label = build_llm_config(prov, req.model_override, req.api_keys)
         o_llm, _       = build_llm_config(prov, None, req.api_keys)
         cfg = build_roma_config_tiered(a_llm, o_llm, roma_mode)
         solve_kwargs: dict = {"max_depth": req.max_depth, "config": cfg}
 
-        # For OpenRouter, force ChatAdapter at the DSPy global level for the entire solve.
+        # For OpenRouter: force ChatAdapter at the DSPy global level for the entire solve.
         # Per-agent adapter_type config alone isn't enough — context propagation through
-        # ROMA's async retry decorators loses the per-agent setting. Wrapping the full
-        # solve() in dspy.context(adapter=ChatAdapter()) ensures all predictor calls
-        # inside this solve use the text-format adapter, preventing JSONAdapter parse errors.
+        # ROMA's async retry decorators loses the per-agent setting.
         use_chat_adapter = prov == "openrouter"
         ctx_adapter = dspy.ChatAdapter() if use_chat_adapter else None
 
-        def _solve():
-            try:
-                return solve(full_prompt, beam_width=beam_width, **solve_kwargs)
-            except TypeError:
-                return solve(full_prompt, **solve_kwargs)
+        def _do_solve(with_beam: bool):
+            kw = {**solve_kwargs, "beam_width": beam_width} if with_beam else solve_kwargs
+            if ctx_adapter is not None:
+                with dspy.context(adapter=ctx_adapter):
+                    return solve(full_prompt, **kw)
+            return solve(full_prompt, **kw)
 
-        if ctx_adapter is not None:
-            with dspy.context(adapter=ctx_adapter):
-                return p_label, _solve()
-        return p_label, _solve()
+        # Probe beam_width support on first call; cache result for parallel workers
+        if _beam_width_supported is None:
+            try:
+                result = _do_solve(with_beam=True)
+                _beam_width_supported = True
+                return p_label, result
+            except TypeError as e:
+                if "beam_width" in str(e):
+                    _beam_width_supported = False
+                else:
+                    raise  # real TypeError — don't mask it
+
+        return p_label, _do_solve(with_beam=_beam_width_supported)
 
     def extract_answer(result: object) -> tuple[str, bool, list]:
         """Extract answer string, was_atomic flag, and subtasks from a solve result."""
         if isinstance(result, str):
             return result, True, []
-        answer = str(result.result or result.goal or result)
+
+        # Use result.result; only fall back to result.goal if result is explicitly None
+        # (not just falsy — empty string answer is still a valid answer)
+        raw_result = getattr(result, "result", None)
+        raw_goal   = getattr(result, "goal", None)
+        answer = str(raw_result if raw_result is not None else (raw_goal or result))
+
         node_type_str = str(getattr(result, "node_type", "")).upper()
         was_atomic = "PLAN" not in node_type_str
         children = getattr(result, "children", []) or []
@@ -398,18 +377,19 @@ Market context:
             if not results_map:
                 raise RuntimeError("All providers failed in parallel solve")
 
-            # Merge: concatenate each provider's answer with a labeled separator
-            parts = []
+            parts: list[str] = []
             all_subtasks: list[SubtaskResult] = []
-            for prov, (prov_label, res) in results_map.items():
+            combined_labels: list[str] = []
+            for prov, (lbl, res) in results_map.items():
                 ans, atomic, subs = extract_answer(res)
-                parts.append(f"[{prov_label}]\n{ans}")
+                parts.append(f"[{lbl}]\n{ans}")
                 all_subtasks.extend(subs)
+                combined_labels.append(lbl)
 
             answer     = "\n\n---\n\n".join(parts)
             was_atomic = len(all_subtasks) == 0
             subtasks   = all_subtasks
-            prov_label = " + ".join(pl for _, (pl, _) in results_map.items())
+            prov_label = " + ".join(combined_labels)
             duration_ms = int((time.time() - start) * 1000)
             print(f"[ROMA] parallel done  providers={prov_label}  duration={duration_ms}ms")
 
@@ -578,6 +558,17 @@ Respond ONLY with a JSON object:
 }}"""
 
 
+def _strip_json_fences(text: str) -> str:
+    """Strip markdown code fences from an LLM JSON response."""
+    text = text.strip()
+    if text.startswith("```"):
+        parts = text.split("```")
+        text = parts[1] if len(parts) > 1 else text
+        if text.startswith("json"):
+            text = text[4:]
+    return text.strip()
+
+
 def _opt_call_gemini(prompt: str, api_key: str) -> dict:
     import urllib.request as _ureq
     url = (
@@ -591,12 +582,8 @@ def _opt_call_gemini(prompt: str, api_key: str) -> dict:
     req = _ureq.Request(url, data=payload, headers={"Content-Type": "application/json"})
     with _ureq.urlopen(req, timeout=30) as resp:
         data = _json.loads(resp.read())
-    text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
-    if text.startswith("```"):
-        text = text.split("```")[1]
-        if text.startswith("json"):
-            text = text[4:]
-    return _json.loads(text.strip())
+    text = data["candidates"][0]["content"]["parts"][0]["text"]
+    return _json.loads(_strip_json_fences(text))
 
 
 def _opt_call_openrouter(prompt: str, api_key: str) -> dict:
@@ -615,12 +602,8 @@ def _opt_call_openrouter(prompt: str, api_key: str) -> dict:
         timeout=30,
     )
     resp.raise_for_status()
-    text = resp.json()["choices"][0]["message"]["content"].strip()
-    if text.startswith("```"):
-        text = text.split("```")[1]
-        if text.startswith("json"):
-            text = text[4:]
-    return _json.loads(text.strip())
+    text = resp.json()["choices"][0]["message"]["content"]
+    return _json.loads(_strip_json_fences(text))
 
 
 @app.post("/calibrate", response_model=CalibrateResponse)
@@ -683,7 +666,6 @@ def backtest(
     if max_llm < 1 or max_llm > 50:
         raise HTTPException(status_code=400, detail="max_llm must be 1–50")
 
-    # Read per-provider API keys from header (base64 JSON, same format as /analyze)
     api_keys: dict = {}
     keys_header = request.headers.get("x-provider-keys")
     if keys_header:
@@ -718,7 +700,7 @@ def optimize(req: OptimizeRequest):
     Uses GOOGLE_AI_API_KEY (direct) or falls back to OPENROUTER_API_KEY.
     Receives trade history + calibration data → returns updated DailyOptParams.
     """
-    google_key    = os.getenv('GOOGLE_AI_API_KEY') or os.getenv('GEMINI_API_KEY')
+    google_key     = os.getenv('GOOGLE_AI_API_KEY') or os.getenv('GEMINI_API_KEY')
     openrouter_key = os.getenv('OPENROUTER_API_KEY')
     if not google_key and not openrouter_key:
         raise HTTPException(status_code=503, detail="No optimizer API key — set GOOGLE_AI_API_KEY or OPENROUTER_API_KEY")
@@ -753,7 +735,7 @@ def optimize(req: OptimizeRequest):
         rationale=             raw.get('rationale', ''),
         riskLevel=             raw.get('risk_level', 'normal'),
         keyChanges=            raw.get('key_changes', []),
-        computedAt=            datetime.utcnow().isoformat(),
+        computedAt=            datetime.now(timezone.utc).isoformat(),
         tradesSampled=         trade_summary.get('count', 0),
         brierScore=            trade_summary.get('brier_score',
                                    req.calibration.get('brierScore', 0.25)),
