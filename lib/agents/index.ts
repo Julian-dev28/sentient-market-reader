@@ -59,7 +59,7 @@ export async function runAgentPipeline(
   apiKeys?: Record<string, string>, // per-provider API keys from user settings
   candles1h?: OHLCVCandle[],  // last 12 × 1h candles — intraday trend context
   candles4h?: OHLCVCandle[],  // last 7 × 4h candles — macro trend context
-  kxbtcdMarket?: KalshiMarket | null,  // highest-liquidity KXBTCD hourly strike (AI mode only)
+  kxbtcdMarket?: KalshiMarket | null,  // highest-liquidity KXBTCD hourly strike (passed in hourly mode)
 ): Promise<PipelineState> {
   const cycleId = ++cycleCounter
   const cycleStartedAt = new Date().toISOString()
@@ -73,7 +73,8 @@ export async function runAgentPipeline(
 
   // ── Stage 1: Market Discovery ──────────────────────────────────────────
   // kxbtcdMarket is only non-null when marketMode='hourly' (gated in pipeline/route.ts).
-  // Hourly mode always uses Grok (price-prediction) — quant pipeline stays on 15m.
+  // useKxbtcd is passed to Grok when aiRisk=true so it knows to use hourly-mode prompts.
+  // When aiRisk=false (quant mode), the ROMA quant pipeline runs on the KXBTCD market data.
   const useKxbtcd = !!kxbtcdMarket
   const mdResult = await runMarketDiscovery(markets, kxbtcdMarket ?? null)
   emit?.('marketDiscovery', mdResult)
@@ -95,8 +96,8 @@ export async function runAgentPipeline(
   // ── AI mode: single Grok agent replaces stages 3-6 ────────────────────────
   // Grok receives the full market picture and makes ALL decisions with full
   // capital authority: direction, probability, sizing, optional hedge.
-  // Hourly mode (useKxbtcd) always runs via Grok — price prediction is required for KXBTCD.
-  if (aiRisk || useKxbtcd) {
+  // Quant mode (aiRisk=false) always runs the ROMA pipeline — even for KXBTCD hourly markets.
+  if (aiRisk) {
     const grok = await runGrokTradingAgent(
       enrichedQuote,
       mdResult.output.strikePrice,
@@ -192,6 +193,7 @@ export async function runAgentPipeline(
     aiRisk,      // true = Grok-powered probability
     candles1h,
     candles4h,
+    useKxbtcd,   // isHourly — skips 15m-calibrated d-gate
   )
   emit?.('probability', probResult)
 
@@ -215,6 +217,7 @@ export async function runAgentPipeline(
     mdResult.output.minutesUntilExpiry,
     pfResult.output.distanceFromStrikePct,
     probResult.output.volOfVol,
+    useKxbtcd,  // isHourly — adjusts entry window (10-45min) and daily trade cap (24)
   )
   emit?.('risk', riskResult)
 

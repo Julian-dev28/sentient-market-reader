@@ -73,9 +73,10 @@ export function runRiskManager(
   gkVol15m?: number | null,
   confidence?: 'high' | 'medium' | 'low',
   portfolioValue: number = 500,   // actual Kalshi account value in dollars
-  minutesUntilExpiry?: number,    // minutes remaining in the 15-min window
+  minutesUntilExpiry?: number,    // minutes remaining in the current window
   distanceFromStrikePct?: number, // how far BTC is from strike (%)
   volOfVol?: number | null,       // vol-of-vol: high = unstable regime → reduce position size
+  isHourly: boolean = false,      // true = KXBTCD hourly market; uses different time gates
 ): AgentResult<RiskOutput> {
   const start = Date.now()
   checkDailyReset()
@@ -100,18 +101,25 @@ export function runRiskManager(
   const BLOCKED_UTC_HOURS = new Set([11, 18])
   const utcHour = new Date().getUTCHours()
 
+  // Time gate params differ by market type
+  // 15m (KXBTC15M): empirically validated 3–9 min entry window (2,690 live fills)
+  // Hourly (KXBTCD): enter when 10–45 min remain; no empirical validation yet — conservative
+  const minMin = isHourly ? 10 : RISK_PARAMS.minMinutesLeft
+  const maxMin = isHourly ? 45 : RISK_PARAMS.maxMinutesLeft
+  const maxTrades = isHourly ? 24 : RISK_PARAMS.maxTradesPerDay
+
   if (recommendation === 'NO_TRADE') {
     approved = false
     rejectionReason = `Quant model: no trade signal — d-score outside edge zone or insufficient model confidence`
   } else if (BLOCKED_UTC_HOURS.has(utcHour)) {
     approved = false
     rejectionReason = `Blocked UTC hour ${utcHour}:00 — empirically bad session (live data: -40 to -57pp margin at d∈[1.0,1.2])`
-  } else if (minutesUntilExpiry !== undefined && minutesUntilExpiry < RISK_PARAMS.minMinutesLeft) {
+  } else if (minutesUntilExpiry !== undefined && minutesUntilExpiry < minMin) {
     approved = false
-    rejectionReason = `Too late in window (${minutesUntilExpiry.toFixed(1)}min left < ${RISK_PARAMS.minMinutesLeft}min minimum)`
-  } else if (minutesUntilExpiry !== undefined && minutesUntilExpiry > RISK_PARAMS.maxMinutesLeft) {
+    rejectionReason = `Too late in window (${minutesUntilExpiry.toFixed(1)}min left < ${minMin}min minimum)`
+  } else if (minutesUntilExpiry !== undefined && minutesUntilExpiry > maxMin) {
     approved = false
-    rejectionReason = `Too early in window (${minutesUntilExpiry.toFixed(1)}min left > ${RISK_PARAMS.maxMinutesLeft}min — signal not settled)`
+    rejectionReason = `Too early in window (${minutesUntilExpiry.toFixed(1)}min left > ${maxMin}min — ${isHourly ? 'wait for price to settle in the hourly window' : 'signal not settled'})`
   } else if (distanceFromStrikePct !== undefined && Math.abs(distanceFromStrikePct) < RISK_PARAMS.minDistancePct) {
     approved = false
     rejectionReason = `Price too close to strike (${distanceFromStrikePct.toFixed(4)}% — near-strike trades are ~50/50 noise)`
@@ -121,9 +129,9 @@ export function runRiskManager(
   } else if (givebackDollars >= givebackLimit) {
     approved = false
     rejectionReason = `Session giveback limit: gave back $${givebackDollars.toFixed(2)} from peak $${sessionState.peakPnl.toFixed(2)} (limit: $${givebackLimit.toFixed(0)} = ${RISK_PARAMS.maxGivebackMult}× daily loss cap)`
-  } else if (sessionState.tradeCount >= RISK_PARAMS.maxTradesPerDay) {
+  } else if (sessionState.tradeCount >= maxTrades) {
     approved = false
-    rejectionReason = `Daily trade count cap reached (${RISK_PARAMS.maxTradesPerDay})`
+    rejectionReason = `Daily trade count cap reached (${maxTrades})`
   } else if (limitPrice < RISK_PARAMS.minEntryPrice) {
     approved = false
     rejectionReason = `BUY ${recommendation} entry price ${limitPrice}¢ below min ${RISK_PARAMS.minEntryPrice}¢ — model has no edge at near-50/50 prices`

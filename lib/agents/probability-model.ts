@@ -22,6 +22,7 @@ export async function runProbabilityModel(
   aiMode?: boolean,                 // true = Grok-powered probability instead of pure quant
   candles1h?: OHLCVCandle[],        // 1h candles — intraday trend
   candles4h?: OHLCVCandle[],        // 4h candles — macro trend
+  isHourly?: boolean,               // true = KXBTCD hourly market; d-gate thresholds not validated, skipped
 ): Promise<AgentResult<ProbabilityOutput>> {
   const start = Date.now()
 
@@ -165,8 +166,11 @@ export async function runProbabilityModel(
   )
 
   // ── Quant-only: apply d-gate (AI mode falls through here only on Grok error) ──
+  // HOURLY EXCEPTION: d-gate thresholds [1.0, 1.2] were empirically calibrated from 2,690
+  // KXBTC15M fills only. No equivalent KXBTCD data exists. Skip the gate for hourly markets
+  // and rely on the Brownian model + direction lock + Kelly sizing to manage edge.
   // TREND OVERRIDE: skip d-gate when both macro timeframes confirm BTC's direction.
-  if (dAbs !== null && (dAbs < D_MIN_THRESHOLD || dAbs > D_MAX_THRESHOLD) && !trendAligned) {
+  if (!isHourly && dAbs !== null && (dAbs < D_MIN_THRESHOLD || dAbs > D_MAX_THRESHOLD) && !trendAligned) {
     const reason = dAbs < D_MIN_THRESHOLD
       ? `|d|=${dAbs.toFixed(3)} < ${D_MIN_THRESHOLD} — Kalshi correctly prices near-strike; no alpha`
       : `|d|=${dAbs.toFixed(3)} > ${D_MAX_THRESHOLD} — BTC only ${(Math.abs(distanceFromStrikePct)).toFixed(3)}% from strike with ${minutesUntilExpiry.toFixed(1)}min left; Brownian model overstates edge, Kalshi prices fat-tail reversal risk`
@@ -295,6 +299,7 @@ export async function runProbabilityModel(
   const edgeAbs = Math.abs(pModel - 0.5)
   const confidence: ProbabilityOutput['confidence'] = edgeAbs >= 0.15 ? 'high' : edgeAbs >= 0.07 ? 'medium' : 'low'
 
+  const marketTypeNote = isHourly ? ' [KXBTCD hourly — d-gate skipped, Brownian model only]' : ''
   return {
     agentName: agentLabel,
     status: 'done',
@@ -307,7 +312,7 @@ export async function runProbabilityModel(
       volOfVol: quant.volOfVol,
       dScore,
     },
-    reasoning: 'Quant-only probability model' + quantBlendNote + '\n\nP(final)=' + (pModel * 100).toFixed(1) + '% vs P(market)=' + (pMarket * 100).toFixed(1) + '% — edge: ' + (edgePct >= 0 ? '+' : '') + edgePct.toFixed(1) + '%. Rec: ' + recommendation + ' (' + confidence + ')',
+    reasoning: 'Quant-only probability model' + marketTypeNote + quantBlendNote + '\n\nP(final)=' + (pModel * 100).toFixed(1) + '% vs P(market)=' + (pMarket * 100).toFixed(1) + '% — edge: ' + (edgePct >= 0 ? '+' : '') + edgePct.toFixed(1) + '%. Rec: ' + recommendation + ' (' + confidence + ')',
     durationMs: Date.now() - start,
     timestamp: new Date().toISOString(),
   }

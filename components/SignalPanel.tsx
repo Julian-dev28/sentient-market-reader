@@ -138,53 +138,25 @@ export default function SignalPanel({ probability, sentiment }: SignalPanelProps
             </div>
 
             {/* Plain-English explanation */}
-            <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5, marginTop: 6 }}>
+            <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5, marginTop: 6, display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
               {rec === 'YES' && (
-                <>
-                  ROMA thinks YES wins at{' '}
-                  <strong style={{ color: recColor }}>{Math.round(probability.pModel * 100)}%</strong>
-                  {probability.pMarket < probability.pModel - 0.02
-                    ? <> — market underprices YES at {Math.round(probability.pMarket * 100)}¢ (ROMA fair value: {Math.round(probability.pModel * 100)}¢). Positive edge.</>
-                    : probability.pMarket > probability.pModel + 0.02
-                      ? <> — market overprices YES at {Math.round(probability.pMarket * 100)}¢ vs ROMA&apos;s {Math.round(probability.pModel * 100)}¢, but direction favors YES.</>
-                      : <> — market agrees ({Math.round(probability.pMarket * 100)}¢ YES).</>
-                  }
-                </>
+                <><strong style={{ color: recColor }}>YES</strong> — {Math.round(probability.pModel * 100)}% likely. Mkt: {Math.round(probability.pMarket * 100)}¢.</>
               )}
               {rec === 'NO' && (
-                <>
-                  ROMA thinks BTC ends{' '}
-                  <strong style={{ color: recColor }}>below the strike</strong>{' '}
-                  ({Math.round(probability.pModel * 100)}% YES → {Math.round((1 - probability.pModel) * 100)}% NO).{' '}
-                  {probability.pMarket > probability.pModel + 0.02
-                    ? <>Market overprices YES at {Math.round(probability.pMarket * 100)}¢ (ROMA: {Math.round(probability.pModel * 100)}¢) — NO is the value trade.</>
-                    : probability.pMarket < probability.pModel - 0.02
-                      ? <>Market is even more bearish ({Math.round(probability.pMarket * 100)}¢ YES) — both sides agree NO wins, limited extra edge.</>
-                      : <>Market agrees ({Math.round(probability.pMarket * 100)}¢ YES) — direction clear, edge thin.</>
-                  }
-                </>
+                <><strong style={{ color: recColor }}>NO</strong> — {Math.round((1 - probability.pModel) * 100)}% likely. Mkt: {Math.round(probability.pMarket * 100)}¢ YES.</>
               )}
               {rec === 'NO_TRADE' && (() => {
                 const mktPct = Math.round(probability.pMarket * 100)
                 const mktDir = probability.pMarket >= 0.5 ? 'YES' : 'NO'
                 const mktClr = mktDir === 'YES' ? 'var(--green)' : 'var(--blue)'
-                return (
-                  <>
-                    d-score outside the [1.0, 1.2] edge zone —{' '}
-                    <strong>no proven alpha here</strong>.{' '}
-                    Market{' '}
-                    <strong style={{ color: mktClr }}>{mktDir} @ {mktPct}¢</strong>
-                    .{' '}Waiting for BTC to enter the 3–9 min entry window.
-                  </>
-                )
+                return <>No edge. Mkt: <strong style={{ color: mktClr }}>{mktDir} @ {mktPct}¢</strong>.</>
               })()}
+              {conviction && conviction.label !== 'no edge' && rec !== 'NO_TRADE' && (
+                <span style={{ fontSize: 9, fontWeight: 700, color: conviction.color, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                  {conviction.label}
+                </span>
+              )}
             </div>
-
-            {conviction && conviction.label !== 'no edge' && (
-              <div style={{ marginTop: 6, fontSize: 9, fontWeight: 700, color: conviction.color, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                · {conviction.label} conviction
-              </div>
-            )}
           </div>
 
           {sentimentContradictsRec && (
