@@ -10,22 +10,26 @@ const g = globalThis as typeof globalThis & {
 }
 const CACHE_TTL_MS = 30_000  // 30s
 
-function coinbaseFetch(url: string): Promise<Response> {
+function coinbaseFetch(url: string, timeoutMs = 5_000): Promise<Response> {
   // Local Node.js often can't verify Coinbase's intermediate cert chain.
   // Skip TLS verification in dev only; Vercel production is unaffected.
   if (process.env.NODE_ENV === 'production') {
-    return fetch(url, { cache: 'no-store' })
+    const ac = new AbortController()
+    setTimeout(() => ac.abort(), timeoutMs)
+    return fetch(url, { cache: 'no-store', signal: ac.signal })
   }
   return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { req.destroy(new Error('coinbase fetch timeout')) }, timeoutMs)
     const req = https.get(url, { rejectUnauthorized: false }, (res) => {
       const chunks: Buffer[] = []
       res.on('data', (c: Buffer) => chunks.push(c))
       res.on('end', () => {
+        clearTimeout(timer)
         const body = Buffer.concat(chunks).toString('utf-8')
         resolve(new Response(body, { status: res.statusCode ?? 200 }))
       })
     })
-    req.on('error', reject)
+    req.on('error', (e) => { clearTimeout(timer); reject(e) })
     req.end()
   })
 }
