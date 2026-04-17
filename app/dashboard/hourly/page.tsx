@@ -285,7 +285,7 @@ export default function HourlyDashboard() {
               marketMode="hourly"
               predictedPrice={predictedPrice}
             />
-            <SignalPanel probability={prob} sentiment={sent} />
+            <SignalPanel probability={prob} sentiment={sent} strikePrice={strikePrice} />
 
             {exec && exec.action !== 'PASS' && (
               <div className="card bracket-card animate-fade-in" style={{ borderColor: exec.action === 'BUY_YES' ? 'rgba(45,158,107,0.3)' : 'rgba(58,114,168,0.3)', background: 'var(--bg-card)' }}>

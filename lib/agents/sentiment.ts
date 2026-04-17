@@ -248,8 +248,9 @@ ${prevContext}`] : []),
     const aboveStrike = distanceFromStrikePct >= 0
     const grokPrompt = [
       `You are a quantitative BTC prediction market analyst. This is a 15-min Kalshi binary.`,
-      `YES wins if BTC finishes ${aboveStrike ? 'ABOVE' : 'BELOW'} $${strikePrice.toLocaleString()}.`,
-      `NO wins if BTC ${aboveStrike ? 'drops below' : 'rises above'} the strike before close.`,
+      `YES wins if BTC finishes AT OR ABOVE $${strikePrice.toLocaleString()} at close.`,
+      `NO wins if BTC closes BELOW $${strikePrice.toLocaleString()}.`,
+      `BTC is currently ${aboveStrike ? 'ABOVE' : 'BELOW'} strike.`,
       ``,
       context,  // includes price, candles, quant signals, OB data — no duplicate quantBrief
       ``,

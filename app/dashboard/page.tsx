@@ -408,7 +408,7 @@ export default function Home() {
               liveMode={true}
               onRefresh={refreshMarket}
             />
-            <SignalPanel probability={prob} sentiment={sent} />
+            <SignalPanel probability={prob} sentiment={sent} strikePrice={strikePrice} />
 
             {exec && exec.action !== 'PASS' && (
               <div className="card bracket-card animate-fade-in" style={{

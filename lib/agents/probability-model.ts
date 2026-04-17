@@ -77,8 +77,9 @@ export async function runProbabilityModel(
     const aboveStrike = distanceFromStrikePct >= 0
     const distUSD = strikePrice > 0 ? Math.abs(distanceFromStrikePct / 100) * strikePrice : 0
     const grokPrompt = [
-      `You are a quantitative BTC prediction market analyst. Estimate P(YES) for this 15-min Kalshi binary.`,
-      `YES wins if BTC finishes ${aboveStrike ? 'ABOVE' : 'BELOW'} $${strikePrice.toLocaleString()}.`,
+      `You are a quantitative BTC prediction market analyst. Estimate P(YES) for this Kalshi binary.`,
+      `YES wins if BTC finishes AT OR ABOVE $${strikePrice.toLocaleString()} at close. NO wins if BTC closes BELOW.`,
+      `BTC is currently ${aboveStrike ? 'ABOVE' : 'BELOW'} strike.`,
       ``,
       `Market state:`,
       `• BTC vs strike: ${distanceFromStrikePct >= 0 ? '+' : ''}${distanceFromStrikePct.toFixed(4)}% ($${distUSD.toFixed(0)} ${aboveStrike ? 'above' : 'below'})`,

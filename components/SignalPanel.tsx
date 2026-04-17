@@ -6,6 +6,7 @@ import type { ProbabilityOutput, SentimentOutput } from '@/lib/types'
 interface SignalPanelProps {
   probability: ProbabilityOutput | null
   sentiment: SentimentOutput | null
+  strikePrice?: number | null
 }
 
 /** Animated fill bar */
@@ -74,7 +75,7 @@ function sentimentLabel(score: number): { text: string; color: string } {
   return                   { text: 'Neutral',            color: 'var(--text-muted)' }
 }
 
-export default function SignalPanel({ probability, sentiment }: SignalPanelProps) {
+export default function SignalPanel({ probability, sentiment, strikePrice }: SignalPanelProps) {
   const [sentimentReady, setSentimentReady] = useState(false)
   useEffect(() => {
     if (!sentiment) return
@@ -126,6 +127,11 @@ export default function SignalPanel({ probability, sentiment }: SignalPanelProps
                 <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 26, fontWeight: 900, color: recColor, lineHeight: 1 }}>
                   {rec === 'YES' ? 'BUY YES' : rec === 'NO' ? 'BUY NO' : 'PASS'}
                 </div>
+                {strikePrice && strikePrice > 0 && (
+                  <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 3 }}>
+                    YES = BTC ≥ ${strikePrice.toLocaleString()} · NO = BTC &lt; ${strikePrice.toLocaleString()}
+                  </div>
+                )}
               </div>
               {rec !== 'NO_TRADE' && (
                 <div style={{ textAlign: 'right' }}>
