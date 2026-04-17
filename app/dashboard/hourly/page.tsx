@@ -17,17 +17,25 @@ import PipelineHistory from '@/components/PipelineHistory'
 // - Late-start warning at 10 min remaining (not 2 min).
 
 export default function HourlyDashboard() {
-  const [botActive, setBotActive]           = useState(false)
-  const [showBotWarning, setShowBotWarning] = useState(false)
+  const [botActive, setBotActive]             = useState(false)
+  const [showBotWarning, setShowBotWarning]   = useState(false)
   const [showLateWarning, setShowLateWarning] = useState(false)
-  const [orModel, setOrModel]               = useState<string>('grok-3')
-  const [grokMenuOpen, setGrokMenuOpen]     = useState(false)
-  const grokMenuRef                         = useRef<HTMLDivElement>(null)
+  const [analysisMode, setAnalysisMode]       = useState<'ai' | 'quant'>('ai')
+  const [orModel, setOrModel]                 = useState<string>('grok-3')
+  const [grokMenuOpen, setGrokMenuOpen]       = useState(false)
+  const grokMenuRef                           = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const saved = localStorage.getItem('sentient-grok-model-hourly')
     if (saved) setOrModel(saved)
+    const savedMode = localStorage.getItem('sentient-analysis-mode-hourly')
+    if (savedMode === 'quant' || savedMode === 'ai') setAnalysisMode(savedMode)
   }, [])
+
+  function handleAnalysisModeChange(mode: 'ai' | 'quant') {
+    setAnalysisMode(mode)
+    localStorage.setItem('sentient-analysis-mode-hourly', mode)
+  }
 
   function handleGrokModelChange(m: string) {
     setOrModel(m)
@@ -55,9 +63,10 @@ export default function HourlyDashboard() {
     : 0) || liveMarket?.floor_strike || 0
 
   // Pipeline — always hourly + AI (Grok price prediction)
+  const aiMode = analysisMode === 'ai'
   const { pipeline, history, streamingAgents, isRunning, serverLocked, nextCycleIn, error, runCycle, stopCycle, monitorDeltaPct } = usePipeline(
-    true, botActive, true, undefined, undefined,
-    orModel,
+    true, botActive, aiMode, undefined, undefined,
+    aiMode ? (orModel || 'grok-3') : undefined,
     liveBTCPrice || undefined, liveStrikePrice || undefined,
     'hourly',
   )
@@ -321,14 +330,30 @@ export default function HourlyDashboard() {
             {/* Control bar */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
 
-              {/* Mode badge — non-interactive, just shows current mode */}
+              {/* Mode badge */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 8, background: 'rgba(224,111,160,0.12)', border: '1px solid rgba(224,111,160,0.3)', flexShrink: 0 }}>
                 <span style={{ fontSize: 11, color: 'var(--pink)', fontWeight: 800 }}>◷ 1H</span>
-                <span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 600 }}>KXBTCD · Grok Forecast</span>
+                <span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 600 }}>KXBTCD · {aiMode ? 'Grok Forecast' : 'Quant'}</span>
               </div>
 
-              {/* Grok model picker */}
-              <div ref={grokMenuRef} style={{ position: 'relative', flex: 1, minWidth: 0 }}>
+              {/* Quant | AI toggle */}
+              <div style={{ display: 'flex', borderRadius: 8, overflow: 'hidden', border: '1px solid rgba(224,111,160,0.3)', flexShrink: 0 }}>
+                {(['quant', 'ai'] as const).map(mode => (
+                  <button key={mode} onClick={() => handleAnalysisModeChange(mode)} style={{
+                    padding: '5px 12px', cursor: 'pointer', border: 'none', fontSize: 11, fontWeight: 700,
+                    background: analysisMode === mode
+                      ? (mode === 'ai' ? 'var(--pink)' : 'var(--brown)')
+                      : 'transparent',
+                    color: analysisMode === mode ? '#fff' : 'var(--text-muted)',
+                    transition: 'all 0.15s',
+                  }}>
+                    {mode === 'quant' ? '∑ Quant' : '◷ AI'}
+                  </button>
+                ))}
+              </div>
+
+              {/* Grok model picker — only in AI mode */}
+              {aiMode && <div ref={grokMenuRef} style={{ position: 'relative', flex: 1, minWidth: 0 }}>
                 <button onClick={() => setGrokMenuOpen(v => !v)} style={{ width: '100%', textAlign: 'left', cursor: 'pointer', padding: '6px 12px', borderRadius: 8, border: '1px solid var(--pink)', background: 'rgba(224,111,160,0.07)', color: 'var(--pink)', display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span style={{ fontSize: 9, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--text-muted)', flexShrink: 0 }}>Model</span>
                   <span style={{ fontSize: 12, fontWeight: 600, flex: 1 }}>{selectedModel.label}</span>
@@ -345,7 +370,7 @@ export default function HourlyDashboard() {
                     ))}
                   </div>
                 )}
-              </div>
+              </div>}
 
               {/* Run / Stop + expiry */}
               <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -416,7 +441,7 @@ export default function HourlyDashboard() {
             )}
 
             <PriceChart priceHistory={priceHistory} strikePrice={strikePrice} currentPrice={currentBTCPrice} />
-            <AgentPipeline pipeline={pipeline} isRunning={isRunning} streamingAgents={streamingAgents} aiMode={true} marketMode="hourly" />
+            <AgentPipeline pipeline={pipeline} isRunning={isRunning} streamingAgents={streamingAgents} aiMode={aiMode} marketMode="hourly" />
             <PipelineHistory history={history} />
           </div>
 

@@ -123,6 +123,16 @@ const AGENTS_AI = [
   { key: 'execution'       as const, label: 'Execution',        short: 'EXEC',      icon: '▶', desc: 'Grok order',        color: 'var(--green)',  rgb: '45,158,107',     bg: 'var(--green-pale)', border: 'rgba(45,158,107,0.22)'    },
 ]
 
+// Hourly KXBTCD + quant pipeline
+const AGENTS_QUANT_HOURLY = [
+  { key: 'marketDiscovery' as const, label: 'Market Discovery', short: 'MARKET',   icon: '◎', desc: 'KXBTCD hourly scan',  color: 'var(--brown)',  rgb: '74,124,142',  bg: 'var(--brown-pale)', border: 'rgba(74,124,142,0.22)' },
+  { key: 'priceFeed'       as const, label: 'Price Feed',       short: 'PRICE',    icon: '◈', desc: 'Coinbase BTC feed',   color: 'var(--green)',  rgb: '45,158,107',  bg: 'var(--green-pale)', border: 'rgba(45,158,107,0.22)'  },
+  { key: 'sentiment'       as const, label: 'Sentiment',        short: 'SENTIMENT',icon: '◉', desc: 'ROMA quant signals',  color: 'var(--blue)',   rgb: '58,114,168',  bg: 'var(--blue-pale)',  border: 'rgba(58,114,168,0.22)'  },
+  { key: 'probability'     as const, label: 'Probability',      short: 'PROB',     icon: '⬟', desc: 'Hourly P(YES) model', color: 'var(--amber)',  rgb: '184,121,10',  bg: 'var(--amber-pale)', border: 'rgba(184,121,10,0.22)'  },
+  { key: 'risk'            as const, label: 'Risk Manager',     short: 'RISK',     icon: '⬡', desc: 'Kelly + limits',      color: 'var(--brown)',  rgb: '74,124,142',  bg: 'var(--brown-pale)', border: 'rgba(74,124,142,0.22)'  },
+  { key: 'execution'       as const, label: 'Execution',        short: 'EXEC',     icon: '▶', desc: 'KXBTCD order',        color: 'var(--green)',  rgb: '45,158,107',  bg: 'var(--green-pale)', border: 'rgba(45,158,107,0.22)'  },
+]
+
 // Hourly KXBTCD mode — Grok price-prediction pipeline, different semantics
 const AGENTS_HOURLY = [
   { key: 'marketDiscovery' as const, label: 'Market Discovery', short: 'MARKET',   icon: '◎', desc: 'KXBTCD hourly scan', color: 'var(--brown)',  rgb: '74,124,142',  bg: 'var(--brown-pale)', border: 'rgba(74,124,142,0.22)' },
@@ -668,8 +678,10 @@ export default function AgentPipeline({
       <div style={{ marginBottom: isRunning ? 10 : 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: isRunning ? 8 : 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '-0.01em' }}>
-            {isHourly
+            {isHourly && aiMode
               ? <><span style={{ color: 'var(--pink)', fontSize: 12 }}>◷</span> Grok Hourly Agent</>
+              : isHourly && !aiMode
+              ? <><span style={{ color: 'var(--brown)', fontSize: 11 }}>∑</span> Quant Hourly</>
               : aiMode
               ? <><span style={{ color: 'var(--blue)', fontSize: 12 }}>✦</span> Grok AI Agent</>
               : <><span style={{ color: 'var(--brown)', fontSize: 11 }}>∑</span> Quant Pipeline</>}
@@ -697,7 +709,7 @@ export default function AgentPipeline({
       ) : (isRunning || pipeline) ? (
         <>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            {(isHourly ? AGENTS_HOURLY : aiMode ? AGENTS_AI : AGENTS_QUANT).map((agent, i) => {
+            {(isHourly && aiMode ? AGENTS_HOURLY : isHourly ? AGENTS_QUANT_HOURLY : aiMode ? AGENTS_AI : AGENTS_QUANT).map((agent, i) => {
               const result = isRunning
                 ? streamingAgents?.[agent.key]
                 : pipeline?.agents[agent.key]
