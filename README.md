@@ -377,6 +377,12 @@ Open `/dashboard` for the 15-min pipeline, `/dashboard/hourly` for the KXBTCD 1h
 
 ---
 
+## Note
+
+Architecture and agent framework integrations are subject to change as we continue researching multi-agent and single-agent approaches. The pipeline described here reflects the current implementation.
+
+---
+
 ## Disclaimer
 
 This project is for educational and research purposes. Paper trading is the default. Live trading places real orders with real money on a regulated prediction market exchange. Use live mode at your own risk. Nothing here is financial advice.
