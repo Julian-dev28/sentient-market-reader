@@ -43,9 +43,12 @@ DAYS_BACK            = 30
 D_THRESHOLD          = 0.0
 D_MAX_THRESHOLD      = 99.0
 
-# Timing
-MIN_MINUTES_LEFT     = 6
+# Timing — golden zone (65-73¢, d≥2.0) is 93%+ WR across 3-12 min so we widen;
+# all other prices keep the tight 6-9 min window where signal is settled.
+MIN_MINUTES_LEFT     = 6    # default for <65¢ and >73¢ trades
 MAX_MINUTES_LEFT     = 9
+MIN_MINUTES_GOLDEN   = 3    # 65-73¢ golden zone: edge holds 3-12 min
+MAX_MINUTES_GOLDEN   = 12
 
 # Hurst
 MIN_HURST            = 0.50
@@ -60,8 +63,8 @@ MIN_PERSIST          = 0.82
 # Vol regime
 MAX_VOL_MULT         = 1.25
 
-# Confidence-tiered flat risk (replaces Kelly)
-# risk_pct = min(20%, KELLY_FRACTION × kelly_full)
+  # Tiered Kelly sizing based on entry price bucket (replaces flat risk)
+  # risk_pct = min(20%, KELLY_FRACTION × kelly_full × tier_multiplier)
 
 # Risk / sizing — MAX_ENTRY_PRICE_RM targets the market efficiency zone:
 # 65-73¢ windows are where Markov gets 93.8% WR but market only prices ~71¢.
@@ -353,7 +356,7 @@ def process_market(mkt: dict, candles_15m: list, candles_5m: list) -> dict | Non
 
     check_times = []
     t = open_ts + POLLER_INTERVAL_MIN * 60
-    while t <= close_ts - MIN_MINUTES_LEFT * 60:
+    while t <= close_ts - MIN_MINUTES_GOLDEN * 60:   # use widest possible window
         check_times.append(t)
         t += POLLER_INTERVAL_MIN * 60
 
@@ -361,7 +364,7 @@ def process_market(mkt: dict, candles_15m: list, candles_5m: list) -> dict | Non
 
     for check_ts in check_times:
         minutes_left = (close_ts - check_ts) / 60.0
-        if minutes_left > MAX_MINUTES_LEFT or minutes_left < MIN_MINUTES_LEFT:
+        if minutes_left > MAX_MINUTES_GOLDEN:   # fast reject: outside widest possible window
             continue
 
         # UTC hour gate
@@ -472,6 +475,13 @@ def process_market(mkt: dict, candles_15m: list, candles_5m: list) -> dict | Non
         if MAX_ENTRY_PRICE_RM > 0 and limit_price_cents > MAX_ENTRY_PRICE_RM:
             continue
 
+        # Conditional timing gate: golden zone (65-73¢) allows 3-12 min; all others 6-9 min
+        is_golden = 65 <= limit_price_cents <= 73
+        min_min   = MIN_MINUTES_GOLDEN if is_golden else MIN_MINUTES_LEFT
+        max_min   = MAX_MINUTES_GOLDEN if is_golden else MAX_MINUTES_LEFT
+        if minutes_left < min_min or minutes_left > max_min:
+            continue
+
         p_gap      = abs(p_yes - 0.5)
         confidence = 'high' if p_gap >= 0.15 else 'medium' if p_gap >= 0.07 else 'low'
         won        = (rec == result)
@@ -549,12 +559,24 @@ def simulate(records: list) -> float:
         fee_per_c_raw    = MAKER_FEE_RATE * p_dollars * (1 - p_dollars)
         total_cost_per_c = p_dollars + fee_per_c_raw
 
-        # 20% fractional Kelly sizing
+        # Tiered Kelly sizing based on entry price bucket
         p_win            = r['p_yes'] if r['side'] == 'yes' else (1.0 - r['p_yes'])
         net_win_per_c    = (1.0 - p_dollars) - fee_per_c_raw
         b_odds           = net_win_per_c / total_cost_per_c if total_cost_per_c > 0 else 1.0
         kelly_full       = max(0.0, (b_odds * p_win - (1.0 - p_win)) / b_odds)
-        risk_pct         = min(MAX_TRADE_PCT, KELLY_FRACTION * kelly_full)
+
+        # Apply tiered Kelly fractions based on entry price bucket
+        lp_cents = r['limit_price_cents']
+        if lp_cents <= 73:
+            tier_multiplier = 0.35  # 35% Kelly for 65-73¢ (93.8% WR zone)
+        elif lp_cents <= 79:
+            tier_multiplier = 0.12  # 12% Kelly for 73-79¢ (71% WR zone)
+        elif lp_cents <= 85:
+            tier_multiplier = 0.08  # 8% Kelly for 79-85¢ (76% WR zone)
+        else:
+            tier_multiplier = 0.05  # 5% Kelly for >85¢ (marginal edge)
+
+        risk_pct = min(MAX_TRADE_PCT, tier_multiplier * kelly_full)
         risk_dollars     = cash * risk_pct
         budget_contracts = round(risk_dollars / total_cost_per_c) if total_cost_per_c > 0 else 1
         dynamic_cap      = max(MAX_ORDER_DEPTH, round(cash / STARTING_CASH * MAX_ORDER_DEPTH))
@@ -683,6 +705,24 @@ def main():
         b_edge   = b_wr - b_be_wr
         b_pnl    = sum(r['pnl'] for r in b_trades)
         print(f"  {label:<10} {len(b_trades):>7} {b_wr:>6.1f}% {b_be_wr:>6.1f}% {b_edge:>+6.1f}pp ${b_pnl:>+8.2f}")
+    # ── Price × timing cross-tab ──────────────────────────────────────────────
+    time_bands = [(3,6,'3-6min'),(6,9,'6-9min'),(9,12,'9-12min'),(12,99,'>12min')]
+    print()
+    print("  PRICE × TIMING CROSS-TAB")
+    hdr2 = f"  {'':10}" + "".join(f"  {tb[2]:>12}" for tb in time_bands)
+    print(hdr2)
+    print("  " + "-" * (len(hdr2) - 2))
+    for lo, hi, label in buckets:
+        row = f"  {label:<10}"
+        for t_lo, t_hi, t_label in time_bands:
+            cell = [r for r in executed if lo <= r['limit_price_cents'] < hi
+                    and t_lo <= r['minutes_left'] < t_hi]
+            if not cell:
+                row += f"  {'—':>12}"
+            else:
+                cw  = [r for r in cell if r.get('outcome_sim', r['outcome']) == 'WIN']
+                row += f"  {len(cw)}/{len(cell)} ({len(cw)/len(cell)*100:.0f}%)".rjust(14)
+        print(row)
     print("=" * W)
     print()
 
