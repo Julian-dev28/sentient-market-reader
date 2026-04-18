@@ -66,40 +66,25 @@ export default function Header({ cycleId, isRunning, lastCompletedAt, onRunCycle
 
         <div style={{ height: 22, width: 1, background: 'var(--border)', margin: '0 2px' }} />
 
-        {/* Market mode tabs */}
-        <div style={{
-          fontSize: 11, fontWeight: 700,
-          padding: '4px 12px', borderRadius: 7,
-          background: 'var(--bg-secondary)',
-          color: 'var(--text-primary)',
-          border: '1px solid var(--border)',
-        }}>
-          15m
-        </div>
-        <Link href="/dashboard/hourly" style={{
-          fontSize: 11, fontWeight: 500,
-          padding: '4px 12px', borderRadius: 7, textDecoration: 'none',
-          background: 'transparent',
-          color: 'var(--text-muted)',
-          transition: 'all 0.15s',
-        }}>
-          ◷ 1h
-        </Link>
-
-        <div style={{ height: 22, width: 1, background: 'var(--border)', margin: '0 2px' }} />
-
-        {/* Page nav */}
-        {(['/agent'] as const).map((href) => {
+        {/* Nav tabs — path-aware active state */}
+        {([
+          { href: '/dashboard',        label: '15m'   },
+          { href: '/dashboard/hourly', label: '◷ 1h' },
+          { href: '/agent',            label: 'Agent' },
+        ] as const).map(({ href, label }, i) => {
           const active = pathname === href
+          const isLast15m = i === 0   // 15m is "home" — also active on sub-paths of /dashboard except hourly
+          const effectiveActive = active || (isLast15m && pathname?.startsWith('/dashboard') && !pathname?.startsWith('/dashboard/hourly'))
           return (
             <Link key={href} href={href} style={{
-              fontSize: 11, fontWeight: active ? 700 : 500,
+              fontSize: 11, fontWeight: effectiveActive ? 700 : 500,
               padding: '4px 12px', borderRadius: 7, textDecoration: 'none',
-              background: active ? 'var(--bg-secondary)' : 'transparent',
-              color: active ? 'var(--text-primary)' : 'var(--text-muted)',
+              background: effectiveActive ? 'var(--bg-secondary)' : 'transparent',
+              color: effectiveActive ? 'var(--text-primary)' : 'var(--text-muted)',
+              border: effectiveActive ? '1px solid var(--border)' : '1px solid transparent',
               transition: 'all 0.15s',
             }}>
-              Agent
+              {label}
             </Link>
           )
         })}

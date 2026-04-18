@@ -5,9 +5,10 @@
  * Browser clients subscribe for real-time updates via /api/agent/stream (SSE).
  *
  * Lifecycle:
- *   start(allowance) → scheduleNextRun() → [wait for valid window] →
- *   startDPoller() → [poll BTC every 30s] → d ≥ threshold →
- *   runCycle() → processResult() → placeOrder() → wait for next window → repeat
+ *   start(allowance) → scheduleNextRun() → [wait for 6–9 min window] →
+ *   startDPoller() → [poll BTC every 2s for UI, run Markov pipeline every 30s] →
+ *   Markov approves → runCycle() → processResult() → placeOrder() → next window → repeat
+ *   Markov blocks  → keep scanning until window expires
  */
 
 import { EventEmitter } from 'events'
@@ -22,24 +23,18 @@ import type {
 } from './types'
 import { normalizeKalshiMarket } from './types'
 import type { AIProvider } from './llm-client'
-import { CONFIDENCE_THRESHOLD, KELLY_FRACTION } from './agent-shared'
+import { KELLY_FRACTION } from './agent-shared'
 import { recordTradeResult } from './agents/markov'
 import type { AgentStateSnapshot, AgentPhase } from './agent-shared'
 import { agentStore } from './agent-store'
 import { KALSHI_HOST, getCurrentEventTicker } from './kalshi'
 
 // ── Constants ────────────────────────────────────────────────────────────────
-const TARGET_MINUTES_BEFORE_CLOSE = 10
-const MIN_MINUTES_LEFT       = 3
-const MAX_MINUTES_LEFT       = 9   // live fills: 9-12min window 69.5% wr; 3-9min = 95.7% wr
+const TARGET_MINUTES_BEFORE_CLOSE = 12  // start monitoring 12 min before close
+const MIN_MINUTES_LEFT       = 2         // safety floor: don't trade with < 2 min left
 const POST_WINDOW_BUFFER_MS  = 30_000
 const MIN_FAST_ENTRY_PRICE   = 78   // ¢ — sweet spot is 78-99¢ (94-100% win rate)
 const MAX_FAST_ENTRY_PRICE   = 99   // ¢ — no hard upper cap; high prices = high win rate
-// Edge zone bounds (empirically validated from 2,690 live fills):
-//   |d| < 1.0: Kalshi correctly prices — no alpha
-//   |d| 1.0–1.2: +5.5pp margin (87.4% wr, 95.7% in 3-9min) — ONLY edge zone
-//   |d| > 1.2: Kalshi overprices fat-tail reversal — negative margin
-const D_MAX_THRESHOLD = 1.2
 
 // Kalshi maker fee: ceil(0.0175 × C × P × (1-P)) — agent places resting limit orders
 const MAKER_FEE_RATE = 0.0175
@@ -67,9 +62,9 @@ function getDelayMs(): { delayMs: number; closeMs: number; minutesLeft: number }
   const minutesLeft = (closeMs - Date.now()) / 60_000
   let delayMs: number
 
-  if (minutesLeft >= MIN_MINUTES_LEFT && minutesLeft <= MAX_MINUTES_LEFT) {
-    delayMs = 0
-  } else if (minutesLeft > MAX_MINUTES_LEFT) {
+  if (minutesLeft >= MIN_MINUTES_LEFT && minutesLeft <= TARGET_MINUTES_BEFORE_CLOSE) {
+    delayMs = 0  // already inside monitoring window
+  } else if (minutesLeft > TARGET_MINUTES_BEFORE_CLOSE) {
     delayMs = (minutesLeft - TARGET_MINUTES_BEFORE_CLOSE) * 60_000
   } else {
     const nextCloseMs = closeMs + 15 * 60_000
@@ -134,6 +129,7 @@ class ServerAgent extends EventEmitter {
   private agentPhase: AgentPhase = 'idle'
   private windowCloseAt = 0
   private lastKvSave    = 0   // timestamp of last KV write — throttle to 1/10s
+  private lastCycleAt  = 0   // timestamp of last pipeline run — throttle within window
 
   // ── Config persistence ─────────────────────────────────────────────────────
 
@@ -565,13 +561,11 @@ class ServerAgent extends EventEmitter {
 
   private startDPoller(closeMs: number) {
     this.stopDPoller()
-    // Starting fresh for a new window — clear bet flag and stale d-score display
-    this.windowBetPlaced = false
-    this.lastPollAt      = null
-    this.currentD        = 0
-    this.windowCloseAt   = closeMs
-    this.agentPhase      = this.strikePrice > 0 ? 'monitoring' : 'bootstrap'
+    this.windowCloseAt = closeMs
+    this.agentPhase    = this.strikePrice > 0 ? 'monitoring' : 'bootstrap'
     this.pushState()
+
+    const SCAN_INTERVAL_MS = 5_000  // run full pipeline at most every 10s while in window
 
     let pollInFlight = false
     const check = async () => {
@@ -579,9 +573,10 @@ class ServerAgent extends EventEmitter {
       pollInFlight = true
 
       const minutesLeft = (closeMs - Date.now()) / 60_000
+
+      // Window closing — stop monitoring, schedule next window
       if (minutesLeft < MIN_MINUTES_LEFT) {
         this.stopDPoller()
-        // Window expiring without a bet — schedule next window
         if (!this.windowBetPlaced) {
           const waitMs = Math.max(POST_WINDOW_BUFFER_MS, closeMs - Date.now() + POST_WINDOW_BUFFER_MS)
           this.agentPhase  = 'waiting'
@@ -591,10 +586,11 @@ class ServerAgent extends EventEmitter {
           this.pushState()
           console.log(`[ServerAgent] Window expiring without bet — next window in ${Math.round(waitMs/1000)}s`)
         }
+        pollInFlight = false
         return
       }
 
-      // Bootstrap: no strike yet → run pipeline once to get market data
+      // Bootstrap: no strike yet → run pipeline once to fetch market data
       if (this.strikePrice <= 0) {
         this.stopDPoller()
         pollInFlight = false
@@ -602,47 +598,39 @@ class ServerAgent extends EventEmitter {
         return
       }
 
+      // Live % distance from strike — update UI every 2s
       try {
         const res = await fetch('https://api.exchange.coinbase.com/products/BTC-USD/ticker', {
           cache: 'no-store',
-          signal: AbortSignal.timeout(5_000),  // 5s max — never block the poll loop
+          signal: AbortSignal.timeout(3_000),
         })
-        if (!res.ok) return
-        const cb = await res.json()
-        const price = parseFloat(cb?.price)
-        if (!price || price <= 0) return
-
-        const candlesLeft = minutesLeft / 15
-        const d = Math.log(price / this.strikePrice) / (this.gkVol * Math.sqrt(candlesLeft))
-        this.currentD   = d
-        this.lastPollAt = Date.now()
-        this.pushState()
-
-        const dAbs = Math.abs(d)
-        if (dAbs >= CONFIDENCE_THRESHOLD && dAbs <= D_MAX_THRESHOLD) {
-          // d in [1.0, 1.2]: confirmed edge zone — run ROMA pipeline for entry.
-          // Pipeline uses live candles for a more precise d-score; this poller d is
-          // an approximation using stale gkVol from bootstrap. If the pipeline's
-          // precise d differs slightly and falls outside [1.0,1.2], it will return
-          // NO_TRADE correctly. Only trigger here when poller confirms we're in zone.
-          this.stopDPoller()
-          console.log(`[ServerAgent] d=${d.toFixed(3)} in [${CONFIDENCE_THRESHOLD},${D_MAX_THRESHOLD}] — running ROMA pipeline for entry`)
-          await this.runCycle()
-        } else if (dAbs > D_MAX_THRESHOLD) {
-          // d > 1.2: Kalshi overprices fat-tail reversal risk — no alpha.
-          // Keep polling: as T shrinks d grows (same distance, less time), but BTC
-          // could also move toward strike and bring |d| back into range.
-          console.log(`[ServerAgent] d=${d.toFixed(3)} > ${D_MAX_THRESHOLD} — outside edge zone, watching`)
+        if (res.ok) {
+          const cb    = await res.json()
+          const price = parseFloat(cb?.price)
+          if (price > 0) {
+            this.currentD   = ((price - this.strikePrice) / this.strikePrice) * 100
+            this.lastPollAt = Date.now()
+            this.pushState()
+          }
         }
-      } catch (e) {
-        console.error('[ServerAgent] d-poller error:', e)
-      } finally {
+      } catch {}
+
+      // Fire full Markov pipeline every 30s — scans the whole window until signal or expiry
+      const now = Date.now()
+      if (now - this.lastCycleAt >= SCAN_INTERVAL_MS) {
+        this.lastCycleAt = now
+        this.stopDPoller()
         pollInFlight = false
+        console.log(`[ServerAgent] ${minutesLeft.toFixed(1)}min left — scanning Markov signal`)
+        await this.runCycle()
+        return
       }
+
+      pollInFlight = false
     }
 
     check()
-    this.pollerInterval = setInterval(check, 500)  // 500ms — detect d-trigger within half a second
+    this.pollerInterval = setInterval(check, 2_000)  // 2s — live UI + rapid signal detection
   }
 
   private scheduleNextRun() {
@@ -654,14 +642,15 @@ class ServerAgent extends EventEmitter {
     this.strikePrice     = 0   // force bootstrap pipeline on next window
     this.lastPollAt      = null
     this.currentD        = 0
+    this.lastCycleAt     = 0   // allow pipeline to fire immediately in the new window
 
     const { delayMs, closeMs, minutesLeft } = getDelayMs()
     this.windowCloseAt = closeMs
 
     if (delayMs === 0) {
       this.startDPoller(closeMs)
-      this.nextRunAt   = closeMs - MIN_MINUTES_LEFT * 60_000
-      this.nextCycleIn = Math.round((minutesLeft - MIN_MINUTES_LEFT) * 60)
+      this.nextRunAt   = closeMs
+      this.nextCycleIn = Math.round(minutesLeft * 60)
     } else {
       this.agentPhase  = 'waiting'
       this.nextRunAt   = Date.now() + delayMs
@@ -836,7 +825,7 @@ class ServerAgent extends EventEmitter {
           console.log('[ServerAgent] Pipeline error — retrying in 5 min')
           this.schedule(() => this.scheduleNextRun(), retryMs)
         } else if (failed && minutesLeft >= MIN_MINUTES_LEFT) {
-          // Order placement failed — retry d-poller in 60s within same window
+          // Order placement failed — retry poller in 60s within same window
           this.nextRunAt   = Date.now() + 60_000
           this.nextCycleIn = 60
           this.schedule(() => {
@@ -844,28 +833,9 @@ class ServerAgent extends EventEmitter {
             this.startDPoller(cm)
           }, 60_000)
         } else if (!this.windowBetPlaced && minutesLeft >= MIN_MINUTES_LEFT) {
-          if (wasBootstrap) {
-            // Bootstrap run just fetched market data — restart d-poller to watch for signal
-            this.agentPhase = 'monitoring'
-            this.startDPoller(freshClose)
-          } else {
-            // Threshold-triggered PASS — wait 3 min before re-enabling d-poller.
-            // Without cooldown, d is still ≥ threshold immediately after PASS (nothing changed),
-            // causing a tight loop: PASS → restart → d triggers → ROMA → PASS → repeat.
-            // 3 min lets conditions change before re-checking, and limits API call burn.
-            const passWaitMs = 3 * 60_000
-            this.agentPhase  = 'monitoring'
-            this.nextCycleIn = Math.round(passWaitMs / 1000)
-            console.log(`[ServerAgent] PASS — waiting 3 min before re-checking d-score`)
-            this.schedule(() => {
-              const { closeMs: cm, minutesLeft: ml } = getDelayMs()
-              if (this.active && !this.windowBetPlaced && ml >= MIN_MINUTES_LEFT) {
-                this.startDPoller(cm)
-              } else if (this.active && !this.windowBetPlaced) {
-                this.scheduleNextRun()
-              }
-            }, passWaitMs)
-          }
+          // Bootstrap or NO_TRADE — restart poller to keep scanning for signal within window
+          this.agentPhase = 'monitoring'
+          this.startDPoller(freshClose)
         } else {
           // Bet placed or window expired — wait for window to close then schedule next
           const waitMs     = Math.max(POST_WINDOW_BUFFER_MS, freshClose - Date.now() + POST_WINDOW_BUFFER_MS)
@@ -897,30 +867,20 @@ class ServerAgent extends EventEmitter {
     if (md.strikePrice > 0)                        this.strikePrice          = md.strikePrice
     if (prob.gkVol15m && prob.gkVol15m > 0)        this.gkVol                = prob.gkVol15m
     if (md.activeMarket?.ticker)                   this.currentMarketTicker  = md.activeMarket.ticker
-    // Sync currentD to the pipeline's precise d-score (candle-based) so UI is consistent
-    if (prob.dScore !== undefined && prob.dScore !== null) this.currentD = prob.dScore
+    // Sync currentD to % distance from strike — positive = above, negative = below
+    this.currentD = pf.aboveStrike ? pf.distanceFromStrikePct : -pf.distanceFromStrikePct
 
     if (evTicker && evTicker !== this.windowKey) {
       this.windowKey       = evTicker
       this.windowBetPlaced = false
     }
 
-    // If this is a bootstrap run, only place a bet if d-score already crosses threshold.
-    // Otherwise skip betting and let the d-poller watch for a real signal.
-    // This prevents the majority of low-confidence trades that cause losses.
+    // Bootstrap: capture market context only — time-based poller triggers the real entry run
     if (isBootstrap) {
-      const distPct    = pf.distanceFromStrikePct / 100
-      const gkV        = prob.gkVol15m ?? this.gkVol
-      const candlesLeft = Math.max(0.01, md.minutesUntilExpiry / 15)
-      const d = Math.abs(Math.log(1 + distPct) / (Math.max(0.0001, gkV) * Math.sqrt(candlesLeft)))
-      if (d < CONFIDENCE_THRESHOLD || d > D_MAX_THRESHOLD) {
-        const reason = d < CONFIDENCE_THRESHOLD
-          ? `d=${d.toFixed(3)} < ${CONFIDENCE_THRESHOLD} (too close to strike, no alpha)`
-          : `d=${d.toFixed(3)} > ${D_MAX_THRESHOLD} (fat-tail zone, Kalshi overprices reversal risk)`
-        console.log(`[ServerAgent] Bootstrap: ${reason} — skip bet, starting d-poller`)
-        return
-      }
-      console.log(`[ServerAgent] Bootstrap: d=${d.toFixed(3)} in [${CONFIDENCE_THRESHOLD},${D_MAX_THRESHOLD}] — betting immediately`)
+      const distPct = pf.aboveStrike ? pf.distanceFromStrikePct : -pf.distanceFromStrikePct
+      this.currentD = distPct
+      console.log(`[ServerAgent] Bootstrap: strike=$${md.strikePrice} BTC=${distPct >= 0 ? '+' : ''}${distPct.toFixed(2)}% from strike — Markov poller scanning every 10s`)
+      return
     }
 
     // Place bet
@@ -955,11 +915,13 @@ class ServerAgent extends EventEmitter {
         console.warn('[ServerAgent] Fresh quote fetch failed, using pipeline price:', qe)
       }
 
-      // Compute contract count using live price
-      const costPerContract  = liveLimitPrice / 100
-      const budgetContracts  = Math.floor(this.allowance / costPerContract)
-      const contracts        = Math.max(1, Math.min(risk.positionSize, budgetContracts))
-      const cost             = contracts * costPerContract
+      // Compute contract count using live price.
+      // Always size from this.allowance — it's already Kelly-sized (or fixed by user).
+      // Ignoring risk.positionSize here: Markov sizes against Kalshi balance which can
+      // diverge from the Kelly bankroll, producing an understated contract count.
+      const costPerContract = liveLimitPrice / 100
+      const contracts       = Math.max(1, Math.min(Math.floor(this.allowance / costPerContract), 500))
+      const cost            = contracts * costPerContract
 
       let liveOrderId: string | undefined
       let orderErrorMsg: string | undefined

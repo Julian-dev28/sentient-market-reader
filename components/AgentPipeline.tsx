@@ -413,39 +413,54 @@ function MarkovBody({ output, color }: { output: MarkovOutput; color: string }) 
   const strong    = enterYes || enterNo
   const strongLbl = enterYes ? 'strong YES' : enterNo ? 'strong NO' : null
 
-  // Confidence bar width based on |z-score| (clamped 0–100%)
-  const confPct = Math.min(100, Math.abs(zScore) * 20)
+  // Signal strength bar: how far p is from 50/50 (0% = coin flip, 100% = certain)
+  const signalPct = Math.min(100, Math.abs(pYes - 0.5) * 200)
+
+  // Human-readable momentum label
+  const trendLabel = stateLbl.includes('flat') || stateLbl.includes('±')
+    ? 'flat'
+    : (stateLbl.includes('−') || stateLbl.startsWith('<'))
+    ? 'falling'
+    : 'rising'
+
+  // How far BTC needs to move to cross the strike
+  const gapAbs = Math.abs(reqDrift)
+  const gapLabel = gapAbs < 0.01
+    ? 'already past strike'
+    : `needs ${reqDrift >= 0 ? '+' : '−'}${gapAbs.toFixed(3)}% to cross`
 
   return (
     <div>
-      {/* Direction + momentum state */}
+      {/* Direction */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
         <div>
           <div style={{ fontSize: 8, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 2 }}>Momentum predicts</div>
           <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 22, fontWeight: 900, color: dirColor, letterSpacing: '0.02em', lineHeight: 1 }}>
-            {approved ? (rec === 'YES' ? 'ABOVE' : 'BELOW') : 'BUILDING…'}
+            {approved ? (rec === 'YES' ? 'ABOVE' : 'BELOW') : histLen < 20 ? 'BUILDING…' : 'BLOCKED'}
           </div>
           {approved && (
-            <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2 }}>
-              {rec === 'YES' ? `P(end above strike) = ${(pYes * 100).toFixed(1)}%` : `P(end below strike) = ${(pNo * 100).toFixed(1)}%`}
+            <div style={{ fontSize: 10, color: 'var(--text-secondary)', fontWeight: 700, marginTop: 3 }}>
+              {rec === 'YES'
+                ? `${(pYes * 100).toFixed(1)}% chance BTC finishes above strike`
+                : `${(pNo  * 100).toFixed(1)}% chance BTC finishes below strike`}
             </div>
           )}
         </div>
         <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
-          <div style={{ fontSize: 8, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 1 }}>Momentum</div>
-          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', fontFamily: 'var(--font-geist-mono)' }}>{stateLbl}</div>
+          <div style={{ fontSize: 8, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 1 }}>BTC trend</div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', fontFamily: 'var(--font-geist-mono)', textTransform: 'capitalize' }}>{trendLabel}</div>
         </div>
       </div>
 
-      {/* Z-score confidence bar */}
+      {/* Signal strength bar */}
       {approved && (
         <div style={{ marginBottom: 10 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
-            <span style={{ fontSize: 8, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Confidence (z={zScore.toFixed(2)})</span>
+            <span style={{ fontSize: 8, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Signal strength</span>
             {strong && <span style={{ fontSize: 9, color: dirColor, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' }}>★ {strongLbl}</span>}
           </div>
           <div style={{ height: 4, background: 'var(--border-color)', borderRadius: 2, overflow: 'hidden' }}>
-            <div style={{ width: `${confPct}%`, height: '100%', background: dirColor, borderRadius: 2, transition: 'width 0.4s ease' }} />
+            <div style={{ width: `${signalPct}%`, height: '100%', background: dirColor, borderRadius: 2, transition: 'width 0.4s ease' }} />
           </div>
         </div>
       )}
@@ -457,27 +472,9 @@ function MarkovBody({ output, color }: { output: MarkovOutput; color: string }) 
         </div>
       )}
 
-      {/* Suggested size */}
-      {approved && (
-        <div style={{ marginBottom: 10 }}>
-          <div style={{ fontSize: 8, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 2 }}>Suggested size</div>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 5 }}>
-            <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 24, fontWeight: 900, color, lineHeight: 1, letterSpacing: '-0.03em' }}>
-              {output.positionSize ?? '—'}
-            </span>
-            <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>contracts</span>
-          </div>
-        </div>
-      )}
-
-      {/* Drift forecast */}
-      <Fact label="Expected drift"  value={`${expDrift >= 0 ? '+' : ''}${expDrift.toFixed(3)}%`}  color={expDrift >= 0 ? 'var(--green-dark)' : 'var(--blue-dark)'} />
-      <Fact label="Required drift"  value={`${reqDrift >= 0 ? '+' : ''}${reqDrift.toFixed(3)}%`}  color="var(--text-secondary)" />
-      <Fact label="Drift σ"         value={`±${sigma.toFixed(3)}%`}                               color="var(--text-secondary)" />
-      <Fact label="P(YES)"          value={`${(pYes * 100).toFixed(1)}%`}                         color={rec === 'YES' ? 'var(--green-dark)' : 'var(--text-secondary)'} />
-      <Fact label="Persist"         value={`${(persist * 100).toFixed(1)}%`}                      color={persist >= tau ? 'var(--green-dark)' : 'var(--text-secondary)'} />
-      {approved && <Fact label="Max loss" value={output.maxLoss != null ? `$${output.maxLoss.toFixed(2)}` : '—'} color="var(--pink)" />}
-      <div style={{ marginTop: 4, fontSize: 8, color: 'var(--text-muted)' }}>{histLen} momentum transitions</div>
+      {approved && <Fact label="Strike gap"   value={gapLabel} color="var(--text-secondary)" />}
+      {approved && <Fact label="Trend locked" value={`Yes (${(persist * 100).toFixed(0)}%)`} color="var(--green-dark)" />}
+      <div style={{ marginTop: 4, fontSize: 8, color: 'var(--text-muted)' }}>{histLen} price observations</div>
     </div>
   )
 }

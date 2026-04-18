@@ -30,8 +30,8 @@ interface AgentAllowancePanelProps {
 
 export default function AgentAllowancePanel({
   active, isRunning, allowance, bankroll, defaultBankroll, kellyMode, aiMode, nextCycleIn,
-  windowKey, windowBetPlaced, orderError, currentD: serverD, confidenceThreshold = 1.0,
-  lastPollAt, strikePrice, gkVol = 0.002, agentPhase = 'idle', windowCloseAt = 0,
+  windowKey, orderError, currentD: serverD,
+  strikePrice, agentPhase = 'idle', windowCloseAt = 0,
   onStart, onStop, onSetAllowance,
 }: AgentAllowancePanelProps) {
   const [editingBankroll, setEditingBankroll] = useState(false)
@@ -52,7 +52,7 @@ export default function AgentAllowancePanel({
     else if (bankroll > 0) setLocalBankroll(bankroll)
   }, [defaultBankroll, bankroll, active])
 
-  // Fetch BTC price every 2s and recompute d locally — only while actively monitoring
+  // Fetch BTC price every 5s and compute % distance from strike — only while monitoring
   useEffect(() => {
     if (!active || !strikePrice || strikePrice <= 0 || agentPhase !== 'monitoring') return
     const compute = async () => {
@@ -60,21 +60,16 @@ export default function AgentAllowancePanel({
         const res = await fetch('/api/btc-price', { cache: 'no-store' })
         if (!res.ok) return
         const { price } = await res.json()
-        if (!price || price <= 0) return
-        // Use actual window close time if available, else fall back to 7 min
-        const minutesLeft = windowCloseAt > 0
-          ? Math.max(0.5, (windowCloseAt - Date.now()) / 60_000)
-          : 7
-        const candlesLeft = minutesLeft / 15
-        const d = Math.log(price / strikePrice) / (gkVol * Math.sqrt(candlesLeft))
-        setLiveD(d)
-        liveDRef.current = d
+        if (!price || price <= 0 || !strikePrice) return
+        const distPct = ((price - strikePrice) / strikePrice) * 100
+        setLiveD(distPct)
+        liveDRef.current = distPct
       } catch {}
     }
     compute()
-    const id = setInterval(compute, 2_000)
+    const id = setInterval(compute, 5_000)
     return () => clearInterval(id)
-  }, [active, strikePrice, gkVol, agentPhase, windowCloseAt])
+  }, [active, strikePrice, agentPhase])
 
   const currentD = liveD
   const mins = Math.floor(nextCycleIn / 60)
@@ -264,7 +259,7 @@ export default function AgentAllowancePanel({
         <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 9, background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
             <span style={{ fontSize: 8, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: 700 }}>
-              D-Score Monitor
+              Momentum Monitor
             </span>
             {windowKey && (
               <span style={{ fontSize: 8, fontFamily: 'var(--font-geist-mono)', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 130 }}>
@@ -297,7 +292,7 @@ export default function AgentAllowancePanel({
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
                 <div style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--amber)', flexShrink: 0 }} />
-                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--amber)' }}>PASS — skipping window</span>
+                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--amber)' }}>Markov blocked — no signal</span>
               </div>
               <div style={{ fontSize: 8, color: 'var(--text-muted)' }}>
                 {nextCycleIn > 0 ? `Next window in ${mins}:${String(secs).padStart(2, '0')}` : 'Waiting for next window…'}
@@ -313,35 +308,36 @@ export default function AgentAllowancePanel({
                 {nextCycleIn > 0 ? `Retry in ${mins}:${String(secs).padStart(2, '0')}` : 'Retrying…'}
               </div>
             </div>
-          ) : agentPhase === 'monitoring' && lastPollAt ? (
+          ) : agentPhase === 'monitoring' ? (
             <>
               <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 4 }}>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
                   <span style={{
                     fontFamily: 'var(--font-geist-mono)', fontSize: 20, fontWeight: 800, letterSpacing: '-0.03em',
-                    color: Math.abs(currentD ?? 0) >= confidenceThreshold ? 'var(--green-dark)' : 'var(--text-primary)',
+                    color: (currentD ?? 0) >= 0 ? 'var(--green-dark)' : 'var(--red)',
                   }}>
-                    {currentD !== undefined ? (currentD >= 0 ? '+' : '') + currentD.toFixed(3) : '—'}
+                    {currentD !== undefined ? `${currentD >= 0 ? '+' : ''}${currentD.toFixed(2)}%` : '—'}
                   </span>
-                  <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>/ {confidenceThreshold}</span>
+                  <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>from strike</span>
                 </div>
+                <span style={{ fontSize: 9, fontWeight: 700, color: (currentD ?? 0) >= 0 ? 'var(--green-dark)' : 'var(--red)' }}>
+                  {(currentD ?? 0) >= 0 ? 'ABOVE' : 'BELOW'}
+                </span>
               </div>
               <div style={{ height: 4, borderRadius: 2, background: 'var(--border)', overflow: 'hidden', marginBottom: 4 }}>
                 <div style={{
                   height: '100%', borderRadius: 2,
-                  width: `${Math.min(100, (Math.abs(currentD ?? 0) / confidenceThreshold) * 100)}%`,
-                  background: Math.abs(currentD ?? 0) >= confidenceThreshold
+                  width: `${Math.min(100, Math.abs(currentD ?? 0) * 20)}%`,
+                  background: Math.abs(currentD ?? 0) >= 2
                     ? 'var(--green)'
-                    : Math.abs(currentD ?? 0) >= confidenceThreshold * 0.75
+                    : Math.abs(currentD ?? 0) >= 1
                       ? 'var(--amber)'
                       : 'var(--blue)',
                   transition: 'width 0.4s ease, background 0.3s ease',
                 }} />
               </div>
               <div style={{ fontSize: 8, color: 'var(--text-muted)' }}>
-                {Math.abs(currentD ?? 0) >= confidenceThreshold
-                  ? '⚡ Signal strong — launching pipeline'
-                  : `${((1 - Math.abs(currentD ?? 0) / confidenceThreshold) * 100).toFixed(0)}% to threshold · live`}
+                Scanning for Markov signal every 5s · live
               </div>
             </>
           ) : (

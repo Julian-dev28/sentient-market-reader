@@ -125,9 +125,13 @@ export function runMarkovAgent(
 
   const approved        = gateOk
   const rejectionReason = !hasHistory
-    ? `Building momentum history (${historyLength}/${MIN_HISTORY} transitions)`
+    ? `Building momentum history (${historyLength}/${MIN_HISTORY} observations)`
     : !gateOk
-    ? `Gate failed — persist ${(forecast.persist * 100).toFixed(0)}% < ${(PERSIST_TAU * 100).toFixed(0)}% OR gap ${(gap * 100).toFixed(1)}% < ${(MIN_GAP * 100).toFixed(0)}%`
+    ? forecast.persist < PERSIST_TAU && gap < MIN_GAP
+      ? `Not confident enough (${(50 + gap * 100).toFixed(1)}% sure, need 65%+) and BTC momentum is too choppy (need 80%+ consistency)`
+      : forecast.persist < PERSIST_TAU
+      ? `BTC momentum is too choppy to call — only ${(forecast.persist * 100).toFixed(0)}% consistent (need 80%+)`
+      : `Not confident enough — model is ${(50 + gap * 100).toFixed(1)}% sure, need 65%+ to trade`
     : undefined
 
   // ── Suggested sizing (never a hard gate) ─────────────────────────────────
