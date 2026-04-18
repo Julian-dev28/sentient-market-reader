@@ -57,3 +57,11 @@ timesfm/
 
 # Persistent trade log (local algo data, not for VCS)
 data/trade-log.json
+data/agent-config.json
+
+# Python service runtime cache/output (generated at runtime)
+python-service/_backtest_cache_*.json
+python-service/live_analysis_cache.json
+python-service/live_analysis_results.json
+python-service/live_fills.json
+python-service/research_cache.json
