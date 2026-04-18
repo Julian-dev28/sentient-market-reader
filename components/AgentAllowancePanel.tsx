@@ -39,7 +39,9 @@ export default function AgentAllowancePanel({
   const [localKelly, setLocalKelly] = useState(kellyMode)
   const [localAiMode, setLocalAiMode] = useState(aiMode)
   const [localBankroll, setLocalBankroll] = useState(defaultBankroll || bankroll || 400)
-  const [kellyPct, setKellyPct] = useState(20)
+  const [kellyPct, setKellyPct]           = useState(20)
+  const [editingKellyPct, setEditingKellyPct] = useState(false)
+  const [kellyPctStr, setKellyPctStr]     = useState('20')
   const [liveD, setLiveD] = useState<number | undefined>(serverD)
   const liveDRef = useRef<number | undefined>(serverD)
 
@@ -180,24 +182,52 @@ export default function AgentAllowancePanel({
 
           {/* Kelly percentage slider */}
           <div style={{ padding: '10px 12px', borderRadius: 10, background: 'var(--bg-secondary)', border: '1px solid var(--border-bright)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
               <span style={{ fontSize: 8, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: 600 }}>
                 Per Trade
               </span>
-              <span style={{ fontSize: 8, fontFamily: 'var(--font-geist-mono)', color: 'var(--amber)', fontWeight: 700 }}>
-                {kellyPct}% = ${Math.max(1, (localBankroll * kellyPct / 100)).toFixed(2)}
+              <span style={{ display: 'flex', alignItems: 'center', gap: 3, fontFamily: 'var(--font-geist-mono)', fontSize: 8, color: 'var(--amber)', fontWeight: 700 }}>
+                {editingKellyPct ? (
+                  <input
+                    autoFocus type="number" min="1" max="100" step="1"
+                    value={kellyPctStr}
+                    onChange={e => setKellyPctStr(e.target.value)}
+                    onBlur={() => {
+                      const v = Math.max(1, Math.min(100, parseInt(kellyPctStr) || kellyPct))
+                      setKellyPct(v); setKellyPctStr(String(v)); setEditingKellyPct(false)
+                    }}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+                      if (e.key === 'Escape') { setKellyPctStr(String(kellyPct)); setEditingKellyPct(false) }
+                    }}
+                    style={{
+                      width: 36, fontFamily: 'var(--font-geist-mono)', fontSize: 11, fontWeight: 800,
+                      color: 'var(--amber)', background: 'transparent', border: 'none',
+                      borderBottom: '1px solid var(--amber)', outline: 'none', textAlign: 'right', padding: 0,
+                    }}
+                  />
+                ) : (
+                  <span
+                    onClick={() => { setKellyPctStr(String(kellyPct)); setEditingKellyPct(true) }}
+                    title="Click to type a value"
+                    style={{ cursor: 'text', borderBottom: '1px dashed rgba(176,118,16,0.4)', fontSize: 11, fontWeight: 800 }}
+                  >
+                    {kellyPct}%
+                  </span>
+                )}
+                <span style={{ fontSize: 8 }}> = ${Math.max(1, (localBankroll * kellyPct / 100)).toFixed(2)}</span>
               </span>
             </div>
             <input
-              type="range" min="5" max="50" step="5"
+              type="range" min="1" max="100" step="1"
               value={kellyPct}
-              onChange={e => setKellyPct(parseInt(e.target.value))}
+              onChange={e => { const v = parseInt(e.target.value); setKellyPct(v); setKellyPctStr(String(v)) }}
               style={{ width: '100%', accentColor: 'var(--amber)' }}
             />
             <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 2 }}>
-              <span style={{ fontSize: 7, color: 'var(--text-muted)' }}>5% safe</span>
+              <span style={{ fontSize: 7, color: 'var(--text-muted)' }}>1% safe</span>
               <span style={{ fontSize: 7, color: 'var(--text-muted)' }}>25% optimal</span>
-              <span style={{ fontSize: 7, color: 'var(--red)' }}>50% risky</span>
+              <span style={{ fontSize: 7, color: 'var(--red)' }}>100% yolo</span>
             </div>
           </div>
         </div>

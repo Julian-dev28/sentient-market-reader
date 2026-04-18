@@ -85,12 +85,23 @@ export default function HourlyDashboard() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [md?.activeMarket?.ticker])
 
-  // Merge live market with pipeline data
+  // Merge live market with pipeline data — filter expired on both sources
   const mdMarket = md?.activeMarket ?? null
   const mdMarketExpired = mdMarket?.close_time
     ? new Date(mdMarket.close_time).getTime() < Date.now()
     : false
-  const activeMarket    = liveMarket ?? (mdMarketExpired ? null : mdMarket)
+  const liveMarketExpired = liveMarket?.close_time
+    ? new Date(liveMarket.close_time).getTime() < Date.now()
+    : false
+  const activeMarket = (liveMarket && !liveMarketExpired)
+    ? liveMarket
+    : (mdMarketExpired ? null : mdMarket)
+
+  // When the live market has expired, clear marketTicker so useMarketTick
+  // auto-discovers the next active KXBTCD market instead of polling the dead one.
+  useEffect(() => {
+    if (liveMarketExpired) setMarketTicker(null)
+  }, [liveMarketExpired])
   const currentBTCPrice = liveBTCPrice ?? pf?.currentPrice ?? 0
   const priceHistory    = livePriceHistory
 
@@ -235,7 +246,7 @@ export default function HourlyDashboard() {
               </div>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 16 }}>
-              {[['Edge', `+${tradeAlert.edge.toFixed(1)}%`], ['P(model)', `${(tradeAlert.pModel * 100).toFixed(0)}%`]].map(([k, v]) => (
+              {[['Edge', `+${(tradeAlert.edge ?? 0).toFixed(1)}%`], ['P(model)', `${((tradeAlert.pModel ?? 0) * 100).toFixed(0)}%`]].map(([k, v]) => (
                 <div key={k} style={{ padding: '8px 10px', borderRadius: 9, background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
                   <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>{k}</div>
                   <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 16, fontWeight: 800, color: 'var(--text-primary)' }}>{v}</div>
@@ -298,8 +309,8 @@ export default function HourlyDashboard() {
                   {[
                     ['Contracts', String(exec.contracts)],
                     ['Limit',     `${exec.limitPrice}¢`],
-                    ['Cost',      `$${exec.estimatedCost.toFixed(2)}`],
-                    ['Max profit',`$${(exec.estimatedPayout - exec.estimatedCost).toFixed(2)}`],
+                    ['Cost',      `$${(exec.estimatedCost ?? 0).toFixed(2)}`],
+                    ['Max profit',`$${((exec.estimatedPayout ?? 0) - (exec.estimatedCost ?? 0)).toFixed(2)}`],
                   ].map(([k, v]) => (
                     <div key={k} style={{ padding: '8px', background: 'var(--bg-secondary)', borderRadius: 8, border: '1px solid var(--border)' }}>
                       <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>{k}</div>

@@ -36,7 +36,8 @@ function CountdownRing({ seconds, total, urgent }: { seconds: number; total: num
 }
 
 type OrderState = { status: 'idle' } | { status: 'placing' } | { status: 'ok'; orderId: string; fillCount: number } | { status: 'err'; message: string }
-const QUICK_AMTS = [10, 20, 50]
+const QUICK_AMTS = [10, 25, 50]
+const QUICK_PCTS = [25, 50, 100] as const
 
 function TradeBox({ yesBid, yesAsk, noBid, noAsk, ticker, liveMode, side, onSideChange }: {
   yesBid: number; yesAsk: number
@@ -44,8 +45,9 @@ function TradeBox({ yesBid, yesAsk, noBid, noAsk, ticker, liveMode, side, onSide
   ticker: string; liveMode: boolean
   side: 'yes' | 'no'; onSideChange: (s: 'yes' | 'no') => void
 }) {
-  const [amtStr, setAmtStr] = useState('10')
-  const [order, setOrder]   = useState<OrderState>({ status: 'idle' })
+  const [amtStr, setAmtStr]   = useState('10')
+  const [order, setOrder]     = useState<OrderState>({ status: 'idle' })
+  const [balance, setBalance] = useState<number | null>(null)  // dollars
 
   const isYes     = side === 'yes'
   const bid       = isYes ? yesBid  : noBid
@@ -54,10 +56,17 @@ function TradeBox({ yesBid, yesAsk, noBid, noAsk, ticker, liveMode, side, onSide
   const colLight  = isYes ? 'var(--green)' : 'var(--pink)'
   const colPale   = isYes ? 'var(--green-pale)' : 'var(--pink-pale)'
 
-  const amt       = Math.max(0.01, parseFloat(amtStr) || 0.01)
-  const contracts = Math.max(1, Math.floor(amt / (ask / 100)))
+  const amt        = Math.max(0.01, parseFloat(amtStr) || 0.01)
+  const contracts  = Math.max(1, Math.floor(amt / (ask / 100)))
   const actualCost = (contracts * ask / 100).toFixed(2)
   const profit     = (contracts * (1 - ask / 100)).toFixed(2)
+
+  useEffect(() => {
+    if (!liveMode) return
+    fetch('/api/balance', { cache: 'no-store' }).then(r => r.json()).then(d => {
+      if (d.balance != null) setBalance(d.balance / 100)
+    }).catch(() => {})
+  }, [liveMode])
 
   function handleAmt(raw: string) {
     if (raw === '' || /^\d*\.?\d*$/.test(raw)) setAmtStr(raw)
@@ -81,9 +90,15 @@ function TradeBox({ yesBid, yesAsk, noBid, noAsk, ticker, liveMode, side, onSide
         setOrder({ status: 'err', message: typeof rawErr === 'string' ? rawErr : (rawErr?.message ?? rawErr?.code) ? String(rawErr.message ?? rawErr.code) : `HTTP ${res.status}` })
       } else {
         setOrder({ status: 'ok', orderId: data.order?.order_id ?? '', fillCount: data.order?.fill_count ?? 0 })
+        fetch('/api/balance', { cache: 'no-store' }).then(r => r.json()).then(d => { if (d.balance != null) setBalance(d.balance / 100) }).catch(() => {})
         setTimeout(() => setOrder({ status: 'idle' }), 4000)
       }
     } catch (err) { setOrder({ status: 'err', message: String(err) }) }
+  }
+
+  function pctDollars(pct: number) {
+    if (balance == null) return null
+    return Math.max(1, Math.floor(balance * pct / 100))
   }
 
   return (
@@ -126,22 +141,22 @@ function TradeBox({ yesBid, yesAsk, noBid, noAsk, ticker, liveMode, side, onSide
       </div>
 
       {/* Ask bar */}
-      <div style={{ height: 3, borderRadius: 2, background: 'var(--border)', overflow: 'hidden', marginBottom: 14 }}>
+      <div style={{ height: 3, borderRadius: 2, background: 'var(--border)', overflow: 'hidden', marginBottom: 12 }}>
         <div style={{ height: '100%', width: `${Math.min(100, ask / 2)}%`, background: colLight, borderRadius: 2, transition: 'width 0.6s ease' }} />
       </div>
 
-      {/* Quick amounts */}
-      <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+      {/* Quick dollar amounts */}
+      <div style={{ display: 'flex', gap: 5, marginBottom: 5 }}>
         {QUICK_AMTS.map(q => (
           <button key={q}
             disabled={order.status === 'placing'}
             onClick={() => { setAmtStr(String(q)); if (liveMode) placeIt(q) }}
             title={liveMode ? `Buy ${side} for $${q}` : `Set amount to $${q}`}
             style={{
-              flex: 1, padding: '8px 0', borderRadius: 8,
+              flex: 1, padding: '7px 0', borderRadius: 8,
               border: `1px solid ${liveMode ? 'var(--border-bright)' : 'var(--border)'}`,
               background: 'var(--bg-secondary)',
-              fontSize: 12, fontWeight: 700, color: liveMode ? col : 'var(--text-muted)',
+              fontSize: 11, fontWeight: 700, color: liveMode ? col : 'var(--text-muted)',
               cursor: order.status === 'placing' ? 'not-allowed' : 'pointer',
               transition: 'all 0.12s', fontFamily: 'var(--font-geist-mono)',
             }}
@@ -152,6 +167,37 @@ function TradeBox({ yesBid, yesAsk, noBid, noAsk, ticker, liveMode, side, onSide
           </button>
         ))}
       </div>
+
+      {/* Pct-of-balance quick buttons — live only */}
+      {liveMode && (
+        <div style={{ display: 'flex', gap: 5, marginBottom: 10 }}>
+          {QUICK_PCTS.map(pct => {
+            const dollars = pctDollars(pct)
+            const label   = pct === 100 ? 'MAX' : `${pct}%`
+            return (
+              <button key={pct}
+                disabled={order.status === 'placing' || dollars == null}
+                onClick={() => { if (dollars) { setAmtStr(String(dollars)); placeIt(dollars) } }}
+                title={dollars != null ? `Buy ${side} · ${label} of balance ($${dollars})` : 'Loading balance…'}
+                style={{
+                  flex: 1, padding: '6px 0', borderRadius: 8,
+                  border: `1px solid ${pct === 100 ? (isYes ? 'rgba(46,158,104,0.5)' : 'rgba(190,74,64,0.5)') : 'var(--border)'}`,
+                  background: pct === 100 ? colPale : 'transparent',
+                  fontSize: 10, fontWeight: 800, color: pct === 100 ? col : 'var(--text-muted)',
+                  cursor: order.status === 'placing' || dollars == null ? 'not-allowed' : 'pointer',
+                  transition: 'all 0.12s',
+                  letterSpacing: '0.02em',
+                }}
+                onMouseEnter={e => { if (dollars && order.status !== 'placing') { e.currentTarget.style.background = colPale; e.currentTarget.style.color = col } }}
+                onMouseLeave={e => { e.currentTarget.style.background = pct === 100 ? colPale : 'transparent'; e.currentTarget.style.color = pct === 100 ? col : 'var(--text-muted)' }}
+              >
+                {label}
+                {dollars != null && <span style={{ display: 'block', fontSize: 8, fontWeight: 600, opacity: 0.65, marginTop: 1 }}>${dollars}</span>}
+              </button>
+            )
+          })}
+        </div>
+      )}
 
       {/* Custom amount input */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
@@ -169,6 +215,9 @@ function TradeBox({ yesBid, yesAsk, noBid, noAsk, ticker, liveMode, side, onSide
             background: 'transparent', outline: 'none',
           }}
         />
+        {balance != null && liveMode && (
+          <span style={{ fontSize: 9, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>bal ${balance.toFixed(0)}</span>
+        )}
       </div>
 
       {/* Contracts summary */}
@@ -222,8 +271,10 @@ export default function MarketCard({ market, orderbook, strikePrice, currentBTCP
   const [countdown, setCountdown]     = useState(secondsUntilExpiry)
   const [spinning, setSpinning]       = useState(false)
   const [sellingAll, setSellingAll]   = useState(false)
+  const [sellingHalf, setSellingHalf] = useState(false)
   const [limitingAll, setLimitingAll] = useState(false)
   const [cancelingAll, setCancelingAll] = useState(false)
+  const [flipping, setFlipping]       = useState(false)
   const [side, setSide]               = useState<'yes' | 'no'>('yes')
   const [hotkeyFlash, setHotkeyFlash] = useState<string | null>(null)
   const [allingIn, setAllingIn]       = useState(false)
@@ -281,6 +332,48 @@ export default function MarketCard({ market, orderbook, strikePrice, currentBTCP
     finally { setAllingIn(false); setTimeout(() => setHotkeyFlash(null), 3000) }
   }
 
+  async function sellHalf() {
+    if (!liveMode || !market) return
+    setSellingHalf(true)
+    try {
+      const d   = await fetch('/api/positions', { cache: 'no-store' }).then(r => r.json())
+      const pos = (d.positions ?? []).find((p: { ticker: string; position: number }) => p.ticker === market.ticker)
+      if (!pos || pos.position === 0) { setHotkeyFlash('No position to sell'); setTimeout(() => setHotkeyFlash(null), 2500); return }
+      const half = Math.max(1, Math.floor(Math.abs(pos.position) / 2))
+      const s    = pos.position > 0 ? 'yes' : 'no'
+      await fetch('/api/sell-order', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ticker: market.ticker, side: s, count: half }) })
+      setHotkeyFlash(`Sold ${half} of ${Math.abs(pos.position)} contracts`)
+      setTimeout(() => setHotkeyFlash(null), 3000)
+    } catch { setHotkeyFlash('Sell error') }
+    finally { setSellingHalf(false) }
+  }
+
+  async function flipPosition() {
+    if (!liveMode || !market) return
+    setFlipping(true)
+    try {
+      const d   = await fetch('/api/positions', { cache: 'no-store' }).then(r => r.json())
+      const pos = (d.positions ?? []).find((p: { ticker: string; position: number }) => p.ticker === market.ticker)
+      const closeSide = pos && pos.position > 0 ? 'yes' : pos && pos.position < 0 ? 'no' : null
+      if (closeSide && Math.abs(pos.position) > 0) {
+        await fetch('/api/sell-order', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ticker: market.ticker, side: closeSide, count: Math.abs(pos.position) }) })
+      }
+      const newSide  = side
+      const ask      = newSide === 'yes' ? market.yes_ask : market.no_ask
+      const balData  = await fetch('/api/balance', { cache: 'no-store' }).then(r => r.json())
+      const maxAfford = ask > 0 ? Math.floor((balData.balance ?? 0) / ask) : 0
+      const count     = Math.min(500, Math.max(1, maxAfford))
+      if (count > 0) {
+        const res  = await fetch('/api/place-order', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ticker: market.ticker, side: newSide, count, ...(newSide === 'yes' ? { yesPrice: ask } : { noPrice: ask }), clientOrderId: `flip-${newSide}-${Date.now()}` }) })
+        const data = await res.json()
+        setHotkeyFlash(data.ok ? `Flipped → ${newSide.toUpperCase()} ${count}` : `Flip error: ${data.error ?? 'unknown'}`)
+      } else {
+        setHotkeyFlash(closeSide ? 'Closed position — no balance to flip' : 'Insufficient balance')
+      }
+    } catch { setHotkeyFlash('Flip error') }
+    finally { setFlipping(false); setTimeout(() => setHotkeyFlash(null), 3000) }
+  }
+
   useEffect(() => {
     if (!liveMode || !market) return
     let flashTimer: ReturnType<typeof setTimeout>
@@ -306,6 +399,8 @@ export default function MarketCard({ market, orderbook, strikePrice, currentBTCP
       else if (e.code === 'KeyY')   { e.preventDefault(); setSide('yes') }
       else if (e.code === 'KeyN')   { e.preventDefault(); setSide('no') }
       else if (e.code === 'KeyA')   { e.preventDefault(); allIn() }
+      else if (e.code === 'KeyH')   { e.preventDefault(); sellHalf() }
+      else if (e.code === 'KeyF')   { e.preventDefault(); flipPosition() }
     }
     window.addEventListener('keydown', onKey)
     return () => { window.removeEventListener('keydown', onKey); clearTimeout(flashTimer) }
@@ -430,10 +525,10 @@ export default function MarketCard({ market, orderbook, strikePrice, currentBTCP
             {/* Live-only actions */}
             {liveMode && (
               <>
-                {/* All In */}
+                {/* All In — primary action */}
                 <button disabled={allingIn} onClick={allIn}
                   style={{
-                    width: '100%', marginBottom: 10, padding: '11px 0', borderRadius: 10,
+                    width: '100%', marginBottom: 8, padding: '11px 0', borderRadius: 10,
                     cursor: allingIn ? 'not-allowed' : 'pointer',
                     border: `1.5px solid ${side === 'yes' ? 'var(--green)' : 'var(--pink)'}`,
                     background: 'transparent',
@@ -447,21 +542,49 @@ export default function MarketCard({ market, orderbook, strikePrice, currentBTCP
                   {allingIn ? '…' : `All In ${side === 'yes' ? 'Yes' : 'No'}`}
                 </button>
 
-                {/* Position actions — text-style, no boxes */}
-                <div style={{ display: 'flex', gap: 0, borderTop: '1px solid var(--border)', paddingTop: 10, marginBottom: 14 }}>
+                {/* Sell 50% + Flip — prominent secondary row */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 8 }}>
+                  <button disabled={sellingHalf} onClick={sellHalf}
+                    style={{
+                      padding: '9px 0', borderRadius: 9, cursor: sellingHalf ? 'not-allowed' : 'pointer',
+                      border: '1.5px solid rgba(176,118,16,0.5)', background: 'var(--amber-pale)',
+                      fontSize: 11, fontWeight: 700, color: 'var(--amber)',
+                      transition: 'all 0.15s',
+                    }}
+                    onMouseEnter={e => { if (!sellingHalf) { e.currentTarget.style.background = 'var(--amber)'; e.currentTarget.style.color = '#fff' } }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'var(--amber-pale)'; e.currentTarget.style.color = 'var(--amber)' }}
+                  >
+                    {sellingHalf ? '…' : 'Sell 50%'}
+                  </button>
+                  <button disabled={flipping} onClick={flipPosition}
+                    style={{
+                      padding: '9px 0', borderRadius: 9, cursor: flipping ? 'not-allowed' : 'pointer',
+                      border: '1.5px solid rgba(60,110,160,0.4)', background: 'var(--blue-pale)',
+                      fontSize: 11, fontWeight: 700, color: 'var(--blue-dark)',
+                      transition: 'all 0.15s',
+                    }}
+                    onMouseEnter={e => { if (!flipping) { e.currentTarget.style.background = 'var(--blue)'; e.currentTarget.style.color = '#fff' } }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'var(--blue-pale)'; e.currentTarget.style.color = 'var(--blue-dark)' }}
+                  >
+                    {flipping ? '…' : `Flip → ${side === 'yes' ? 'NO' : 'YES'}`}
+                  </button>
+                </div>
+
+                {/* Text-link actions */}
+                <div style={{ display: 'flex', gap: 0, borderTop: '1px solid var(--border)', paddingTop: 8, marginBottom: 14 }}>
                   {[
-                    { label: limitingAll  ? '…' : 'Limit All 99¢', fn: batchLimitSell, col: 'var(--brown)' },
-                    { label: cancelingAll ? '…' : 'Cancel All',    fn: cancelAllOrders, col: 'var(--amber)' },
-                    { label: sellingAll   ? '…' : 'Sell All',      fn: () => batchSell('/api/sell-order', setSellingAll), col: 'var(--pink-dark)' },
+                    { label: limitingAll  ? '…' : 'Limit 99¢',  fn: batchLimitSell,   col: 'var(--brown)' },
+                    { label: cancelingAll ? '…' : 'Cancel All',  fn: cancelAllOrders,   col: 'var(--text-muted)' },
+                    { label: sellingAll   ? '…' : 'Sell All',    fn: () => batchSell('/api/sell-order', setSellingAll), col: 'var(--pink-dark)' },
                   ].map(({ label, fn, col }, i, arr) => (
                     <button key={label} onClick={fn}
                       style={{
-                        flex: 1, padding: '6px 4px', background: 'none', border: 'none',
+                        flex: 1, padding: '5px 4px', background: 'none', border: 'none',
                         borderRight: i < arr.length - 1 ? '1px solid var(--border)' : 'none',
                         fontSize: 10, fontWeight: 600, color: col, cursor: 'pointer',
                         transition: 'opacity 0.12s',
                       }}
-                      onMouseEnter={e => { e.currentTarget.style.opacity = '0.6' }}
+                      onMouseEnter={e => { e.currentTarget.style.opacity = '0.55' }}
                       onMouseLeave={e => { e.currentTarget.style.opacity = '1' }}
                     >
                       {label}
@@ -518,7 +641,7 @@ export default function MarketCard({ market, orderbook, strikePrice, currentBTCP
             <span style={{ fontSize: 9, fontWeight: 700, color: side === 'yes' ? 'var(--green-dark)' : 'var(--pink-dark)', marginRight: 4 }}>
               {side === 'yes' ? 'YES' : 'NO'}
             </span>
-            {[['⇧Y','YES'],['⇧N','NO'],['⇧A','All In'],['⇧1','$10'],['⇧2','$20'],['⇧3','$50'],['⇧4','Limit'],['⇧5','Cancel'],['⇧6','Sell']].map(([key, label]) => (
+            {[['⇧Y','YES'],['⇧N','NO'],['⇧A','All In'],['⇧1','$10'],['⇧2','$25'],['⇧3','$50'],['⇧H','½ Sell'],['⇧F','Flip'],['⇧4','Limit'],['⇧5','Cancel'],['⇧6','Sell All']].map(([key, label]) => (
               <span key={key} style={{ fontSize: 9, color: 'var(--text-muted)', fontFamily: 'var(--font-geist-mono)' }}>
                 <span style={{ fontWeight: 700, color: 'var(--text-secondary)' }}>{key}</span> {label}
               </span>

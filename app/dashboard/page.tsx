@@ -137,13 +137,22 @@ export default function Home() {
     } catch { setAlertStatus('err') }
   }
 
-  // Merge: live tick overrides stale pipeline values.
-  // Don't fall back to pipeline market if its close_time is already in the past.
+  // Merge: live tick overrides stale pipeline values — filter expired on both sources.
   const mdMarket = md?.activeMarket ?? null
   const mdMarketExpired = mdMarket?.close_time
     ? new Date(mdMarket.close_time).getTime() < Date.now()
     : false
-  const activeMarket    = liveMarket ?? (mdMarketExpired ? null : mdMarket)
+  const liveMarketExpired = liveMarket?.close_time
+    ? new Date(liveMarket.close_time).getTime() < Date.now()
+    : false
+  const activeMarket = (liveMarket && !liveMarketExpired)
+    ? liveMarket
+    : (mdMarketExpired ? null : mdMarket)
+
+  // Clear ticker when live market expires so auto-discovery picks up the next window.
+  useEffect(() => {
+    if (liveMarketExpired) setMarketTicker(null)
+  }, [liveMarketExpired])
   const currentBTCPrice = liveBTCPrice ?? pf?.currentPrice ?? 0
   const priceHistory    = livePriceHistory
 
