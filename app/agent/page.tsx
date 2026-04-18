@@ -56,12 +56,12 @@ export default function AgentPage() {
               Autonomous Agent
             </h1>
           </div>
-          <span style={{
-            fontSize: 9, color: 'var(--text-muted)', padding: '2px 8px', borderRadius: 6,
-            background: 'var(--bg-secondary)', border: '1px solid var(--border)',
-          }}>
-            Full-deploy · 1 bet / window
-          </span>
+           <span style={{
+             fontSize: 9, color: 'var(--text-muted)', padding: '2px 8px', borderRadius: 6,
+             background: 'var(--bg-secondary)', border: '1px solid var(--border)',
+           }}>
+             Tiered Kelly · Markov + RiskManager
+           </span>
           {(engine.error || startError) && (
             <span style={{ fontSize: 9, color: 'var(--red)', background: 'var(--red-pale)', padding: '2px 8px', borderRadius: 6, border: '1px solid var(--red)' }}>
               {startError ?? engine.error}

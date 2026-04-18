@@ -395,7 +395,7 @@ export default function Home() {
         </div>
       )}
 
-      <main style={{ padding: '20px 24px', maxWidth: 1560, margin: '0 auto', position: 'relative', zIndex: 1 }}>
+      <main style={{ padding: '24px', width: '100%', maxWidth: '100%', position: 'relative', zIndex: 1, minHeight: 'calc(100vh - 64px)' }}>
 
         {error && (
           <div style={{
@@ -415,7 +415,7 @@ export default function Home() {
 
 
 
-        <div style={{ display: 'grid', gridTemplateColumns: '310px 1fr 290px', gap: 14, alignItems: 'start' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr 260px', gap: 12, alignItems: 'start' }}>
 
           {/* ─── LEFT ─── */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>

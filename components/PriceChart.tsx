@@ -1,80 +1,253 @@
 'use client'
 
-import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, ReferenceLine, Tooltip, CartesianGrid } from 'recharts'
+import { useEffect, useRef } from 'react'
 import type { PricePoint } from '@/lib/types'
 
-interface TooltipPayload { value: number; payload: { timestamp: number } }
+const WINDOW_MS = 10 * 60 * 1000   // 10-min sliding window
+const PAD = { t: 12, r: 20, b: 30, l: 58 }
 
-function CustomTooltip({ active, payload }: { active?: boolean; payload?: TooltipPayload[] }) {
-  if (!active || !payload?.length) return null
-  const { value, payload: inner } = payload[0]
-  const time = new Date(inner.timestamp).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
-  return (
-    <div style={{
-      background: 'rgba(255,255,255,0.96)', border: '1px solid var(--border)', borderRadius: 10,
-      padding: '8px 12px', fontSize: 11, fontFamily: 'var(--font-geist-mono)',
-      boxShadow: '0 4px 20px rgba(74,124,142,0.12)',
-      backdropFilter: 'blur(8px)',
-    }}>
-      <div style={{ color: 'var(--text-muted)', marginBottom: 2 }}>{time}</div>
-      <div style={{ color: 'var(--brown)', fontWeight: 700, fontSize: 14 }}>${value.toLocaleString('en-US', { maximumFractionDigits: 0 })}</div>
-    </div>
-  )
+/** Smooth Catmull-Rom spline through canvas points */
+function splinePath(ctx: CanvasRenderingContext2D, pts: [number, number][]) {
+  if (pts.length < 2) return
+  ctx.moveTo(pts[0][0], pts[0][1])
+  if (pts.length === 2) { ctx.lineTo(pts[1][0], pts[1][1]); return }
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[Math.max(i - 1, 0)]
+    const p1 = pts[i]
+    const p2 = pts[i + 1]
+    const p3 = pts[Math.min(i + 2, pts.length - 1)]
+    ctx.bezierCurveTo(
+      p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6,
+      p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6,
+      p2[0], p2[1],
+    )
+  }
 }
 
-export default function PriceChart({ priceHistory, strikePrice, currentPrice }: { priceHistory: PricePoint[]; strikePrice: number; currentPrice: number }) {
-  const data = priceHistory.map(p => ({
-    timestamp: p.timestamp,
-    price: p.price,
-    time: new Date(p.timestamp).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' }),
-  }))
+export default function PriceChart({
+  priceHistory,
+  strikePrice,
+  currentPrice,
+}: {
+  priceHistory: PricePoint[]
+  strikePrice: number
+  currentPrice: number
+}) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const canvasRef    = useRef<HTMLCanvasElement>(null)
+  const rafRef       = useRef<number>()
 
-  const prices = data.map(d => d.price)
-  const min = prices.length ? Math.min(...prices) : currentPrice * 0.999
-  const max = prices.length ? Math.max(...prices) : currentPrice * 1.001
-  const pad = (max - min) * 0.4 || 300
-  const domain: [number, number] = [min - pad, max + pad]
-  const above = strikePrice > 0 && currentPrice > strikePrice
+  // All live state lives in a ref — RAF closure reads it without stale captures
+  const live = useRef({
+    history:      [] as PricePoint[],
+    strikePrice:  0,
+    currentPrice: 0,
+    displayPrice: 0,   // smoothly interpolated toward currentPrice
+    pulseT:       0,   // 0→1 pulse cycle timer
+    cssW:         600,
+    cssH:         240,
+  })
 
-  const lineColor = above ? 'var(--green)' : 'var(--pink)'
-  const gradStop1 = above ? '#2D9E6B' : '#C0453E'
-  const gradStop2 = above ? '#2D9E6B' : '#C0453E'
+  // Sync incoming props into the ref every render
+  live.current.history      = priceHistory
+  live.current.strikePrice  = strikePrice
+  if (live.current.displayPrice === 0 && currentPrice > 0) live.current.displayPrice = currentPrice
+  live.current.currentPrice = currentPrice
+
+  useEffect(() => {
+    const canvas    = canvasRef.current
+    const container = containerRef.current
+    if (!canvas || !container) return
+
+    const dpr = window.devicePixelRatio || 1
+    const ctx  = canvas.getContext('2d')!
+
+    const resize = () => {
+      const rect = container.getBoundingClientRect()
+      live.current.cssW = rect.width  || 600
+      live.current.cssH = rect.height || 240
+      canvas.width  = live.current.cssW * dpr
+      canvas.height = live.current.cssH * dpr
+      canvas.style.width  = `${live.current.cssW}px`
+      canvas.style.height = `${live.current.cssH}px`
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    }
+    resize()
+    const ro = new ResizeObserver(resize)
+    ro.observe(container)
+
+    let prevNow = performance.now()
+
+    const draw = (now: number) => {
+      const dt = Math.min((now - prevNow) / 1000, 0.05)
+      prevNow  = now
+
+      const s = live.current
+      const { cssW: W, cssH: H } = s
+
+      // Ease display price toward actual price (smooth travel)
+      s.displayPrice += (s.currentPrice - s.displayPrice) * Math.min(dt * 5, 1)
+      s.pulseT        = (s.pulseT + dt * 0.5) % 1   // 2s pulse cycle
+
+      ctx.clearRect(0, 0, W, H)
+
+      const iW = W - PAD.l - PAD.r
+      const iH = H - PAD.t - PAD.b
+
+      // Build data: history + live point
+      const raw: { t: number; p: number }[] = [
+        ...s.history.map(pt => ({ t: pt.timestamp, p: pt.price })),
+        { t: Date.now(), p: s.displayPrice },
+      ]
+      const tNow = Date.now()
+      // tStart = first data point, capped at 10 min back.
+      // When data is fresh (< 10 min), the window is exactly as wide as the history,
+      // so the line always fills the full chart width from left to right.
+      const tStart   = raw.length > 0 ? Math.max(raw[0].t, tNow - WINDOW_MS) : tNow - WINDOW_MS
+      const windowMs = tNow - tStart
+      const data     = raw.filter(d => d.t >= tStart)
+      if (data.length < 2) { rafRef.current = requestAnimationFrame(draw); return }
+
+      const toX = (t: number) => PAD.l + ((t - tStart) / Math.max(windowMs, 1)) * iW
+
+      // Price domain
+      const allP = data.map(d => d.p)
+      if (s.strikePrice > 0) allP.push(s.strikePrice)
+      const pMin = Math.min(...allP), pMax = Math.max(...allP)
+      const pRange  = Math.max(pMax - pMin, 150)
+      const pCenter = (pMax + pMin) / 2
+      const yMin    = pCenter - pRange * 0.7
+      const yMax    = pCenter + pRange * 0.7
+      const toY = (p: number) => PAD.t + iH - ((p - yMin) / (yMax - yMin)) * iH
+
+      const above = s.strikePrice > 0 && s.displayPrice > s.strikePrice
+      const [cr, cg, cb] = above ? [58, 158, 114] : [224, 111, 160]
+      const lineColor = `rgb(${cr},${cg},${cb})`
+
+      // ── Grid lines ────────────────────────────────────────────────────────
+      const step = (yMax - yMin) > 1000 ? 500 : (yMax - yMin) > 500 ? 200 : 100
+      ctx.setLineDash([2, 6])
+      ctx.strokeStyle = 'rgba(0,0,0,0.07)'
+      ctx.lineWidth   = 1
+      for (let p = Math.ceil(yMin / step) * step; p <= yMax; p += step) {
+        if (s.strikePrice > 0 && Math.abs(p - s.strikePrice) < step / 2) continue
+        const y = toY(p)
+        if (y < PAD.t || y > PAD.t + iH) continue
+        ctx.beginPath(); ctx.moveTo(PAD.l, y); ctx.lineTo(PAD.l + iW, y); ctx.stroke()
+      }
+      ctx.setLineDash([])
+
+      // ── Strike line ───────────────────────────────────────────────────────
+      if (s.strikePrice > 0) {
+        const sy = toY(s.strikePrice)
+        ctx.strokeStyle = '#d4872c'
+        ctx.lineWidth   = 1.5
+        ctx.setLineDash([5, 3])
+        ctx.beginPath(); ctx.moveTo(PAD.l, sy); ctx.lineTo(PAD.l + iW, sy); ctx.stroke()
+        ctx.setLineDash([])
+        ctx.fillStyle = '#d4872c'
+        ctx.font      = '9px ui-monospace, monospace'
+        ctx.textAlign = 'right'
+        ctx.fillText('STRIKE', PAD.l + iW, sy - 5)
+      }
+
+      // ── Spline points ─────────────────────────────────────────────────────
+      const pts: [number, number][] = data.map(d => [toX(d.t), toY(d.p)])
+
+      // ── Gradient fill ─────────────────────────────────────────────────────
+      const grad = ctx.createLinearGradient(0, PAD.t, 0, PAD.t + iH)
+      grad.addColorStop(0,   `rgba(${cr},${cg},${cb},0.20)`)
+      grad.addColorStop(0.7, `rgba(${cr},${cg},${cb},0.04)`)
+      grad.addColorStop(1,   `rgba(${cr},${cg},${cb},0)`)
+      ctx.beginPath()
+      splinePath(ctx, pts)
+      ctx.lineTo(pts[pts.length - 1][0], PAD.t + iH)
+      ctx.lineTo(pts[0][0], PAD.t + iH)
+      ctx.closePath()
+      ctx.fillStyle = grad
+      ctx.fill()
+
+      // ── Price line ────────────────────────────────────────────────────────
+      ctx.beginPath()
+      splinePath(ctx, pts)
+      ctx.strokeStyle = lineColor
+      ctx.lineWidth   = 2.5
+      ctx.lineJoin    = 'round'
+      ctx.lineCap     = 'round'
+      ctx.stroke()
+
+      // ── Live dot + two expanding pulse rings ──────────────────────────────
+      const [lx, ly] = pts[pts.length - 1]
+      for (let ring = 0; ring < 2; ring++) {
+        const phase = (s.pulseT + ring * 0.45) % 1
+        const r     = 5 + phase * 18
+        const alpha = (1 - phase) * 0.45
+        ctx.beginPath()
+        ctx.arc(lx, ly, r, 0, Math.PI * 2)
+        ctx.strokeStyle = `rgba(${cr},${cg},${cb},${alpha})`
+        ctx.lineWidth   = 1.5
+        ctx.stroke()
+      }
+      ctx.beginPath(); ctx.arc(lx, ly, 4.5, 0, Math.PI * 2)
+      ctx.fillStyle = lineColor; ctx.fill()
+      ctx.beginPath(); ctx.arc(lx, ly, 2, 0, Math.PI * 2)
+      ctx.fillStyle = '#fff';    ctx.fill()
+
+      // ── Y-axis labels ─────────────────────────────────────────────────────
+      ctx.fillStyle = 'rgba(0,0,0,0.30)'
+      ctx.font      = '9px ui-monospace, monospace'
+      ctx.textAlign = 'right'
+      for (let p = Math.ceil(yMin / step) * step; p <= yMax; p += step) {
+        const y = toY(p)
+        if (y < PAD.t || y > PAD.t + iH) continue
+        ctx.fillText(`$${(p / 1000).toFixed(1)}k`, PAD.l - 6, y + 3)
+      }
+
+      // ── X-axis time labels ────────────────────────────────────────────────
+      ctx.textAlign = 'center'
+      const labelN  = 5
+      for (let i = 0; i <= labelN; i++) {
+        const t = tStart + (i / labelN) * windowMs
+        const x = toX(t)
+        const label = new Date(t).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' })
+        ctx.fillText(label, x, PAD.t + iH + 18)
+      }
+
+      rafRef.current = requestAnimationFrame(draw)
+    }
+
+    rafRef.current = requestAnimationFrame(draw)
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current)
+      ro.disconnect()
+    }
+  }, [])   // empty — all data flows through live ref
+
+  const above     = strikePrice > 0 && currentPrice > strikePrice
+  const lineColor = above ? '#3a9e72' : '#e06fa0'
 
   return (
-    <div className="card" style={{ padding: '18px 14px 10px 14px' }}>
+    <div className="card" style={{ padding: '18px 14px 10px 14px', display: 'flex', flexDirection: 'column', width: '100%', boxSizing: 'border-box' }}>
+      {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, padding: '0 4px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           <div>
             <div style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>BTC / USD</div>
-            <div style={{
-              fontFamily: 'var(--font-geist-mono)', fontSize: 28, fontWeight: 800,
-              color: lineColor, letterSpacing: '-0.02em',
-              transition: 'color 0.5s ease',
-            }}>
+            <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 28, fontWeight: 800, color: lineColor, letterSpacing: '-0.02em', transition: 'color 0.4s ease' }}>
               {currentPrice > 0 ? `$${currentPrice.toLocaleString('en-US', { maximumFractionDigits: 0 })}` : '—'}
             </div>
           </div>
-
-          {/* Above/below pill */}
           <div style={{
             padding: '6px 12px', borderRadius: 9,
-            background: above ? 'var(--green-pale)' : 'var(--pink-pale)',
-            border: `1px solid ${above ? 'rgba(45,158,107,0.25)' : 'rgba(192,69,62,0.25)'}`,
-            transition: 'all 0.5s ease',
+            background: above ? 'rgba(58,158,114,0.10)' : 'rgba(224,111,160,0.10)',
+            border: `1px solid ${above ? 'rgba(58,158,114,0.25)' : 'rgba(224,111,160,0.25)'}`,
+            transition: 'all 0.4s ease',
           }}>
-            <div style={{
-              fontSize: 11, fontWeight: 800,
-              color: above ? 'var(--green-dark)' : 'var(--pink-dark)',
-              display: 'flex', alignItems: 'center', gap: 4,
-            }}>
-              <span style={{ animation: 'iconBeat 3s ease infinite', display: 'inline-block' }}>
-                {above ? '↑' : '↓'}
-              </span>
-              {above ? 'ABOVE STRIKE' : 'BELOW STRIKE'}
+            <div style={{ fontSize: 11, fontWeight: 800, color: lineColor }}>
+              {above ? '↑ ABOVE STRIKE' : '↓ BELOW STRIKE'}
             </div>
           </div>
         </div>
-
         {strikePrice > 0 && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text-muted)' }}>
             <div style={{ width: 18, height: 2, background: 'var(--amber)', borderRadius: 1 }} />
@@ -83,48 +256,15 @@ export default function PriceChart({ priceHistory, strikePrice, currentPrice }: 
         )}
       </div>
 
-      {data.length < 2 ? (
-        <div style={{ height: 220, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-          <div style={{ fontSize: 10, letterSpacing: '0.07em', color: 'var(--text-muted)', textTransform: 'uppercase' }}>// COLLECTING</div>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Price history loading...</div>
-        </div>
-      ) : (
-        <ResponsiveContainer width="100%" height={220}>
-          <AreaChart data={data} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
-            <defs>
-              <linearGradient id="priceGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%"  stopColor={gradStop1} stopOpacity={0.2} />
-                <stop offset="95%" stopColor={gradStop2} stopOpacity={0.01} />
-              </linearGradient>
-            </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-            <XAxis
-              dataKey="time"
-              tick={{ fill: 'var(--text-muted)', fontSize: 9, fontFamily: 'var(--font-geist-mono)' }}
-              axisLine={false} tickLine={false} interval="preserveStartEnd"
-            />
-            <YAxis
-              tickFormatter={v => `$${(v / 1000).toFixed(1)}k`}
-              tick={{ fill: 'var(--text-muted)', fontSize: 9, fontFamily: 'var(--font-geist-mono)' }}
-              axisLine={false} tickLine={false} width={48} domain={domain}
-            />
-            {strikePrice > 0 && (
-              <ReferenceLine y={strikePrice} stroke="var(--amber)" strokeDasharray="5 3" strokeWidth={1.5}
-                label={{ value: 'STRIKE', fill: 'var(--amber)', fontSize: 9, fontFamily: 'var(--font-geist-mono)', position: 'insideTopRight' }}
-              />
-            )}
-            <Tooltip content={<CustomTooltip />} />
-            <Area
-              type="monotone" dataKey="price"
-              stroke={lineColor} strokeWidth={2.5}
-              fill="url(#priceGrad)"
-              dot={false}
-              activeDot={{ r: 4, fill: lineColor, stroke: '#fff', strokeWidth: 2 }}
-              style={{ transition: 'stroke 0.5s ease' }}
-            />
-          </AreaChart>
-        </ResponsiveContainer>
-      )}
+      {/* Canvas — 60fps RAF loop */}
+      <div ref={containerRef} style={{ width: '100%', height: 300, position: 'relative' }}>
+        <canvas ref={canvasRef} style={{ display: 'block', borderRadius: 8 }} />
+        {currentPrice <= 0 && (
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{ fontSize: 10, letterSpacing: '0.07em', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Collecting price data…</div>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

@@ -65,3 +65,16 @@ python-service/live_analysis_cache.json
 python-service/live_analysis_results.json
 python-service/live_fills.json
 python-service/research_cache.json
+
+.sentient-trader/config.env
+
+# Python daemon logs
+python-service/logs/
+
+# sentient-trader-mcp build artifacts
+sentient-trader-mcp/dist/
+sentient-trader-mcp/*.egg-info/
+
+# Dev/scratch scripts
+python-service/backtest_67c.py
+python-service/test_tiered_kelly.py

@@ -16,8 +16,8 @@
 
 export const NUM_STATES = 9
 
-// 1-min % price change breakpoints (boundaries between states)
-const BOUNDS = [-1.5, -1.0, -0.5, -0.2, 0.2, 0.5, 1.0, 1.5] as const
+// 5-min % price change breakpoints (boundaries between states) — aligned with Python backtest
+const BOUNDS = [-3.35, -2.24, -1.12, -0.45, 0.45, 1.12, 2.24, 3.35] as const
 
 export const STATE_LABELS = [
   '< −1.5%',      // 0 strong down
@@ -103,7 +103,7 @@ export function predictFromMomentum(
   minutesUntilExpiry: number,
   distanceFromStrikePct: number,
 ): MomentumForecast {
-  const T = Math.max(1, Math.round(minutesUntilExpiry))
+  const T = Math.max(1, Math.round(minutesUntilExpiry / 5))  // 5-min steps, aligned with Python backtest
   // For YES: need cumulative drift > -distanceFromStrikePct
   // (BTC above by 2% → can drop up to 2%; below by 1% → must rally 1%+)
   const requiredDriftPct = -distanceFromStrikePct

@@ -1,0 +1,32 @@
+{
+  "name": "sentient-trader",
+  "description": "Autonomous Kalshi BTC prediction market trader. Exposes a Markov chain momentum signal engine as MCP tools Claude Code can call directly — analyze markets, size positions with Kelly criterion, and place real Kalshi orders.",
+  "version": "0.1.0",
+  "author": "Sentient",
+  "license": "MIT",
+  "mcpServers": {
+    "sentient-trader": {
+      "type": "stdio",
+      "command": "python",
+      "args": ["-m", "sentient_trader_mcp"],
+      "env": {
+        "KALSHI_API_KEY": "${KALSHI_API_KEY}",
+        "KALSHI_PRIVATE_KEY_PATH": "${KALSHI_PRIVATE_KEY_PATH}"
+      }
+    }
+  },
+  "skills": [],
+  "install": {
+    "pip": "sentient-trader-mcp"
+  },
+  "requiredEnv": [
+    {
+      "name": "KALSHI_API_KEY",
+      "description": "Your Kalshi API key ID (UUID from Kalshi settings)"
+    },
+    {
+      "name": "KALSHI_PRIVATE_KEY_PATH",
+      "description": "Path to your Kalshi RSA private key PEM file (e.g. ~/.kalshi/private_key.pem)"
+    }
+  ]
+}

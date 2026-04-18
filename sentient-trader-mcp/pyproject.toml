@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sentient-trader-mcp"
+version = "0.1.3"
+description = "Autonomous Kalshi BTC prediction market trader — MCP server for Claude Code"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+keywords = ["kalshi", "bitcoin", "trading", "mcp", "claude", "markov", "prediction-market"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Office/Business :: Financial :: Investment",
+]
+dependencies = [
+    "mcp>=1.0.0",
+    "httpx>=0.24.0",
+    "cryptography>=41.0.0",
+]
+
+[project.scripts]
+sentient-trader = "sentient_trader_mcp:main"
+
+[project.urls]
+Homepage = "https://github.com/Julian-dev28/sentient-market-reader"
+Repository = "https://github.com/Julian-dev28/sentient-market-reader"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["sentient_trader_mcp*"]

@@ -538,10 +538,21 @@ def _process_market(mkt: dict, candles_oldest_first: list[dict], p_llm: Optional
     actual_result = result  # 'yes' or 'no'
     won = (side == actual_result)
 
-    # Half-Kelly sizing (placeholder contracts=1; actual sizing done in run_backtest)
-    b      = (100 - limit_price) / limit_price   # net odds = 1.0 at 50¢
-    kelly  = max(0.0, (b * p_win - (1.0 - p_win)) / b)
-    half_k = kelly * 0.5
+    # Tiered Kelly sizing based on entry price bucket
+    b = (100 - limit_price) / limit_price   # net odds = 1.0 at 50¢
+    kelly = max(0.0, (b * p_win - (1.0 - p_win)) / b)
+
+    # Apply tiered Kelly fractions based on entry price
+    if limit_price <= 73:
+        kelly_fraction = 0.35  # 35% Kelly for 65-73¢ (93.8% WR zone)
+    elif limit_price <= 79:
+        kelly_fraction = 0.12  # 12% Kelly for 73-79¢ (71% WR zone)
+    elif limit_price <= 85:
+        kelly_fraction = 0.08  # 8% Kelly for 79-85¢ (76% WR zone)
+    else:
+        kelly_fraction = 0.05  # 5% Kelly for >85¢ (marginal edge)
+
+    half_k = kelly * kelly_fraction
 
     return {
         'id':              f'bt-{ticker}',

@@ -79,11 +79,11 @@ export function runMarkovAgent(
   const mKey: MarketKey = isHourly ? '1h' : '15m'
 
   // ── Seed momentum history from candles ──────────────────────────────────
+  // Use 1-min candles with 5-min bounds (aligned with Python backtest approach)
   if (liveCandles && liveCandles.length >= 2)     seedFromCandles(liveCandles, mKey)
   else if (candles15m && candles15m.length >= 2)  seedFromCandles(candles15m, mKey)
 
-  // ── Current momentum state from the most recent 1-min candle pair ───────
-  // liveCandles are newest-first: [0]=most recent, [1]=previous
+  // ── Current momentum state from the most recent candle pair ───────
   let currentState = 4  // default: flat
   if (liveCandles && liveCandles.length >= 2) {
     const currClose = liveCandles[0][4]
@@ -137,25 +137,7 @@ export function runMarkovAgent(
       : `Not confident enough — model is ${(50 + gap * 100).toFixed(1)}% sure, need 61%+ to trade`
     : undefined
 
-  // ── Suggested sizing (never a hard gate) ─────────────────────────────────
-  const yesAskCents = market?.yes_ask ?? 50
-  const noAskCents  = market?.no_ask  ?? 50
-  const limitPrice  = recommendation === 'YES' ? yesAskCents : recommendation === 'NO' ? noAskCents : 50
-  const p_dollars   = limitPrice / 100
-  const feePerC     = MAKER_FEE_RATE * p_dollars * (1 - p_dollars)
-  const netWinPerC  = (1 - p_dollars) - feePerC
-  const totalCostPerC = p_dollars + feePerC
-  const b           = limitPrice > 0 ? netWinPerC / totalCostPerC : 1
-  const pWin        = recommendation === 'NO' ? pNo : pYes
-  const kelly       = Math.max(0, (b * pWin - (1 - pWin)) / b)
-
-  const volScalar  = gkVol15m && gkVol15m > 0 ? Math.max(0.30, Math.min(1.50, REFERENCE_VOL / gkVol15m)) : 1.0
-  const confScalar = confidence === 'high' ? 1.00 : confidence === 'low' ? 0.50 : 0.80
-
-  const dynamicCap   = Math.max(BASE_ORDER_CAP, Math.round(portfolioValue / BASE_BANKROLL * BASE_ORDER_CAP))
-  const budget      = Math.min(kelly * 0.18 * portfolioValue * volScalar * confScalar, portfolioValue * MAX_TRADE_PCT)
-  const positionSize = approved ? Math.max(1, Math.min(Math.round(budget / totalCostPerC), dynamicCap)) : 0
-  const maxLoss      = approved ? totalCostPerC * positionSize : 0
+  // Position sizing is now handled by RiskManager — Markov provides signal only
 
   // ── Reasoning ────────────────────────────────────────────────────────────
   const reasoning = [
@@ -164,7 +146,7 @@ export function runMarkovAgent(
     `σ=${forecast.sigma.toFixed(3)}% | z=${forecast.zScore.toFixed(2)} | P(YES)=${(pYes * 100).toFixed(1)}%`,
     `Persist=${(forecast.persist * 100).toFixed(1)}% | j*=${forecast.jStar} (${jStarLabel})`,
     approved
-      ? `→ ${recommendation} (suggested ${positionSize}c @ ${limitPrice}¢, max loss $${maxLoss.toFixed(2)})`
+      ? `→ ${recommendation} (signal approved — sizing by RiskManager)`
       : `→ ${rejectionReason ?? 'no signal'}`,
   ].join('\n')
 
@@ -189,8 +171,8 @@ export function runMarkovAgent(
     recommendation,
     approved,
     rejectionReason,
-    positionSize,
-    maxLoss,
+    positionSize:     0,  // sizing now handled by RiskManager
+    maxLoss:          0,  // sizing now handled by RiskManager
     dailyPnl:        sessionState.dailyPnl,
     givebackDollars: 0,
     tradeCount:      sessionState.tradeCount,

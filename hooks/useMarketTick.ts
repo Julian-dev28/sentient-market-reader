@@ -143,7 +143,7 @@ export function useMarketTick(ticker: string | null, marketMode: '15m' | 'hourly
           }
           const last = prev[prev.length - 1]
           if (Math.abs(last.price - data.price) < 0.01) return prev
-          return [...prev, { timestamp: now, price: data.price }].slice(-180)
+          return [...prev, { timestamp: now, price: data.price }].slice(-600)
         })
       } catch { /* network blip */ }
     }
