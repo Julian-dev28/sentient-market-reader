@@ -98,13 +98,11 @@ export function runRiskManager(
   const BLOCKED_UTC_HOURS = new Set([11, 18])
   const utcHour = new Date().getUTCHours()
 
-  // Time gate params differ by market type and entry price.
-  // 65–73¢ golden zone (d≥2.0): 93%+ WR across 3–12 min — timing doesn't matter, widen window.
-  // All other prices: keep tight 6–9 min (signal noise outside that band).
-  // Hourly (KXBTCD): enter when 10–45 min remain; no empirical validation yet — conservative.
-  const isGoldenZone = !isHourly && limitPrice >= 65 && limitPrice <= 73
-  const minMin = isHourly ? 10 : (isGoldenZone ? 3 : RISK_PARAMS.minMinutesLeft)
-  const maxMin = isHourly ? 45 : (isGoldenZone ? 12 : RISK_PARAMS.maxMinutesLeft)
+  // Time gate params differ by market type
+  // 15m (KXBTC15M): 6–9 min entry window (live fills: 6-9min=98.3% WR; raised from 3min)
+  // Hourly (KXBTCD): enter when 10–45 min remain; no empirical validation yet — conservative
+  const minMin = isHourly ? 10 : RISK_PARAMS.minMinutesLeft
+  const maxMin = isHourly ? 45 : RISK_PARAMS.maxMinutesLeft
   const maxTrades = isHourly ? 24 : RISK_PARAMS.maxTradesPerDay
 
   if (recommendation === 'NO_TRADE') {
@@ -115,10 +113,10 @@ export function runRiskManager(
     rejectionReason = `Blocked UTC hour ${utcHour}:00 — empirically bad session (live data: -40 to -57pp margin at d∈[1.0,1.2])`
   } else if (minutesUntilExpiry !== undefined && minutesUntilExpiry < minMin) {
     approved = false
-    rejectionReason = `Too late in window (${minutesUntilExpiry.toFixed(1)}min left < ${minMin}min minimum${isGoldenZone ? ' [golden zone]' : ''})`
+    rejectionReason = `Too late in window (${minutesUntilExpiry.toFixed(1)}min left < ${minMin}min minimum)`
   } else if (minutesUntilExpiry !== undefined && minutesUntilExpiry > maxMin) {
     approved = false
-    rejectionReason = `Too early in window (${minutesUntilExpiry.toFixed(1)}min left > ${maxMin}min${isGoldenZone ? ' [golden zone 3–12min]' : isHourly ? ' — wait for price to settle' : ' — signal not settled'})`
+    rejectionReason = `Too early in window (${minutesUntilExpiry.toFixed(1)}min left > ${maxMin}min — ${isHourly ? 'wait for price to settle in the hourly window' : 'signal not settled'})`
   } else if (distanceFromStrikePct !== undefined && Math.abs(distanceFromStrikePct) < RISK_PARAMS.minDistancePct) {
     approved = false
     rejectionReason = `Price too close to strike (${distanceFromStrikePct.toFixed(4)}% — near-strike trades are ~50/50 noise)`
@@ -152,42 +150,29 @@ export function runRiskManager(
     rejectionReason = `Markov chain opposes: model says ${recommendation} but transition matrix favours ${markovDir} (P(YES)=${(markov.pHatYes * 100).toFixed(1)}%, persist=${(markov.persist * 100).toFixed(1)}%)`
   }
 
-  // ── Tiered Kelly sizing (aligned with Python backtest) ────────────────────
-  // Uses price-bucket Kelly fractions based on backtest win rates:
-  // 65-73¢: 35% Kelly (93.8% WR golden zone)
-  // 73-79¢: 12% Kelly (71% WR zone)
-  // 79-85¢: 8% Kelly (76% WR zone)
-  // 85¢+: 5% Kelly (marginal edge)
+  // ── Confidence-tiered flat risk sizing ────────────────────────────────────
+  // Replaces Kelly entirely. Sizes based on Markov gap (directional conviction).
+  // gap=0.15 → 1% of portfolio, scales linearly to 5% at gap≥0.65.
+  // Backtest (30d, $200 start): 166 trades, 77.1% WR, +100.8%, 5.4% max drawdown.
+  // The entry price cap (maxEntryPrice=72¢) is what generates the edge:
+  //   71¢ zone (d>2.0): 91.5% WR — market underprices our momentum signal
+  //   73¢+ zone: 66% WR — market prices correctly, no edge, skip
   const MAKER_FEE_RATE = 0.0175
   const p_dollars      = limitPrice / 100
   const feePerContract = MAKER_FEE_RATE * p_dollars * (1 - p_dollars)
   const netWinPerC     = (1 - p_dollars) - feePerContract
   const totalCostPerC  = p_dollars + feePerContract
 
-  // Determine Kelly fraction based on entry price bucket
-  let kellyFraction: number
-  if (limitPrice <= 73) {
-    kellyFraction = 0.35  // 35% Kelly for 65-73¢ (93.8% WR)
-  } else if (limitPrice <= 79) {
-    kellyFraction = 0.12  // 12% Kelly for 73-79¢ (71% WR)
-  } else if (limitPrice <= 85) {
-    kellyFraction = 0.08  // 8% Kelly for 79-85¢ (76% WR)
-  } else {
-    kellyFraction = 0.05  // 5% Kelly for >85¢ (marginal)
-  }
-
-  // Calculate full Kelly
-  const pWin = (recommendation === 'NO' ? (1 - pModel) : pModel)
-  const b_odds = totalCostPerC > 0 ? netWinPerC / totalCostPerC : 1.0
-  const fullKelly = Math.max(0, (b_odds * pWin - (1 - pWin)) / b_odds)
-
-  // Apply tiered Kelly fraction
-  const riskPct = Math.min(RISK_PARAMS.maxTradePct, kellyFraction * fullKelly)
-  const riskDollars = portfolioValue * riskPct
+  const markovGap  = (markov && markov.historyLength >= 20)
+    ? Math.abs(markov.pHatYes - 0.5)
+    : Math.abs((recommendation === 'NO' ? (1 - pModel) : pModel) - 0.5)
+  const riskPct    = Math.min(0.05, 0.01 + 0.08 * Math.max(0, markovGap - 0.15))
+  const riskDollars  = portfolioValue * riskPct
   const budgetContracts = totalCostPerC > 0 ? Math.round(riskDollars / totalCostPerC) : 0
-  const positionSize = Math.max(1, budgetContracts)
+  const positionSize    = Math.max(1, budgetContracts)
 
-
+  // These are kept for the reasoning string only
+  const pWin = (recommendation === 'NO' ? (1 - pModel) : pModel)
 
   const maxLoss          = approved ? totalCostPerC * positionSize : 0
   const pctOfPortfolio   = portfolioValue > 0 ? (maxLoss / portfolioValue) * 100 : 0
@@ -205,7 +190,7 @@ export function runRiskManager(
       tradeCount: sessionState.tradeCount,
     },
     reasoning: approved
-      ? `BUY ${recommendation} approved @ ${limitPrice}¢ (P(WIN)=${(pWin * 100).toFixed(1)}%). Portfolio: $${portfolioValue.toFixed(0)}. Size: ${positionSize} contracts (${(kellyFraction * 100).toFixed(0)}% Kelly → risk=${(riskPct * 100).toFixed(1)}% → $${riskDollars.toFixed(0)}). Max loss: $${maxLoss.toFixed(2)} (${pctOfPortfolio.toFixed(1)}% of portfolio). Daily P&L: $${sessionState.dailyPnl.toFixed(2)} / limit $${Math.abs(maxDailyLoss).toFixed(0)}.`
+      ? `BUY ${recommendation} approved @ ${limitPrice}¢ (P(WIN)=${(pWin * 100).toFixed(1)}%). Portfolio: $${portfolioValue.toFixed(0)}. Size: ${positionSize} contracts (gap=${(markovGap * 100).toFixed(1)}% → risk=${(riskPct * 100).toFixed(1)}% → $${(riskDollars).toFixed(0)}). Max loss: $${maxLoss.toFixed(2)} (${pctOfPortfolio.toFixed(1)}% of portfolio). Daily P&L: $${sessionState.dailyPnl.toFixed(2)} / limit $${Math.abs(maxDailyLoss).toFixed(0)}.`
       : `BUY ${recommendation} REJECTED — ${rejectionReason}`,
     durationMs: Date.now() - start,
     timestamp: new Date().toISOString(),
