@@ -298,6 +298,16 @@ export default function AgentAllowancePanel({
                 {nextCycleIn > 0 ? `Next window in ${mins}:${String(secs).padStart(2, '0')}` : 'Waiting for next window…'}
               </div>
             </div>
+          ) : agentPhase === 'error' ? (
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+                <div style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--red)', flexShrink: 0 }} />
+                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--red)' }}>Pipeline error — retrying</span>
+              </div>
+              <div style={{ fontSize: 8, color: 'var(--text-muted)' }}>
+                {nextCycleIn > 0 ? `Retry in ${mins}:${String(secs).padStart(2, '0')}` : 'Retrying…'}
+              </div>
+            </div>
           ) : agentPhase === 'order_failed' ? (
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>

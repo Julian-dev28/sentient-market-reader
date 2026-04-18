@@ -96,9 +96,9 @@ export async function runAgentPipeline(
   const pfResult = runPriceFeed(enrichedQuote, mdResult.output.strikePrice)
   emit?.('priceFeed', pfResult)
 
-  // ── Stage 2.5: Markov Gate ─────────────────────────────────────────────
-  // Runs before any LLM call. If momentum isn't locked-in and decisive, the
-  // entire downstream pipeline is skipped — no expensive Grok/ROMA calls.
+  // ── Stage 2.5: Markov ─────────────────────────────────────────────────
+  // Quant mode: hard gate — if momentum isn't locked-in and decisive, skip all LLM calls.
+  // AI mode:    advisory only — Grok receives Markov as one signal and makes the final call.
   const gkVolEarly = candles && candles.length >= 2 ? computeGarmanKlassVol(candles) : null
   const markovGate = runMarkovAgent(
     pfResult.output.distanceFromStrikePct,
@@ -109,12 +109,13 @@ export async function runAgentPipeline(
     portfolioValue,
     mdResult.output.minutesUntilExpiry,
     gkVolEarly,
-    undefined,   // confidence unknown until Probability runs; defaults to medium scalar
+    undefined,
     useKxbtcd,
   )
   emit?.('markov', markovGate)
 
-  if (!markovGate.output.approved) {
+  // Quant-only hard gate
+  if (!aiRisk && !markovGate.output.approved) {
     const passExec = await runExecution(
       'NO_TRADE',
       0,
@@ -141,7 +142,7 @@ export async function runAgentPipeline(
     }
   }
 
-  // ── AI mode: Grok replaces Sentiment + Probability when gate passes ────
+  // ── AI mode: Grok has full decision authority — Markov is one input signal ──
   if (aiRisk) {
     const grok = await runGrokTradingAgent(
       enrichedQuote,
@@ -160,22 +161,20 @@ export async function runAgentPipeline(
       candles1h,
       candles4h,
       useKxbtcd,
+      markovGate.output,  // Markov as advisory context
     )
     emit?.('sentiment',   grok.sentiment)
     emit?.('probability', grok.probability)
 
-    // Direction alignment: only execute if Grok agrees with Markov
-    const grokRec    = grok.probability.output.recommendation
-    const markovRec  = markovGate.output.recommendation
-    const aligned    = grokRec === markovRec
-    const finalRec   = aligned ? markovRec : 'NO_TRADE'
-    const finalSize  = aligned ? markovGate.output.positionSize : 0
+    // Grok has final say — no direction alignment requirement
+    const finalRec  = grok.probability.output.recommendation
+    const finalSize = grok.execution.output.contracts ?? 0
 
     const execResultAI = await runExecution(
       finalRec,
       finalSize,
       mdResult.output.activeMarket,
-      aligned && markovGate.output.approved,
+      finalRec !== 'NO_TRADE',
       portfolioValue > 0 ? portfolioValue : undefined,
       mdResult.output.minutesUntilExpiry,
       provider,

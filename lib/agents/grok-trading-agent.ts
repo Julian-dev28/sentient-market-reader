@@ -12,7 +12,7 @@
 
 import type {
   AgentResult, SentimentOutput, ProbabilityOutput, RiskOutput, ExecutionOutput,
-  BTCQuote, KalshiMarket, KalshiOrderbook, OHLCVCandle, DerivativesSignal,
+  BTCQuote, KalshiMarket, KalshiOrderbook, OHLCVCandle, DerivativesSignal, MarkovOutput,
 } from '../types'
 import { llmToolCall } from '../llm-client'
 import { computeQuantSignals, formatQuantBrief } from '../indicators'
@@ -103,6 +103,7 @@ export async function runGrokTradingAgent(
   candles1h?:           OHLCVCandle[],   // 1h candles, newest first — intraday trend
   candles4h?:           OHLCVCandle[],   // 4h candles, newest first — macro trend
   isHourly?:            boolean,          // true = KXBTCD hourly market (price-prediction mode)
+  markov?:              MarkovOutput | null,  // advisory Markov signal (AI mode only — not a gate)
 ): Promise<{
   sentiment:   AgentResult<SentimentOutput>
   probability: AgentResult<ProbabilityOutput>
@@ -162,6 +163,16 @@ export async function runGrokTradingAgent(
     ? Math.log(spotApprox / strikePrice) / (quant.gkVol15m * Math.sqrt(minutesUntilExpiry / 15))
     : null
 
+  // ── Markov advisory block (AI mode — informational, not a constraint) ─────
+  const markovBlock = markov ? [
+    `=== MARKOV MOMENTUM SIGNAL (advisory) ===`,
+    `State: ${markov.currentState} (${markov.stateLabel}) | History: ${markov.historyLength} observations`,
+    `P(YES): ${(markov.pHatYes * 100).toFixed(1)}% | P(NO): ${(markov.pHatNo * 100).toFixed(1)}%`,
+    `Persistence: ${(markov.persist * 100).toFixed(1)}% | Expected drift: ${markov.expectedDriftPct >= 0 ? '+' : ''}${markov.expectedDriftPct.toFixed(3)}%`,
+    `Momentum verdict: ${markov.recommendation}${markov.rejectionReason ? ` — ${markov.rejectionReason}` : ' — signal locked in'}`,
+    `NOTE: This is a 1-min momentum signal — factor it alongside all other signals. You have full decision authority.`,
+  ].join('\n') : null
+
   // ── Build prompt ──────────────────────────────────────────────────────────
   const derivBlock = derivatives ? [
     `Bybit perp funding: ${(derivatives.fundingRate * 100).toFixed(4)}%/8h (${derivatives.fundingRate > 0.0001 ? 'longs paying → short-term bearish' : derivatives.fundingRate < -0.0001 ? 'shorts paying → short-term bullish' : 'near-zero'})`,
@@ -219,6 +230,7 @@ export async function runGrokTradingAgent(
     ``,
     `=== SUPPORTING SIGNALS ===`,
     quantBrief,
+    markovBlock,
     derivBlock,
     candles?.length ? `\n${compactCandles(candles, 6, '15m')}` : null,
     liveCandles?.length ? `\n${compactCandles(liveCandles, 8, '1m')}` : null,
@@ -252,6 +264,7 @@ export async function runGrokTradingAgent(
     ``,
     `=== QUANT SIGNALS ===`,
     quantBrief,
+    markovBlock,
     pBrownian !== null ? `Brownian P(YES): ${(pBrownian * 100).toFixed(1)}%` : null,
     dScore !== null ? `D-score: ${dScore.toFixed(3)} — DIRECTIONAL CONSTRAINT: if |d|∈[1.0,1.2], your action MUST match d's direction (d>0 → BUY_YES or PASS; d<0 → BUY_NO or PASS). Acting against the d-score in this zone has a 100% loss rate in backtests.` : null,
     derivBlock,
@@ -301,6 +314,7 @@ export async function runGrokTradingAgent(
     `- NEVER trade against the d-score direction when |d|∈[1.0,1.2]: d>0 → only BUY_YES or PASS; d<0 → only BUY_NO or PASS. Contrarian bets in this zone have 100% loss rate in backtests.`,
     `- Minimum limit price: 3¢. Maximum: 97¢.`,
     `- PASS only when EV is genuinely negative on both sides — not just because d-score is outside [1.0,1.2] or the price is extreme.`,
+    `- If your pModel differs from the market price by even 2pp, compute EV — there may be edge. e.g. pModel=10% vs market YES at 8¢ → EV(YES)=+2¢/contract → BUY_YES (small Kelly position). Do NOT pass with positive EV.`,
   ].filter(Boolean).join('\n')
 
   // ── Grok tool call ────────────────────────────────────────────────────────
@@ -433,12 +447,24 @@ export async function runGrokTradingAgent(
 
   const approved = action !== 'PASS' && contracts > 0
 
-  const pMarket    = yesAsk / 100
+  const pMarket = yesAsk / 100
   const recFull: ProbabilityOutput['recommendation'] = action === 'BUY_YES' ? 'YES' : action === 'BUY_NO' ? 'NO' : 'NO_TRADE'
-  const entryP     = limitPrice / 100
-  const fee        = 0.0175 * entryP * (1 - entryP)
-  const pWin       = recFull === 'NO' ? (1 - pModel) : pModel
-  const edge       = pWin * ((1 - entryP) - fee) + (1 - pWin) * (-entryP - fee)
+
+  // Edge: compute against the actual trade price when acting, or best available EV when PASS.
+  // (Using Grok's limitPrice against the wrong pWin when PASS produces garbage like -83%.)
+  let edge: number
+  if (action === 'PASS') {
+    const feeY = MAKER_FEE_RATE * (yesAsk/100) * (1 - yesAsk/100)
+    const feeN = MAKER_FEE_RATE * (noAsk/100)  * (1 - noAsk/100)
+    const evY  = pModel       * (1 - yesAsk/100 - feeY) - (1 - pModel) * (yesAsk/100 + feeY)
+    const evN  = (1 - pModel) * (1 - noAsk/100  - feeN) - pModel       * (noAsk/100  + feeN)
+    edge = Math.max(evY, evN)   // show best side's EV — negative means no edge on either side
+  } else {
+    const entryP = limitPrice / 100
+    const fee    = MAKER_FEE_RATE * entryP * (1 - entryP)
+    const pWin   = recFull === 'NO' ? (1 - pModel) : pModel
+    edge = pWin * ((1 - entryP) - fee) + (1 - pWin) * (-entryP - fee)
+  }
 
   const sentLabel: SentimentOutput['label'] =
     sentScore >  0.6 ? 'strongly_bullish' :
@@ -451,15 +477,17 @@ export async function runGrokTradingAgent(
     ? ` | HEDGE: ${decision.hedge.action} ${decision.hedge.contracts}× @ ${decision.hedge.limitPrice}¢ — ${decision.hedge.rationale}`
     : ''
 
-  const maxLoss  = approved ? entryP * contracts : 0
-  const pctPort  = portfolioValue > 0 ? (maxLoss / portfolioValue * 100).toFixed(1) : '0'
+  const tradeEntryP = limitPrice / 100
+  const pWin        = recFull === 'NO' ? (1 - pModel) : pModel
+  const maxLoss     = approved ? tradeEntryP * contracts : 0
+  const pctPort     = portfolioValue > 0 ? (maxLoss / portfolioValue * 100).toFixed(1) : '0'
 
   const givebackDollars = session.peakPnl > 0 ? session.peakPnl - session.dailyPnl : 0
   const ts   = new Date().toISOString()
   const ms   = Date.now() - start
 
   // ── Execution details ─────────────────────────────────────────────────────
-  const estimatedCost   = entryP * contracts
+  const estimatedCost   = tradeEntryP * contracts
   const estimatedPayout = contracts  // $1 per contract if win
   const side            = recFull === 'YES' ? 'yes' : recFull === 'NO' ? 'no' : null
   const execAction      = action === 'BUY_YES' ? 'BUY_YES' : action === 'BUY_NO' ? 'BUY_NO' : 'PASS'

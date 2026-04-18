@@ -18,6 +18,7 @@ export type AgentPhase =
   | 'bet_placed'    // order placed, waiting for window close
   | 'pass_skipped'  // pipeline ran, decided PASS — skipping rest of window
   | 'order_failed'  // order placement failed, retrying
+  | 'error'         // pipeline threw (no markets, network, etc.) — short retry pending
 
 export interface AgentStateSnapshot {
   active:           boolean

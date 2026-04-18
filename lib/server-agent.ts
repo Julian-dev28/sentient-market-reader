@@ -30,9 +30,9 @@ import { agentStore } from './agent-store'
 import { KALSHI_HOST, getCurrentEventTicker } from './kalshi'
 
 // ── Constants ────────────────────────────────────────────────────────────────
-const TARGET_MINUTES_BEFORE_CLOSE = 12  // start monitoring 12 min before close
+const TARGET_MINUTES_BEFORE_CLOSE = 14  // start monitoring 14 min before close (1 min into each 15-min window)
 const MIN_MINUTES_LEFT       = 2         // safety floor: don't trade with < 2 min left
-const POST_WINDOW_BUFFER_MS  = 30_000
+const POST_WINDOW_BUFFER_MS  = 5_000
 const MIN_FAST_ENTRY_PRICE   = 78   // ¢ — sweet spot is 78-99¢ (94-100% win rate)
 const MAX_FAST_ENTRY_PRICE   = 99   // ¢ — no hard upper cap; high prices = high win rate
 
@@ -817,12 +817,12 @@ class ServerAgent extends EventEmitter {
         this.pipelineError = false
 
         if (pipeErr) {
-          // Pipeline failed completely (markets closed, network error, etc.) — back off 5 min
-          const retryMs    = 5 * 60_000
+          // Pipeline failed (markets closed, network error, etc.) — short retry so we don't miss a window
+          const retryMs    = 5_000
           this.nextRunAt   = Date.now() + retryMs
           this.nextCycleIn = Math.round(retryMs / 1000)
-          this.agentPhase  = 'waiting'
-          console.log('[ServerAgent] Pipeline error — retrying in 5 min')
+          this.agentPhase  = 'error'
+          console.log('[ServerAgent] Pipeline error — retrying in 5s')
           this.schedule(() => this.scheduleNextRun(), retryMs)
         } else if (failed && minutesLeft >= MIN_MINUTES_LEFT) {
           // Order placement failed — retry poller in 60s within same window
@@ -883,7 +883,9 @@ class ServerAgent extends EventEmitter {
       return
     }
 
-    // Place bet
+    // Place bet — also guard against pipeline completing too close to expiry
+    const msUntilClose    = this.windowCloseAt > 0 ? this.windowCloseAt - Date.now() : Infinity
+    const minsUntilClose  = msUntilClose / 60_000
     if (
       exec.action !== 'PASS' &&
       exec.side   != null    &&
@@ -892,7 +894,8 @@ class ServerAgent extends EventEmitter {
       md.activeMarket        &&
       evTicker               &&
       this.allowance >= 1    &&
-      !this.windowBetPlaced
+      !this.windowBetPlaced  &&
+      minsUntilClose >= MIN_MINUTES_LEFT   // don't place if pipeline result is stale / too late
     ) {
       // Fetch a fresh market quote right before placing the order — pipeline data may be stale
       let liveLimitPrice = exec.limitPrice
