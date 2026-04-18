@@ -404,48 +404,27 @@ export default function Home() {
 
             {/* ── Control bar: mode toggle + model picker (AI only) + gear + run + expiry ── */}
             <div style={{ position: 'relative' }}>
-              {/* Mode accent bar */}
-              <div style={{
-                position: 'absolute', top: 0, left: 0, bottom: 0, width: 3, borderRadius: 2,
-                background: analysisMode === 'ai' ? 'var(--blue)' : 'var(--brown)',
-                transition: 'background 0.2s',
-              }} />
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
 
                 {/* QUANT | AI mode toggle */}
-                <div className="seg-group" style={{ flexShrink: 0 }}>
+                <div style={{ display: 'flex', borderRadius: 20, border: '1px solid var(--border)', overflow: 'hidden', flexShrink: 0 }}>
                   {(['quant', 'ai'] as const).map(mode => (
                     <button
                       key={mode}
                       onClick={() => handleAnalysisModeChange(mode)}
-                      className={`seg-btn${analysisMode === mode ? (mode === 'ai' ? ' active-blue' : ' active-brown') : ''}`}
-                      style={{ padding: '6px 16px' }}
+                      style={{
+                        padding: '6px 14px', cursor: 'pointer', border: 'none',
+                        fontSize: 11, fontWeight: 800, letterSpacing: '0.05em', textTransform: 'uppercase',
+                        background: analysisMode === mode
+                          ? (mode === 'ai' ? 'var(--blue)' : 'var(--brown)')
+                          : 'var(--bg-secondary)',
+                        color: analysisMode === mode ? '#fff' : 'var(--text-muted)',
+                        transition: 'all 0.15s',
+                      }}
                     >
                       {mode === 'quant' ? '∑ Quant' : '✦ AI'}
                     </button>
                   ))}
-                </div>
-
-                {/* Active mode label */}
-                <div style={{
-                  display: 'flex', alignItems: 'center', gap: 5,
-                  padding: '4px 10px', borderRadius: 4, flexShrink: 0,
-                  background: analysisMode === 'ai' ? 'rgba(60,110,160,0.1)' : 'rgba(78,122,138,0.1)',
-                  border: `1px solid ${analysisMode === 'ai' ? 'rgba(60,110,160,0.3)' : 'rgba(78,122,138,0.3)'}`,
-                  transition: 'all 0.2s',
-                }}>
-                  <span style={{
-                    width: 5, height: 5, borderRadius: '50%', flexShrink: 0,
-                    background: analysisMode === 'ai' ? 'var(--blue)' : 'var(--brown)',
-                    transition: 'background 0.2s',
-                  }} />
-                  <span style={{
-                    fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em',
-                    color: analysisMode === 'ai' ? 'var(--blue-dark)' : 'var(--brown-dark)',
-                    transition: 'color 0.2s',
-                  }}>
-                    {analysisMode === 'ai' ? 'AI Mode' : 'Quant Mode'}
-                  </span>
                 </div>
 
                 {/* Grok model picker — only visible in AI mode */}
@@ -534,11 +513,15 @@ export default function Home() {
                       }
                     })}
                     disabled={serverLocked && !isRunning}
-                    className={`btn-flat${isRunning ? ' btn-outline-pink' : serverLocked ? '' : ' btn-solid-green'}`}
                     style={{
-                      padding: '8px 22px', fontSize: 12,
-                      boxShadow: (!isRunning && !serverLocked) ? '0 2px 10px rgba(46,158,104,0.3)' : 'none',
-                      ...(serverLocked && !isRunning ? { border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-muted)', cursor: 'not-allowed', boxShadow: 'none' } : {}),
+                      padding: '7px 20px', borderRadius: 20,
+                      background: 'transparent',
+                      border: isRunning ? '1.5px solid var(--pink)' : serverLocked ? '1.5px solid var(--border)' : '1.5px solid var(--green)',
+                      color: isRunning ? 'var(--pink)' : serverLocked ? 'var(--text-muted)' : 'var(--green-dark)',
+                      cursor: serverLocked && !isRunning ? 'not-allowed' : 'pointer',
+                      fontSize: 12, fontWeight: 700,
+                      display: 'flex', alignItems: 'center', gap: 6,
+                      transition: 'all 0.2s', letterSpacing: '0.02em',
                     }}
                   >
                     {isRunning
