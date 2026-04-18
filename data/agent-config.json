@@ -1,8 +1,8 @@
 {
-  "active": false,
-  "allowance": 6.464,
+  "active": true,
+  "allowance": 23.17,
   "kellyMode": true,
   "aiMode": false,
-  "bankroll": 32.32,
+  "bankroll": 115.87,
   "kellyPct": 0.2
 }
