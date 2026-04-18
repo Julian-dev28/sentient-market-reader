@@ -23,12 +23,10 @@ import type {
 import { normalizeKalshiMarket } from './types'
 import type { AIProvider } from './llm-client'
 import { CONFIDENCE_THRESHOLD, KELLY_FRACTION } from './agent-shared'
-import { recordTradeResult } from './agents/risk-manager'
+import { recordTradeResult } from './agents/markov'
 import type { AgentStateSnapshot, AgentPhase } from './agent-shared'
 import { agentStore } from './agent-store'
-
-export { CONFIDENCE_THRESHOLD }
-export type { AgentStateSnapshot }
+import { KALSHI_HOST, getCurrentEventTicker } from './kalshi'
 
 // ── Constants ────────────────────────────────────────────────────────────────
 const TARGET_MINUTES_BEFORE_CLOSE = 10
@@ -79,32 +77,6 @@ function getDelayMs(): { delayMs: number; closeMs: number; minutesLeft: number }
   }
 
   return { delayMs: Math.max(0, delayMs), closeMs, minutesLeft }
-}
-
-function getCurrentEventTicker(): string {
-  const MONTHS = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC']
-  const now    = new Date()
-  const parts  = Object.fromEntries(
-    new Intl.DateTimeFormat('en-US', {
-      timeZone: 'America/New_York',
-      year: 'numeric', month: 'numeric', day: 'numeric',
-      hour: 'numeric', minute: 'numeric', hour12: false,
-    }).formatToParts(now)
-      .filter(p => p.type !== 'literal')
-      .map(p => [p.type, parseInt(p.value)])
-  ) as Record<string, number>
-
-  const { year, month, day, hour, minute } = parts
-  let blockMin  = Math.ceil((minute + 1) / 15) * 15
-  let blockHour = hour % 24
-  if (blockMin >= 60) { blockMin = 0; blockHour += 1 }
-
-  const yy  = String(year).slice(-2)
-  const mon = MONTHS[month - 1]
-  const dd  = String(day).padStart(2, '0')
-  const hh  = String(blockHour).padStart(2, '0')
-  const mm  = String(blockMin).padStart(2, '0')
-  return `KXBTC15M-${yy}${mon}${dd}${hh}${mm}`
 }
 
 function computeStats(trades: AgentTrade[]): AgentStats {
@@ -364,7 +336,7 @@ class ServerAgent extends EventEmitter {
     const settled = await Promise.all(expired.map(async t => {
       try {
         const path = `/trade-api/v2/markets/${encodeURIComponent(t.marketTicker)}`
-        const res  = await fetch(`https://api.elections.kalshi.com${path}`, {
+        const res  = await fetch(`${KALSHI_HOST}${path}`, {
           headers: { ...buildKalshiHeaders('GET', path), Accept: 'application/json' },
           cache: 'no-store',
         })
@@ -376,7 +348,9 @@ class ServerAgent extends EventEmitter {
             return { ...t, status: (win ? 'won' : 'lost') as 'won' | 'lost', pnl: win ? t.contracts - t.cost - fee : -t.cost - fee }
           }
         }
-      } catch {}
+      } catch (e) {
+        console.warn(`[ServerAgent] Settlement fetch failed for ${t.marketTicker} — will retry next cycle:`, e)
+      }
       return t
     }))
 
@@ -428,7 +402,7 @@ class ServerAgent extends EventEmitter {
       let market: KalshiMarket | undefined
       if (this.currentMarketTicker) {
         const path = `/trade-api/v2/markets/${encodeURIComponent(this.currentMarketTicker)}`
-        const res  = await fetch(`https://api.elections.kalshi.com${path}`, {
+        const res  = await fetch(`${KALSHI_HOST}${path}`, {
           headers: { ...buildKalshiHeaders('GET', path), Accept: 'application/json' },
           cache: 'no-store',
           signal: AbortSignal.timeout(5_000),
@@ -441,14 +415,14 @@ class ServerAgent extends EventEmitter {
       if (!market && this.windowKey) {
         // Fallback: query by event_ticker and pick the one with liquidity on our side
         const path = '/trade-api/v2/markets'
-        const res  = await fetch(`https://api.elections.kalshi.com${path}?event_ticker=${encodeURIComponent(this.windowKey)}&limit=10`, {
+        const res  = await fetch(`${KALSHI_HOST}${path}?event_ticker=${encodeURIComponent(this.windowKey)}&limit=10`, {
           headers: { ...buildKalshiHeaders('GET', path), Accept: 'application/json' },
           cache: 'no-store',
           signal: AbortSignal.timeout(5_000),
         })
         if (!res.ok) return
         const data    = await res.json()
-        const markets = ((data.markets ?? []) as unknown[]).map(m => normalizeKalshiMarket(m as KalshiMarket))
+        const markets = (data.markets as unknown[] ?? []).map(normalizeKalshiMarket)
         market = markets.find(m => (side === 'yes' ? m.yes_ask : m.no_ask) > 0)
       }
       if (!market) return
@@ -629,13 +603,13 @@ class ServerAgent extends EventEmitter {
       }
 
       try {
-        const res = await fetch('https://api.coinbase.com/v2/prices/BTC-USD/spot', {
+        const res = await fetch('https://api.exchange.coinbase.com/products/BTC-USD/ticker', {
           cache: 'no-store',
           signal: AbortSignal.timeout(5_000),  // 5s max — never block the poll loop
         })
         if (!res.ok) return
-        const { data } = await res.json()
-        const price = parseFloat(data?.amount)
+        const cb = await res.json()
+        const price = parseFloat(cb?.price)
         if (!price || price <= 0) return
 
         const candlesLeft = minutesLeft / 15
@@ -724,7 +698,7 @@ class ServerAgent extends EventEmitter {
       const eventTicker = getCurrentEventTicker()
       const eventPath   = `/trade-api/v2/markets?event_ticker=${eventTicker}&limit=5`
       const eventRes    = await fetch(
-        `https://api.elections.kalshi.com${eventPath}`,
+        `${KALSHI_HOST}${eventPath}`,
         { headers: { ...buildKalshiHeaders('GET', eventPath), Accept: 'application/json' }, cache: 'no-store' }
       ).catch(() => null)
 
@@ -736,7 +710,7 @@ class ServerAgent extends EventEmitter {
       if (!markets.length) {
         const fbPath = '/trade-api/v2/markets?series_ticker=KXBTC15M&limit=100'
         const fbRes  = await fetch(
-          `https://api.elections.kalshi.com${fbPath}`,
+          `${KALSHI_HOST}${fbPath}`,
           { headers: { ...buildKalshiHeaders('GET', fbPath), Accept: 'application/json' }, cache: 'no-store' }
         ).catch(() => null)
         if (fbRes?.ok) {
@@ -749,7 +723,7 @@ class ServerAgent extends EventEmitter {
       if (!markets.length && this.currentMarketTicker) {
         const tkPath = `/trade-api/v2/markets/${encodeURIComponent(this.currentMarketTicker)}`
         const tkRes  = await fetch(
-          `https://api.elections.kalshi.com${tkPath}`,
+          `${KALSHI_HOST}${tkPath}`,
           { headers: { ...buildKalshiHeaders('GET', tkPath), Accept: 'application/json' }, cache: 'no-store' }
         ).catch(() => null)
         if (tkRes?.ok) {
@@ -761,23 +735,15 @@ class ServerAgent extends EventEmitter {
 
       if (!markets.length) throw new Error('No active KXBTC15M markets — trading hours ~11:30 AM–midnight ET')
 
-      // ── Fetch BTC price ────────────────────────────────────────────────────
+      // ── Fetch BTC price (Coinbase Exchange — same feed Kalshi settles against) ──
       let quote: BTCQuote | null = null
-      const cbRes = await fetch('https://api.coinbase.com/v2/prices/BTC-USD/spot', { cache: 'no-store' }).catch(() => null)
+      const cbRes = await fetch('https://api.exchange.coinbase.com/products/BTC-USD/ticker', { cache: 'no-store' }).catch(() => null)
       if (cbRes?.ok) {
         const cb    = await cbRes.json()
-        const price = parseFloat(cb?.data?.amount)
+        const price = parseFloat(cb?.price)
         if (price > 0) quote = { price, percent_change_1h: 0, percent_change_24h: 0, volume_24h: 0, market_cap: price * 19_700_000, last_updated: new Date().toISOString() }
       }
-      if (!quote) {
-        const cgRes = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd', { cache: 'no-store' }).catch(() => null)
-        if (cgRes?.ok) {
-          const cg    = await cgRes.json()
-          const price = cg?.bitcoin?.usd
-          if (price > 0) quote = { price, percent_change_1h: 0, percent_change_24h: 0, volume_24h: 0, market_cap: price * 19_700_000, last_updated: new Date().toISOString() }
-        }
-      }
-      if (!quote) throw new Error('BTC price unavailable — all sources failed')
+      if (!quote) throw new Error('BTC price unavailable — Coinbase Exchange unreachable')
 
       // ── Parallel data fetch ────────────────────────────────────────────────
       const [balResult, candleRes, liveCandleRes, bybitRes, obRes] = await Promise.all([
@@ -785,7 +751,7 @@ class ServerAgent extends EventEmitter {
         fetch('https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=900&limit=13', { cache: 'no-store' }).catch(() => null),
         fetch('https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=60&limit=16', { cache: 'no-store' }).catch(() => null),
         fetch('https://api.bybit.com/v5/market/tickers?category=linear&symbol=BTCUSDT', { cache: 'no-store' }).catch(() => null),
-        fetch(`https://api.elections.kalshi.com/trade-api/v2/markets/${markets[0].ticker}/orderbook`, {
+        fetch(`${KALSHI_HOST}/trade-api/v2/markets/${markets[0].ticker}/orderbook`, {
           headers: { ...buildKalshiHeaders('GET', `/trade-api/v2/markets/${markets[0].ticker}/orderbook`), Accept: 'application/json' },
           cache: 'no-store',
         }).catch(() => null),
@@ -921,7 +887,7 @@ class ServerAgent extends EventEmitter {
     const md    = data.agents.marketDiscovery.output
     const pf    = data.agents.priceFeed.output
     const prob  = data.agents.probability.output
-    const risk  = data.agents.risk.output
+    const risk  = data.agents.markov.output
     const sent  = data.agents.sentiment.output
 
     const evTicker = (md.activeMarket as { event_ticker?: string } | undefined)?.event_ticker
@@ -972,7 +938,7 @@ class ServerAgent extends EventEmitter {
       let liveLimitPrice = exec.limitPrice
       try {
         const quotePath = `/trade-api/v2/markets/${encodeURIComponent(exec.marketTicker)}`
-        const quoteRes = await fetch(`https://api.elections.kalshi.com${quotePath}`, {
+        const quoteRes = await fetch(`${KALSHI_HOST}${quotePath}`, {
           headers: { ...buildKalshiHeaders('GET', quotePath), Accept: 'application/json' },
           cache: 'no-store',
         })
@@ -1125,7 +1091,7 @@ class ServerAgent extends EventEmitter {
       const settled = await Promise.all(expiredTrades.map(async t => {
         try {
           const path = `/trade-api/v2/markets/${encodeURIComponent(t.marketTicker)}`
-          const res  = await fetch(`https://api.elections.kalshi.com${path}`, {
+          const res  = await fetch(`${KALSHI_HOST}${path}`, {
             headers: { ...buildKalshiHeaders('GET', path), Accept: 'application/json' },
             cache: 'no-store',
           })
@@ -1138,7 +1104,9 @@ class ServerAgent extends EventEmitter {
               return { ...t, status: (win ? 'won' : 'lost') as 'won' | 'lost', settlementPrice: pf.currentPrice, pnl }
             }
           }
-        } catch {}
+        } catch (e) {
+          console.warn(`[ServerAgent] Settlement fetch failed for ${t.marketTicker} — will retry next cycle:`, e)
+        }
         return t
       }))
       const justSettled = settled.filter(s => s.status !== 'open')

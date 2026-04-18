@@ -23,6 +23,8 @@ export function encrypt(plaintext: string): string {
   return `${iv.toString('base64')}:${authTag.toString('base64')}:${encrypted.toString('base64')}`
 }
 
+// decrypt is retained for use when multi-user Appwrite auth is re-enabled.
+// It pairs with encrypt() — do not delete without also removing kalshi-connect's encrypt calls.
 export function decrypt(stored: string): string {
   const key = getKey()
   const parts = stored.split(':')

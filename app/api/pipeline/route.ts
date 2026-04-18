@@ -6,78 +6,11 @@ import type { KalshiMarket, KalshiOrderbook, BTCQuote, OHLCVCandle, DerivativesS
 import { normalizeKalshiMarket } from '@/lib/types'
 import type { AIProvider } from '@/lib/llm-client'
 import { tryLockPipeline, releasePipelineLock } from '@/lib/pipeline-lock'
+import { KALSHI_HOST, MONTHS_ET, getCurrentEventTicker, getCurrentKXBTCDEventTicker } from '@/lib/kalshi'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300  // 5 min — blitz ROMA makes ~6 LLM calls per solve (~90-150s)
-
-const MONTHS_ET = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC']
-
-/** Helper: parse ET date/time parts from current moment */
-function getETParts() {
-  const now = new Date()
-  const parts = Object.fromEntries(
-    new Intl.DateTimeFormat('en-US', {
-      timeZone: 'America/New_York',
-      year: 'numeric', month: 'numeric', day: 'numeric',
-      hour: 'numeric', minute: 'numeric', hour12: false,
-    }).formatToParts(now)
-      .filter(p => p.type !== 'literal')
-      .map(p => [p.type, parseInt(p.value)])
-  ) as Record<string, number>
-  return parts
-}
-
-/** Compute the current active KXBTC15M event_ticker using ET timezone
- *  Format: KXBTC15M-{YY}{MON}{DD}{HHMM} — date/time in US Eastern Time
- */
-function getCurrentEventTicker(): string {
-  const { year, month, day, hour, minute } = getETParts()
-
-  // Advance to the end of the current 15-min block
-  let blockMin  = Math.ceil((minute + 1) / 15) * 15
-  let blockHour = hour % 24  // hour12:false can yield 24 at midnight on some engines
-  if (blockMin >= 60) { blockMin = 0; blockHour += 1 }
-
-  const yy  = String(year).slice(-2)
-  const mon = MONTHS_ET[month - 1]
-  const dd  = String(day).padStart(2, '0')
-  const hh  = String(blockHour).padStart(2, '0')
-  const mm  = String(blockMin).padStart(2, '0')
-  return `KXBTC15M-${yy}${mon}${dd}${hh}${mm}`
-}
-
-/**
- * Compute the KXBTCD hourly event_ticker for the current (or next) ET hour.
- * Format: KXBTCD-{YY}{MON}{DD}{HH}00 — closing hour in US Eastern Time.
- * e.g. at 12:24 AM ET on Apr 15, the market closes at 1:00 AM ET → KXBTCD-26APR1501
- * offsetHours=1 gives the next hour's event (fallback when current is near/past expiry).
- */
-function getCurrentKXBTCDEventTicker(offsetHours: number = 0): string {
-  const { year, month, day, hour } = getETParts()
-  let closeHour  = (hour % 24) + 1 + offsetHours
-  let closeDay   = day
-  let closeMonth = month
-  let closeYear  = year
-
-  while (closeHour >= 24) {
-    closeHour -= 24
-    closeDay  += 1
-    const daysInMonth = new Date(closeYear, closeMonth, 0).getDate()
-    if (closeDay > daysInMonth) {
-      closeDay = 1
-      closeMonth += 1
-      if (closeMonth > 12) { closeMonth = 1; closeYear += 1 }
-    }
-  }
-
-  const yy  = String(closeYear).slice(-2)
-  const mon = MONTHS_ET[closeMonth - 1]
-  const dd  = String(closeDay).padStart(2, '0')
-  const hh  = String(closeHour).padStart(2, '0')
-  // Format matches Kalshi's actual tickers: KXBTCD-26APR1600 (DD+HH, no trailing "00")
-  return `KXBTCD-${yy}${mon}${dd}${hh}`
-}
 
 
 export async function GET(req: NextRequest) {
@@ -136,7 +69,7 @@ export async function GET(req: NextRequest) {
     const eventTicker = getCurrentEventTicker()
     const eventPath = `/trade-api/v2/markets?event_ticker=${eventTicker}&limit=5`
     const eventRes = await fetch(
-      `https://api.elections.kalshi.com${eventPath}`,
+      `${KALSHI_HOST}${eventPath}`,
       { headers: { ...buildKalshiHeaders('GET', eventPath), Accept: 'application/json' }, cache: 'no-store' }
     ).catch(() => null)
 
@@ -149,7 +82,7 @@ export async function GET(req: NextRequest) {
     if (!markets.length && !isHourlyMode) {
       const fallbackPath = '/trade-api/v2/markets?series_ticker=KXBTC15M&limit=100'
       const fallbackRes = await fetch(
-        `https://api.elections.kalshi.com${fallbackPath}`,
+        `${KALSHI_HOST}${fallbackPath}`,
         { headers: { ...buildKalshiHeaders('GET', fallbackPath), Accept: 'application/json' }, cache: 'no-store' }
       ).catch(() => null)
       if (fallbackRes?.ok) {
@@ -184,16 +117,12 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'BTC price unavailable — all sources failed' }, { status: 503 })
     }
 
-    // Fetch Kalshi balance for portfolio-aware risk/execution sizing
     let portfolioValueCents = 0
     const balResult = await getBalance().catch(() => null)
     if (balResult?.ok && balResult.data) {
       portfolioValueCents = (balResult.data.balance ?? 0) + (balResult.data.portfolio_value ?? 0)
     }
 
-    // KXBTCD: compute event ticker for the current ET hour.
-    // Format: KXBTCD-{YY}{MON}{DD}{HH} where date/hour is the closing time in ET.
-    // e.g. at 12:24 AM ET → closes at 1:00 AM ET → KXBTCD-26APR1501
     const kxbtcdEventTicker = isHourlyMode ? getCurrentKXBTCDEventTicker() : null
     const kxbtcdEventPath   = kxbtcdEventTicker
       ? `/trade-api/v2/markets?event_ticker=${kxbtcdEventTicker}&limit=200`
@@ -202,14 +131,12 @@ export async function GET(req: NextRequest) {
     // Kalshi KXBTCD doesn't run 24/7; this finds whatever event is actually open right now.
     const kxbtcdEventsPath  = isHourlyMode ? '/trade-api/v2/events?series_ticker=KXBTCD&status=open&limit=10' : null
 
-    // 15m orderbook: only fetch when we have a 15m market (not needed in hourly mode).
-    // KXBTCD orderbook is fetched after market selection (ticker not known yet).
+    // 15m OB: skip in hourly mode. KXBTCD OB fetched after market selection (ticker not known yet).
     const ob15mTicker = markets.length > 0 ? markets[0].ticker : null
     const ob15mPath   = ob15mTicker ? `/trade-api/v2/markets/${ob15mTicker}/orderbook` : null
 
-    // Fetch candles, live candles, 1h/4h trend candles, derivatives, orderbook, KXBTCD — all in parallel
-    // All candle sources: Coinbase Exchange (newest-first format: [time_s, low, high, open, close, vol])
-    // granularity=900 → 15m, granularity=60 → 1m, granularity=3600 → 1h, granularity=14400 → 4h
+    // Coinbase candles format: [time_s, low, high, open, close, vol] newest-first
+    // granularity=900→15m, 60→1m, 3600→1h, 14400→4h
     const [candleRes, liveCandleRes, candle1hRes, candle4hRes, bybitRes, obRes, kxbtcdRes, kxbtcdEventsRes] = await Promise.all([
       fetch('https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=900&limit=14', { cache: 'no-store' }).catch(() => null),
       fetch('https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=60&limit=17', { cache: 'no-store' }).catch(() => null),
@@ -218,7 +145,7 @@ export async function GET(req: NextRequest) {
       fetch('https://api.bybit.com/v5/market/tickers?category=linear&symbol=BTCUSDT', { cache: 'no-store' }).catch(() => null),
       // 15m orderbook — null when no 15m markets (hourly mode); avoids markets[0] crash
       ob15mPath
-        ? fetch(`https://api.elections.kalshi.com${ob15mPath}`, {
+        ? fetch(`${KALSHI_HOST}${ob15mPath}`, {
             headers: { ...buildKalshiHeaders('GET', ob15mPath), Accept: 'application/json' },
             cache: 'no-store',
           }).catch(() => null)
@@ -226,7 +153,7 @@ export async function GET(req: NextRequest) {
       // KXBTCD markets — only fetched in hourly mode; queries by computed event_ticker
       // so we get exactly the current hour's 188+ strike markets (all with yes_ask > 0)
       kxbtcdEventPath
-        ? fetch(`https://api.elections.kalshi.com${kxbtcdEventPath}`, {
+        ? fetch(`${KALSHI_HOST}${kxbtcdEventPath}`, {
             headers: { ...buildKalshiHeaders('GET', kxbtcdEventPath), Accept: 'application/json' },
             cache: 'no-store',
           }).catch(() => null)
@@ -235,7 +162,7 @@ export async function GET(req: NextRequest) {
       // If the computed event ticker finds 0 markets (e.g. off-hours), we use the soonest
       // open event from this response instead of failing.
       kxbtcdEventsPath
-        ? fetch(`https://api.elections.kalshi.com${kxbtcdEventsPath}`, {
+        ? fetch(`${KALSHI_HOST}${kxbtcdEventsPath}`, {
             headers: { ...buildKalshiHeaders('GET', kxbtcdEventsPath), Accept: 'application/json' },
             cache: 'no-store',
           }).catch(() => null)
@@ -254,14 +181,12 @@ export async function GET(req: NextRequest) {
       liveCandles = Array.isArray(raw) ? raw as OHLCVCandle[] : []
     }
 
-    // 1h candles — intraday trend (last 12 complete hours)
     let candles1h: OHLCVCandle[] = []
     if (candle1hRes?.ok) {
       const raw = await candle1hRes.json()
       candles1h = Array.isArray(raw) ? raw.slice(1, 13) as OHLCVCandle[] : []
     }
 
-    // 4h candles — macro trend (last 7 complete 4h bars = ~28h)
     let candles4h: OHLCVCandle[] = []
     if (candle4hRes?.ok) {
       const raw = await candle4hRes.json()
@@ -323,7 +248,7 @@ export async function GET(req: NextRequest) {
         const nextTicker = getCurrentKXBTCDEventTicker(1)
         const nextPath   = `/trade-api/v2/markets?event_ticker=${nextTicker}&limit=200`
         console.log(`[pipeline] KXBTCD fallback → trying ${nextTicker}`)
-        const nextRes = await fetch(`https://api.elections.kalshi.com${nextPath}`, {
+        const nextRes = await fetch(`${KALSHI_HOST}${nextPath}`, {
           headers: { ...buildKalshiHeaders('GET', nextPath), Accept: 'application/json' },
           cache: 'no-store',
         }).catch(() => null)
@@ -361,7 +286,7 @@ export async function GET(req: NextRequest) {
           const discoveredTicker = futureEvents[0].event_ticker
           console.log(`[pipeline] KXBTCD events API discovered: ${discoveredTicker} (closes ${new Date(futureEvents[0].closeMs).toISOString()})`)
           const discoveredPath = `/trade-api/v2/markets?event_ticker=${discoveredTicker}&limit=200`
-          const discoveredRes = await fetch(`https://api.elections.kalshi.com${discoveredPath}`, {
+          const discoveredRes = await fetch(`${KALSHI_HOST}${discoveredPath}`, {
             headers: { ...buildKalshiHeaders('GET', discoveredPath), Accept: 'application/json' },
             cache: 'no-store',
           }).catch(() => null)
@@ -384,7 +309,7 @@ export async function GET(req: NextRequest) {
         // Fetch KXBTCD orderbook for the selected market (overrides 15m OB in hourly mode)
         const kxbtcdObPath = `/trade-api/v2/markets/${kxbtcdMarket.ticker}/orderbook`
         const kxbtcdObRes = await fetch(
-          `https://api.elections.kalshi.com${kxbtcdObPath}`,
+          `${KALSHI_HOST}${kxbtcdObPath}`,
           { headers: { ...buildKalshiHeaders('GET', kxbtcdObPath), Accept: 'application/json' }, cache: 'no-store' }
         ).catch(() => null)
         if (kxbtcdObRes?.ok) {

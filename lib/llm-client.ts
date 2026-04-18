@@ -18,7 +18,7 @@ export type AIProvider = 'anthropic' | 'openai' | 'grok' | 'openrouter' | 'huggi
 // ── Default model per provider ────────────────────────────────────────────────
 // Used when no model is selected via the UI picker (orModelOverride).
 // Set via env vars — see .env.local. OpenRouter IDs use provider/model format.
-export const PROVIDER_MODELS: Record<AIProvider, { model: string; label: string }> = {
+const PROVIDER_MODELS: Record<AIProvider, { model: string; label: string }> = {
   anthropic:   { model: process.env.ANTHROPIC_MODEL   ?? 'claude-haiku-4-5-20251001', label: 'Claude' },
   openai:      { model: process.env.OPENAI_MODEL      ?? 'gpt-4o-mini',               label: 'GPT' },
   grok:        { model: process.env.GROK_MODEL        ?? 'grok-3-mini-fast',          label: 'Grok' },
@@ -28,7 +28,7 @@ export const PROVIDER_MODELS: Record<AIProvider, { model: string; label: string 
 
 // Returns the model to use for a provider.
 // `modelOverride` (from the UI picker) wins over the env-var default.
-export function resolveModel(_tier: 'fast' | 'smart' | undefined, provider: AIProvider, modelOverride?: string): string {
+function resolveModel(_tier: 'fast' | 'smart' | undefined, provider: AIProvider, modelOverride?: string): string {
   return modelOverride ?? PROVIDER_MODELS[provider].model
 }
 
@@ -74,14 +74,14 @@ function oaiCompatClient(provider: 'openai' | 'grok' | 'openrouter' | 'huggingfa
 }
 
 // ── Shared schema type ───────────────────────────────────────────────────────
-export interface ToolSchema {
+interface ToolSchema {
   properties: Record<string, unknown>
   required: string[]
 }
 
 // ── llmChat ──────────────────────────────────────────────────────────────────
 /** Plain text completion — used by Executor and Aggregator */
-export async function llmChat(opts: {
+async function llmChat(opts: {
   prompt: string
   system?: string
   tier?: 'fast' | 'smart'

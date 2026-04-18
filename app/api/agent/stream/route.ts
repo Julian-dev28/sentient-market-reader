@@ -18,7 +18,7 @@
 
 import { serverAgent } from '@/lib/server-agent'
 import { agentStore } from '@/lib/agent-store'
-import type { AgentStateSnapshot } from '@/lib/server-agent'
+import type { AgentStateSnapshot } from '@/lib/agent-shared'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'

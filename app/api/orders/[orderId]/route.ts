@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { buildKalshiHeaders } from '@/lib/kalshi-auth'
+import { KALSHI_BASE } from '@/lib/kalshi'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
-
-const KALSHI_BASE = 'https://api.elections.kalshi.com/trade-api/v2'
 
 export async function GET(
   _req: NextRequest,

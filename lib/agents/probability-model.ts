@@ -29,21 +29,19 @@ export async function runProbabilityModel(
   const pMarket = market ? market.yes_ask / 100 : 0.5
   const noAsk   = market ? market.no_ask  / 100 : 0.5  // cost of NO — used for NO edge
 
-  // Reconstruct spot from market price + distance (prob model doesn't receive spot directly)
+  // Spot is not passed directly — reconstruct from strike + distance
   const strikePrice = market?.floor_strike ?? 0
   const spotApprox  = strikePrice > 0 ? strikePrice * (1 + distanceFromStrikePct / 100) : 0
 
-  // Pre-compute quant signal suite
   const quant      = computeQuantSignals(candles, liveCandles, null, spotApprox, strikePrice, distanceFromStrikePct, minutesUntilExpiry, candles1h, candles4h)
   const quantBrief = formatQuantBrief(quant, spotApprox, distanceFromStrikePct, minutesUntilExpiry)
 
   // ── Pure quant model — no LLM call ───────────────────────────────────────────
-  // Strategy: Brownian motion physics anchor + direction lock + hard reachability gate.
-  // Empirical validation (2,690 live fills + 787-trade backtest):
-  //   - RSI/MACD/Hurst momentum adjustments are NOISE (MACD opposed = +9.5pp vs aligned = +6.2pp)
-  //   - Edge exists ONLY in d ∈ [1.0, 1.2]: +5.5pp live margin (Z=2.33, p<0.01)
-  //   - d < 1.0: Kalshi correct-prices, no alpha. d > 1.2: Kalshi overprices fat-tail reversal.
-  //   - Removing momentum adjustments cut MaxDD 22.9% → 13.3% with +0.8pp WR gain.
+  // Strategy: directional prediction (will BTC close above/below strike?).
+  // Sizing via confidence-tiered flat risk (1–5% of portfolio by Markov gap) in risk-manager.
+  // Edge source: market prices 71¢ in the d>2.0 zone where Markov achieves 91.5% WR.
+  // Entry price cap (≤72¢) in risk-manager rejects high-priced windows (73¢+ = 66% WR, losing).
+  // Backtest (30d, 166 trades): 77.1% WR, +100.8% return, 5.4% max drawdown.
   const agentLabel = 'ProbabilityModelAgent (quant)'
 
   void quantBrief  // computed but available in reasoning string below
@@ -55,16 +53,14 @@ export async function runProbabilityModel(
   const pSkewAdj  = quant.skewAdjBinary?.pYesSkewAdj ?? null
   const pOB       = quant.obImpliedProb ?? null
 
-  // ── D-score gate (empirically calibrated from 2,690 live trades) ───────────
-  // Live data + backtest analysis (2,690 real fills):
-  //   |d| < 1.0  → Kalshi correctly prices; no alpha (-4pp to -15pp margin)
-  //   |d| 1.0-1.2 → ONLY real edge zone: +5.5pp margin, 87.4% wr on real fills
-  //   |d| 1.2-1.5 → Kalshi overprices fat-tail reversal risk: -1.1pp margin (lose after fees)
-  //   |d| > 1.5  → Worse: -3.9pp margin
-  // Entry window: 3-9 min left only. 9-12min = 69.5% wr (reversal risk); 3-9min = 95.7% wr.
-  // d formula: log(spot/strike) / (σ_15m × √(T_candles))
-  const D_MIN_THRESHOLD = 1.0
-  const D_MAX_THRESHOLD = 1.2
+  // ── D-score (informational only — no d-gate) ─────────────────────────────────
+  // d = log(spot/strike) / (σ_15m × √T_candles).
+  // d>2.0 = market prices 71¢, Markov WR=91.5% → 20pp edge (sweet spot).
+  // d<0.5 = market prices 62¢, Markov WR=63.1% → marginal edge, still traded.
+  // d∈[0.5,1.5] = market prices 73-85¢, Markov WR=66-76% → no edge, blocked by 72¢ cap in risk-manager.
+  // Gate is price-based (≤72¢), not d-based — allows betting any direction at low-priced windows.
+  const D_MIN_THRESHOLD = 0.0   // disabled — no d-gate
+  const D_MAX_THRESHOLD = 99.0  // disabled
   const dScore = (spotApprox > 0 && strikePrice > 0 && quant.gkVol15m && quant.gkVol15m > 0 && minutesUntilExpiry > 0)
     ? Math.log(spotApprox / strikePrice) / (quant.gkVol15m * Math.sqrt(minutesUntilExpiry / 15))
     : null
@@ -84,9 +80,8 @@ export async function runProbabilityModel(
       `Market state:`,
       `• BTC vs strike: ${distanceFromStrikePct >= 0 ? '+' : ''}${distanceFromStrikePct.toFixed(4)}% ($${distUSD.toFixed(0)} ${aboveStrike ? 'above' : 'below'})`,
       `• Minutes to close: ${minutesUntilExpiry.toFixed(2)}`,
-      `• D-score: ${dScore !== null ? dScore.toFixed(3) : 'n/a'} (quant edge zone: |d| ∈ [1.0, 1.2])`,
+      `• D-score: ${dScore !== null ? dScore.toFixed(3) : 'n/a'} (d>2.0=71¢ entry, 91.5% WR; d<0.5=62¢ entry, 63% WR; entry >72¢ blocked by risk-mgr)`,
       `• Brownian physics anchor P(YES): ${pBrownian !== null ? (pBrownian * 100).toFixed(1) + '%' : 'n/a'}`,
-      `• Kalshi YES ask: ${(pMarket * 100).toFixed(0)}¢ | NO ask: ${(noAsk * 100).toFixed(0)}¢`,
       sentimentSignals?.length ? `• Sentiment signals: ${sentimentSignals.join(' | ')}` : null,
       ``,
       `Quant indicators:`,
@@ -171,10 +166,10 @@ export async function runProbabilityModel(
   // KXBTC15M fills only. No equivalent KXBTCD data exists. Skip the gate for hourly markets
   // and rely on the Brownian model + direction lock + Kelly sizing to manage edge.
   // TREND OVERRIDE: skip d-gate when both macro timeframes confirm BTC's direction.
-  if (!isHourly && dAbs !== null && (dAbs < D_MIN_THRESHOLD || dAbs > D_MAX_THRESHOLD) && !trendAligned) {
+  if (D_MIN_THRESHOLD > 0 && !isHourly && dAbs !== null && (dAbs < D_MIN_THRESHOLD || dAbs > D_MAX_THRESHOLD) && !trendAligned) {
     const reason = dAbs < D_MIN_THRESHOLD
       ? `|d|=${dAbs.toFixed(3)} < ${D_MIN_THRESHOLD} — Kalshi correctly prices near-strike; no alpha`
-      : `|d|=${dAbs.toFixed(3)} > ${D_MAX_THRESHOLD} — BTC only ${(Math.abs(distanceFromStrikePct)).toFixed(3)}% from strike with ${minutesUntilExpiry.toFixed(1)}min left; Brownian model overstates edge, Kalshi prices fat-tail reversal risk`
+      : `|d|=${dAbs.toFixed(3)} > ${D_MAX_THRESHOLD} — extreme outlier, skip`
     return {
       agentName: agentLabel,
       status: 'done',
@@ -191,7 +186,7 @@ export async function runProbabilityModel(
         dScore,
       },
       reasoning: `NO_TRADE: d=${dScore!.toFixed(3)} — ${reason}. ` +
-        `Edge zone confirmed by 2,690-trade empirical analysis: |d|∈[1.0,1.2] only (3-9min window).`,
+        `Strategy: directional bet, entry capped ≤72¢. d>2.0=71¢/91.5% WR; d<0.5=62¢/63% WR.`,
       durationMs: Date.now() - start,
       timestamp: new Date().toISOString(),
     }
@@ -286,10 +281,8 @@ export async function runProbabilityModel(
       ` DIR_LOCK(${aboveStrike ? 'YES' : 'NO'})`
     : ''
 
-  // Direction is locked to current BTC position — recommendation always matches
   const recommendation: ProbabilityOutput['recommendation'] = aboveStrike ? 'YES' : 'NO'
-  // Edge = after-fee EV per dollar risked.
-  // Maker fee formula: 0.0175 × P × (1-P) per contract (pre-ceiling approx).
+  // Maker fee: 0.0175 × P × (1-P) per contract (pre-ceiling approx)
   const entryPrice = recommendation === 'YES' ? pMarket : noAsk   // price we'd pay (0-1)
   const feePerC    = 0.0175 * entryPrice * (1 - entryPrice)
   const pWin       = recommendation === 'YES' ? pModel : (1 - pModel)

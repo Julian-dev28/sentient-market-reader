@@ -22,6 +22,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: 'side must be "yes" or "no"' }, { status: 400 })
     }
 
+    // Server-side ticker guard — only allow known Kalshi BTC series
+    if (!/^KXBTC(15M|D)-/.test(ticker)) {
+      return NextResponse.json({ ok: false, error: `Invalid ticker format: ${ticker}` }, { status: 400 })
+    }
+
     const result = await sellOrder({ ticker, side, count })
     return NextResponse.json(result, { status: result.ok ? 200 : 422 })
   } catch (err) {

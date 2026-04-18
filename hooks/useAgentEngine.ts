@@ -67,7 +67,7 @@ export function useAgentEngine(orModel?: string) {
 
       es.addEventListener('state', (e: MessageEvent) => {
         if (destroyed) return
-        try { setServerState(JSON.parse(e.data)) } catch {}
+        try { setServerState(JSON.parse(e.data)) } catch (e) { console.warn('[SSE] Malformed state frame:', e) }
       })
 
       es.addEventListener('agent', (e: MessageEvent) => {
@@ -75,7 +75,7 @@ export function useAgentEngine(orModel?: string) {
         try {
           const { key, result } = JSON.parse(e.data)
           setStreamingAgents(prev => ({ ...prev, [key]: result }))
-        } catch {}
+        } catch (e) { console.warn('[SSE] Malformed agent frame:', e) }
       })
 
       es.addEventListener('pipeline_start', () => {

@@ -31,12 +31,24 @@ export interface KalshiMarket {
 }
 
 /**
+ * Raw Kalshi v2 API market object as returned by the REST API.
+ * Fields are unknown because the API may add/remove fields across versions.
+ * The normalize functions coerce these into the strongly-typed KalshiMarket shape.
+ */
+export type RawKalshiMarket    = Record<string, unknown>
+export type RawKalshiPosition  = Record<string, unknown>
+export type RawKalshiOrder     = Record<string, unknown>
+export type RawKalshiFill      = Record<string, unknown>
+
+/**
  * Normalize a raw Kalshi API market object.
  * The v2 API now returns `yes_ask_dollars` (float USD) instead of `yes_ask` (int cents).
  * This converts dollar fields → cent fields so all downstream code stays consistent.
+ * Parameter is `unknown` because this sits at the API response boundary — callers pass
+ * JSON.parse() output (unknown[]) directly via .map(normalizeKalshiMarket).
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function normalizeKalshiMarket(m: any): KalshiMarket {
+export function normalizeKalshiMarket(raw: unknown): KalshiMarket {
+  const m = raw as RawKalshiMarket
   const toC = (dollars: number | undefined, cents: number | undefined): number => {
     if (cents && cents > 0) return cents
     if (dollars !== undefined && dollars >= 0) return Math.round(dollars * 100)
@@ -44,12 +56,18 @@ export function normalizeKalshiMarket(m: any): KalshiMarket {
   }
   const fp = (v: unknown) => parseFloat(String(v ?? 0)) || 0
   return {
-    ...m,
-    yes_ask:       toC(m.yes_ask_dollars,      m.yes_ask),
-    yes_bid:       toC(m.yes_bid_dollars,      m.yes_bid),
-    no_ask:        toC(m.no_ask_dollars,       m.no_ask),
-    no_bid:        toC(m.no_bid_dollars,       m.no_bid),
-    last_price:    toC(m.last_price_dollars,   m.last_price),
+    ...(m as Partial<KalshiMarket>),
+    ticker:        String(m.ticker ?? ''),
+    event_ticker:  String(m.event_ticker ?? ''),
+    title:         String(m.title ?? ''),
+    close_time:    String(m.close_time ?? ''),
+    expiration_time: String(m.expiration_time ?? ''),
+    status:        (m.status as KalshiMarket['status']) ?? 'closed',
+    yes_ask:       toC(m.yes_ask_dollars as number | undefined,      m.yes_ask as number | undefined),
+    yes_bid:       toC(m.yes_bid_dollars as number | undefined,      m.yes_bid as number | undefined),
+    no_ask:        toC(m.no_ask_dollars  as number | undefined,      m.no_ask  as number | undefined),
+    no_bid:        toC(m.no_bid_dollars  as number | undefined,      m.no_bid  as number | undefined),
+    last_price:    toC(m.last_price_dollars as number | undefined,   m.last_price as number | undefined),
     volume:        fp(m.volume_fp       ?? m.volume),
     open_interest: fp(m.open_interest_fp ?? m.open_interest),
   }
@@ -65,7 +83,7 @@ export interface KalshiOrderbook {
   no: KalshiOrderbookLevel[]
 }
 
-// ─── CoinMarketCap Types ───────────────────────────────────────────────────
+// ─── Market Data Types ────────────────────────────────────────────────────
 
 // [timestamp, low, high, open, close, volume] — Coinbase Exchange format, newest first
 export type OHLCVCandle = [number, number, number, number, number, number]
@@ -166,7 +184,59 @@ export interface ExecutionOutput {
   rationale: string
 }
 
+export interface MarkovOutput {
+  // Current momentum state (1-min % price change bin, 0–8)
+  currentState:     number
+  stateLabel:       string       // e.g. "0.5→1%"
+  historyLength:    number       // 1-min transitions accumulated
+
+  // Momentum forecast — P(YES) derived from Chapman-Kolmogorov propagation
+  pHatYes:          number       // P(BTC > strike at expiry) from momentum model
+  pHatNo:           number       // 1 - pHatYes
+  expectedDriftPct: number       // expected cumulative % price change over T minutes
+  requiredDriftPct: number       // drift needed for YES (≈ −distanceFromStrikePct)
+  sigma:            number       // std dev of cumulative drift distribution
+  zScore:           number       // (expectedDrift − requiredDrift) / sigma
+
+  // Transition matrix stats
+  jStar:            number       // most likely next momentum state (argmax P[s])
+  jStarLabel:       string
+  persist:          number       // P[currentState][currentState] — momentum self-persistence
+  enterYes:         boolean      // strong YES: pYes >= 0.65 AND persist >= 0.80
+  enterNo:          boolean      // strong NO:  pYes <= 0.35 AND persist >= 0.80
+  tau:              number       // persist threshold used
+  transitionMatrix: number[][]   // full 9×9 matrix for UI heatmap
+  numStates:        number       // always 9
+
+  // Legacy fields (kept for type compat — set to 0 in new model)
+  pMarketYes?:      number
+  pMarketNo?:       number
+  gapYes?:          number
+  gapNo?:           number
+  eps?:             number
+
+  // Risk decision (Markov is the engine)
+  recommendation:   'YES' | 'NO' | 'NO_TRADE'
+  approved:         boolean
+  rejectionReason?: string
+  positionSize:     number
+  maxLoss:          number
+  dailyPnl:         number
+  givebackDollars:  number
+  tradeCount:       number
+}
+
 // ─── Pipeline State ────────────────────────────────────────────────────────
+
+/** Union of all specific agent result types — used for the SSE emit callback. */
+export type AnyAgentResult =
+  | AgentResult<MarketDiscoveryOutput>
+  | AgentResult<PriceFeedOutput>
+  | AgentResult<SentimentOutput>
+  | AgentResult<ProbabilityOutput>
+  | AgentResult<MarkovOutput>
+  | AgentResult<RiskOutput>
+  | AgentResult<ExecutionOutput>
 
 /** Partial agents map — populated incrementally during SSE streaming */
 export type PartialPipelineAgents = Partial<PipelineState['agents']>
@@ -181,7 +251,8 @@ export interface PipelineState {
     priceFeed: AgentResult<PriceFeedOutput>
     sentiment: AgentResult<SentimentOutput>
     probability: AgentResult<ProbabilityOutput>
-    risk: AgentResult<RiskOutput>
+    markov: AgentResult<MarkovOutput>
+    risk?: AgentResult<RiskOutput>
     execution: AgentResult<ExecutionOutput>
   }
 }
@@ -232,14 +303,16 @@ export interface KalshiFill {
   fee_cost: string        // dollar string e.g. "0.01"
 }
 
-/** Normalize raw Kalshi API position — new API uses _fp / _dollars suffixes */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function normalizeKalshiPosition(p: any): KalshiPosition {
+/** Normalize raw Kalshi API position — new API uses _fp / _dollars suffixes.
+ *  Parameter is RawKalshiPosition (Record<string, unknown>) because this sits at the
+ *  API response boundary — callers pass JSON.parse() output directly.
+ */
+export function normalizeKalshiPosition(p: RawKalshiPosition): KalshiPosition {
   const fp  = (v: unknown) => parseFloat(String(v ?? 0)) || 0
   const toC = (dollars: unknown, cents: unknown) =>
     (cents !== undefined && cents !== null && fp(cents) !== 0) ? fp(cents) : Math.round(fp(dollars) * 100)
   return {
-    ticker:              p.ticker ?? p.market_ticker ?? '',
+    ticker:              String(p.ticker ?? p.market_ticker ?? ''),
     position:            fp(p.position_fp ?? p.position),
     realized_pnl:        toC(p.realized_pnl_dollars, p.realized_pnl),
     market_exposure:     toC(p.market_exposure_dollars, p.market_exposure),
@@ -248,47 +321,51 @@ export function normalizeKalshiPosition(p: any): KalshiPosition {
   }
 }
 
-/** Normalize raw Kalshi API order */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function normalizeKalshiOrder(o: any): KalshiOrder {
+/** Normalize raw Kalshi API order.
+ *  Parameter is RawKalshiOrder (Record<string, unknown>) because this sits at the
+ *  API response boundary — callers pass JSON.parse() output directly.
+ */
+export function normalizeKalshiOrder(o: RawKalshiOrder): KalshiOrder {
   const fp  = (v: unknown) => parseFloat(String(v ?? 0)) || 0
   const toC = (dollars: unknown, cents: unknown) =>
     (cents !== undefined && cents !== null && fp(cents) !== 0) ? fp(cents) : Math.round(fp(dollars) * 100)
   return {
-    order_id:        o.order_id ?? '',
-    ticker:          o.ticker ?? o.market_ticker ?? '',
-    side:            o.side,
-    action:          o.action,
+    order_id:        String(o.order_id ?? ''),
+    ticker:          String(o.ticker ?? o.market_ticker ?? ''),
+    side:            o.side as 'yes' | 'no',
+    action:          o.action as 'buy' | 'sell',
     count:           fp(o.count_fp ?? o.count),
     fill_count:      fp(o.fill_count_fp ?? o.fill_count),
     remaining_count: fp(o.remaining_count_fp ?? o.remaining_count),
     initial_count:   fp(o.initial_count_fp ?? o.initial_count ?? o.count_fp ?? o.count),
     yes_price:       toC(o.yes_price_dollars, o.yes_price),
     no_price:        toC(o.no_price_dollars,  o.no_price),
-    status:          o.status,
-    created_time:    o.created_time ?? '',
-    client_order_id: o.client_order_id,
+    status:          o.status as KalshiOrder['status'],
+    created_time:    String(o.created_time ?? ''),
+    client_order_id: o.client_order_id as string | undefined,
   }
 }
 
-/** Normalize raw Kalshi API fill */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function normalizeKalshiFill(f: any): KalshiFill {
+/** Normalize raw Kalshi API fill.
+ *  Parameter is RawKalshiFill (Record<string, unknown>) because this sits at the
+ *  API response boundary — callers pass JSON.parse() output directly.
+ */
+export function normalizeKalshiFill(f: RawKalshiFill): KalshiFill {
   const fp  = (v: unknown) => parseFloat(String(v ?? 0)) || 0
   const toC = (dollars: unknown, cents: unknown) =>
     (cents !== undefined && cents !== null && fp(cents) !== 0) ? fp(cents) : Math.round(fp(dollars) * 100)
   return {
-    fill_id:      f.fill_id ?? f.trade_id ?? '',
-    order_id:     f.order_id ?? '',
-    ticker:       f.ticker ?? f.market_ticker ?? '',
-    side:         f.side,
-    action:       f.action,
+    fill_id:      String(f.fill_id ?? f.trade_id ?? ''),
+    order_id:     String(f.order_id ?? ''),
+    ticker:       String(f.ticker ?? f.market_ticker ?? ''),
+    side:         f.side as 'yes' | 'no',
+    action:       f.action as 'buy' | 'sell',
     count:        fp(f.count_fp ?? f.count),
     yes_price:    toC(f.yes_price_dollars, f.yes_price),
     no_price:     toC(f.no_price_dollars,  f.no_price),
-    is_taker:     f.is_taker ?? false,
-    created_time: f.created_time ?? '',
-    fee_cost:     f.fee_cost ?? '0',
+    is_taker:     (f.is_taker as boolean | undefined) ?? false,
+    created_time: String(f.created_time ?? ''),
+    fee_cost:     String(f.fee_cost ?? '0'),
   }
 }
 
@@ -304,7 +381,7 @@ export interface TradeSignals {
   orderbookSkew: number        // -1 to +1
   sentimentLabel: string       // e.g. 'strongly_bullish'
   // Probability agent
-  pLLM: number                 // raw LLM P(YES) before quant blend
+  pLLM: number                 // model P(YES) at entry (quant or Grok mode)
   confidence: string           // 'high' | 'medium' | 'low'
   gkVol: number | null         // Garman-Klass realized vol
   // Market context
@@ -313,8 +390,6 @@ export interface TradeSignals {
   aboveStrike: boolean         // BTC above strike at entry
   // Market structure
   priceMomentum1h: number      // 1h price change %
-  // TimesFM (if available)
-  timesfmPYes?: number         // TimesFM-derived P(YES)
 }
 
 export interface TradeRecord {
@@ -383,65 +458,3 @@ export interface AgentStats {
   worstWindow: number
 }
 
-// ─── Calibration ────────────────────────────────────────────────────────────
-
-/** Calibration bucket: "when model says X%, how often does YES actually win?" */
-export interface CalibrationBucket {
-  bucket: string            // e.g. "50–60%"
-  pMid: number              // midpoint, e.g. 0.55
-  predicted: number         // avg pModel in bucket
-  actual: number            // actual win rate
-  count: number             // trade count
-}
-
-export interface SignalImportance {
-  feature: string           // signal name
-  coefficient: number       // logistic regression coefficient
-  direction: 'bullish' | 'bearish' | 'mixed'
-  accuracy: number          // % of times this signal correctly predicted direction
-  count: number             // sample size
-}
-
-export interface CalibrationResult {
-  brierScore: number        // 0–0.25; lower is better; random=0.25
-  logLoss: number           // lower is better
-  rocAuc: number            // 0.5–1.0; 0.5=random
-  totalTrades: number
-  settledTrades: number
-  overallWinRate: number
-  avgPModel: number         // average predicted P(YES) on YES trades
-  buckets: CalibrationBucket[]
-  signals: SignalImportance[]
-  plattA: number | null     // Platt scaling coefficient a (null if not fitted)
-  plattB: number | null     // Platt scaling coefficient b
-  computedAt: string        // ISO timestamp
-}
-
-/** Daily optimization parameters output by Gemini meta-optimizer */
-export interface DailyOptParams {
-  alphaCap: number          // max quant weight (0.70–0.92)
-  gateVelocityThreshold: number  // reachability gate (0.40–0.75)
-  edgeMinPct: number        // minimum edge to trade (1.5–6.0)
-  sentimentWeight: number   // LLM sentiment blend weight (0.05–0.30)
-  fatTailNu: number | null  // Student-t degrees of freedom (null = auto)
-  rationale: string         // Gemini's explanation
-  riskLevel: 'conservative' | 'normal' | 'aggressive'
-  computedAt: string
-  tradesSampled: number
-  brierScore: number
-}
-
-// ─── Performance ───────────────────────────────────────────────────────────
-
-export interface PerformanceStats {
-  totalTrades: number
-  wins: number
-  losses: number
-  pending: number
-  winRate: number
-  totalPnl: number
-  avgEdge: number
-  avgReturn: number
-  bestTrade: number
-  worstTrade: number
-}

@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { buildKalshiHeaders } from '@/lib/kalshi-auth'
 import { normalizeKalshiMarket } from '@/lib/types'
+import { KALSHI_HOST } from '@/lib/kalshi'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
-
-const KALSHI_BASE = 'https://api.elections.kalshi.com'
 
 /** Fetch a single market's live quote (yes/no bid/ask) with retry on 429 */
 async function fetchWithRetry(url: string, path: string, retries = 3): Promise<Response> {
@@ -33,7 +32,7 @@ export async function GET(
   const { ticker } = await params
   const path = `/trade-api/v2/markets/${encodeURIComponent(ticker)}`
   try {
-    const res = await fetchWithRetry(`${KALSHI_BASE}${path}`, path)
+    const res = await fetchWithRetry(`${KALSHI_HOST}${path}`, path)
     if (!res.ok) {
       return NextResponse.json({ error: `Kalshi ${res.status}` }, { status: res.status })
     }

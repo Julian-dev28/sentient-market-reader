@@ -85,20 +85,6 @@ export function computeFatTailBinary(
   return { pYesFat: studentTCDF(d2, nu), d2, nu }
 }
 
-// ── Logarithmic Opinion Pool ──────────────────────────────────────────────────
-// Combines two calibrated binary forecasts: p_lop ∝ p1^w1 × p2^w2
-// Formally derived from the independent-expert Bayesian combination theorem.
-// Avoids the "regression to the mean" of linear pools — preserves forecast sharpness.
-// Numerically stable via log-sum-exp trick.
-export function logOpinionPool(p1: number, p2: number, w1: number, w2: number): number {
-  p1 = Math.max(1e-9, Math.min(1 - 1e-9, p1))
-  p2 = Math.max(1e-9, Math.min(1 - 1e-9, p2))
-  const lyes = w1 * Math.log(p1)      + w2 * Math.log(p2)
-  const lno  = w1 * Math.log(1 - p1)  + w2 * Math.log(1 - p2)
-  const maxL = Math.max(lyes, lno)   // log-sum-exp for numerical stability
-  return Math.exp(lyes - maxL) / (Math.exp(lyes - maxL) + Math.exp(lno - maxL))
-}
-
 // ── Hurst exponent (variance ratio method) ────────────────────────────────────
 // H > 0.5: persistent trend (momentum extrapolation is valid)
 // H < 0.5: anti-persistent / mean-reverting (expect reversion, fade extremes)
@@ -1022,11 +1008,6 @@ export function formatQuantBrief(
     lines.push(
       `  Binary Greeks:  Δ=${g.delta.toFixed(6)}/$ BTC  Θ=${(g.thetaPerMin * 100).toFixed(6)}pp/min` +
       `  [Δ near-ATM if Δ×$1000>0.5%; Θ shows P decay rate — high Θ = fast time kill]`
-    )
-  }
-  if (sig.obImpliedProb !== null) {
-    lines.push(
-      `  Orderbook P(YES):          ${(sig.obImpliedProb * 100).toFixed(1)}%  [crowd depth pressure — auxiliary signal]`
     )
   }
   if (sig.volOfVol !== null) {

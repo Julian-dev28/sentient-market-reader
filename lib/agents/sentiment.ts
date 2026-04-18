@@ -97,8 +97,9 @@ export async function runSentiment(
   const distUSD = Math.abs(distanceFromStrikePct / 100) * quote.price
   const reqVel  = minutesUntilExpiry > 0 ? distUSD / minutesUntilExpiry : 0
 
-  // Pre-compute quantitative signals
-  const quant      = computeQuantSignals(candles, liveCandles, orderbook, quote.price, strikePrice, distanceFromStrikePct, minutesUntilExpiry, candles1h, candles4h)
+  // Pre-compute quantitative signals — pass null for orderbook so Kalshi depth never
+  // influences price prediction (orderbook reflects crowd opinion on price, not price itself)
+  const quant      = computeQuantSignals(candles, liveCandles, null, quote.price, strikePrice, distanceFromStrikePct, minutesUntilExpiry, candles1h, candles4h)
   const quantBrief = formatQuantBrief(quant, quote.price, distanceFromStrikePct, minutesUntilExpiry)
 
   const context = [
@@ -108,9 +109,6 @@ export async function runSentiment(
     `Minutes to window close: ${minutesUntilExpiry.toFixed(2)} | Required velocity: ±$${reqVel.toFixed(2)}/min to reach strike`,
     `1h change: ${quote.percent_change_1h >= 0 ? '+' : ''}${quote.percent_change_1h.toFixed(4)}%`,
     `24h change: ${quote.percent_change_24h >= 0 ? '+' : ''}${quote.percent_change_24h.toFixed(4)}%`,
-    market
-      ? `Kalshi market: YES ask=${market.yes_ask}¢ bid=${market.yes_bid}¢ | NO ask=${market.no_ask}¢ | spread=${market.yes_ask - market.yes_bid}¢`
-      : 'No active Kalshi market',
     `
 ${quantBrief}`,
     derivativesBlock,
@@ -218,17 +216,7 @@ ${prevContext}`] : []),
     else if (quant.rsiDivergence.type === 'bearish') { score -= 0.15; signals.push('RSI bearish divergence') }
   }
 
-  // 12. Kalshi orderbook imbalance (pressure-weighted YES vs NO depth)
-  if (quant.obImbalance) {
-    const pw = quant.obImbalance.pressureWeighted
-    if      (pw >  0.30) { score += 0.15; signals.push('OB strong YES pressure') }
-    else if (pw >  0.12) { score += 0.08; signals.push('OB mild YES pressure') }
-    else if (pw < -0.30) { score -= 0.15; signals.push('OB strong NO pressure') }
-    else if (pw < -0.12) { score -= 0.08; signals.push('OB mild NO pressure') }
-    else                 { signals.push('OB balanced') }
-  }
-
-  // 13. Efficiency ratio — dampen signals in choppy market
+  // 12. Efficiency ratio — dampen signals in choppy market
   if (quant.efficiencyRatio !== null && quant.efficiencyRatio < 0.3) {
     score *= 0.5
     signals.push('Choppy regime — signals dampened')

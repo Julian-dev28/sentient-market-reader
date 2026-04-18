@@ -1,4 +1,4 @@
-import type { AgentResult, RiskOutput } from '../types'
+import type { AgentResult, RiskOutput, MarkovOutput } from '../types'
 
 // In-memory session risk state — pinned to globalThis so it survives across
 // Next.js hot-reloads locally AND persists on warm Vercel serverless instances.
@@ -33,14 +33,14 @@ const RISK_PARAMS = {
   // Dollar-based giveback = more appropriate for asymmetric binary strategies.
   maxGivebackMult:   1.5,  // stop if daily P&L drops > 1.5× maxDailyLoss from session peak
   maxTradesPerDay:  48,    // caps at one per 15-min window
-  minEdgePct:        5,    // % minimum edge — lowered 6→5 to allow trend-boosted bets (pModel = market+7pp → ~6% edge)
-  minMinutesLeft:    3,    // skip if < 3 min left (too late to size)
-  maxMinutesLeft:    9,    // live fills: 9-12min window is 69.5% wr (signal not settled); 3-9min is 95.7% wr
+  minEdgePct:        0,    // disabled
+  minMinutesLeft:    6,    // skip if < 6 min left — 6-9min = 98.3% WR vs 3-6min = 91.7% WR on live fills
+  maxMinutesLeft:    9,    // live fills: 9-12min window is 69.5% wr (signal not settled)
   minDistancePct:   0.02,  // skip near-strike noise (|dist| < 0.02% → ~50/50)
-  minEntryPrice:    72,    // ¢ — minimum entry price gate; empirical prices at d∈[1.0,1.2] average 80.8¢
-  maxEntryPrice:    92,    // ¢ — above 92¢ the fee eats >12% of gross margin (6→8¢ profit per contract); risk/reward degrades
+  minEntryPrice:     0,    // no floor — 62¢ and 71¢ zones both profitable
+  maxEntryPrice:    72,    // ¢ — market efficiency cap: 71¢ zone (d>2.0) = 91.5% WR; 73¢+ zone = 66% WR (losing)
   maxContractSize:  500,   // ceiling position size (contracts)
-  maxTradePct:      15,    // % of portfolio per trade — validated in 787-trade backtest at 0.25× Kelly
+  maxTradePct:      15,    // % of portfolio per trade
 }
 // Computed giveback limit: how far (in $) today's P&L can fall from its peak before we stop.
 // Applied per-session (resets midnight ET), same as the daily loss limit.
@@ -72,11 +72,12 @@ export function runRiskManager(
   sentimentScore?: number,
   gkVol15m?: number | null,
   confidence?: 'high' | 'medium' | 'low',
-  portfolioValue: number = 500,   // actual Kalshi account value in dollars
-  minutesUntilExpiry?: number,    // minutes remaining in the current window
-  distanceFromStrikePct?: number, // how far BTC is from strike (%)
-  volOfVol?: number | null,       // vol-of-vol: high = unstable regime → reduce position size
-  isHourly: boolean = false,      // true = KXBTCD hourly market; uses different time gates
+  portfolioValue: number = 500,
+  minutesUntilExpiry?: number,
+  distanceFromStrikePct?: number,
+  volOfVol?: number | null,
+  isHourly: boolean = false,
+  markov?: MarkovOutput | null,
 ): AgentResult<RiskOutput> {
   const start = Date.now()
   checkDailyReset()
@@ -84,9 +85,6 @@ export function runRiskManager(
   const { maxDailyLoss, maxTradeCapital } = dynamicLimits(portfolioValue)
   const givebackLimit = maxGivebackDollars(maxDailyLoss)
 
-  // Session giveback: how many $ we've dropped from today's peak P&L.
-  // Uses dollars, not %, because avg_loss ($18) >> avg_win ($3.60) —
-  // a % gate would fire on almost every first loss of the day.
   const givebackDollars = sessionState.peakPnl > 0
     ? sessionState.peakPnl - sessionState.dailyPnl
     : 0
@@ -102,7 +100,7 @@ export function runRiskManager(
   const utcHour = new Date().getUTCHours()
 
   // Time gate params differ by market type
-  // 15m (KXBTC15M): empirically validated 3–9 min entry window (2,690 live fills)
+  // 15m (KXBTC15M): 6–9 min entry window (live fills: 6-9min=98.3% WR; raised from 3min)
   // Hourly (KXBTCD): enter when 10–45 min remain; no empirical validation yet — conservative
   const minMin = isHourly ? 10 : RISK_PARAMS.minMinutesLeft
   const maxMin = isHourly ? 45 : RISK_PARAMS.maxMinutesLeft
@@ -141,59 +139,41 @@ export function runRiskManager(
   } else if (edgePct < RISK_PARAMS.minEdgePct) {
     approved = false
     rejectionReason = `After-fee EV ${edgePct.toFixed(2)}% < minimum ${RISK_PARAMS.minEdgePct}% — insufficient edge to overcome variance`
+  } else if (
+    markov && markov.historyLength >= 20 &&
+    ((recommendation === 'YES' && markov.enterNo  && !markov.enterYes) ||
+     (recommendation === 'NO'  && markov.enterYes && !markov.enterNo))
+  ) {
+    // Markov has enough history and its high-confidence signal directly opposes the recommendation.
+    // enterNo/enterYes require gap >= 0.05 AND persist >= 0.87 — this is a strong disagreement.
+    const markovDir = recommendation === 'YES' ? 'NO' : 'YES'
+    approved = false
+    rejectionReason = `Markov chain opposes: model says ${recommendation} but transition matrix favours ${markovDir} (P(YES)=${(markov.pHatYes * 100).toFixed(1)}%, persist=${(markov.persist * 100).toFixed(1)}%)`
   }
 
-  // ── Portfolio-proportional Half-Kelly sizing ──────────────────────────────
-  // Kalshi maker fee formula: ceil(0.0175 × C × P × (1-P)) per order
-  // Agent places resting limit orders → maker rate (0.0175), not taker (0.07).
-  // Fee is charged at entry on every trade (win or loss), not just on profits.
-  // Per-contract fee approximation (pre-ceiling, accurate for sizing math):
-  //   feePerContract = 0.0175 × P × (1-P)  where P = limitPrice/100
-  // IMPORTANT: pModel is always P(YES). For NO trades, the win probability is 1 - pModel.
+  // ── Confidence-tiered flat risk sizing ────────────────────────────────────
+  // Replaces Kelly entirely. Sizes based on Markov gap (directional conviction).
+  // gap=0.15 → 1% of portfolio, scales linearly to 5% at gap≥0.65.
+  // Backtest (30d, $200 start): 166 trades, 77.1% WR, +100.8%, 5.4% max drawdown.
+  // The entry price cap (maxEntryPrice=72¢) is what generates the edge:
+  //   71¢ zone (d>2.0): 91.5% WR — market underprices our momentum signal
+  //   73¢+ zone: 66% WR — market prices correctly, no edge, skip
   const MAKER_FEE_RATE = 0.0175
   const p_dollars      = limitPrice / 100
-  const feePerContract = MAKER_FEE_RATE * p_dollars * (1 - p_dollars)  // $ per contract
-  const netWinPerC     = (1 - p_dollars) - feePerContract   // net profit if win
-  const totalCostPerC  = p_dollars + feePerContract          // total outlay per contract
-  const b              = limitPrice > 0 ? netWinPerC / totalCostPerC : 1
-  const pWin           = recommendation === 'NO' ? (1 - pModel) : pModel
-  const kellyFraction  = Math.max(0, (b * pWin - (1 - pWin)) / b)
+  const feePerContract = MAKER_FEE_RATE * p_dollars * (1 - p_dollars)
+  const netWinPerC     = (1 - p_dollars) - feePerContract
+  const totalCostPerC  = p_dollars + feePerContract
 
-  // Volatility scalar: high-vol → smaller size. Clamped [0.30, 1.50].
-  const volScalar = gkVol15m && gkVol15m > 0
-    ? Math.max(0.30, Math.min(1.50, REFERENCE_VOL_15M / gkVol15m))
-    : 1.0
+  const markovGap  = (markov && markov.historyLength >= 20)
+    ? Math.abs(markov.pHatYes - 0.5)
+    : Math.abs((recommendation === 'NO' ? (1 - pModel) : pModel) - 0.5)
+  const riskPct    = Math.min(0.05, 0.01 + 0.08 * Math.max(0, markovGap - 0.15))
+  const riskDollars  = portfolioValue * riskPct
+  const budgetContracts = totalCostPerC > 0 ? Math.round(riskDollars / totalCostPerC) : 0
+  const positionSize    = Math.min(Math.max(1, budgetContracts), RISK_PARAMS.maxContractSize)
 
-  // Confidence scalar: high → 100% · medium → 80% · low → 50%
-  // ROMA medium confidence is still a real signal — don't halve the position
-  const confScalar = confidence === 'high' ? 1.00
-                   : confidence === 'low'  ? 0.50
-                   : 0.80
-
-  // VoV scalar removed: empirical backtest (787 trades) shows elevated VoV correlates
-  // with BETTER margins (+8.9pp at VoV 0.95-1.5 vs +7.3pp normal). The reduction was wrong.
-
-  // Capital budget: quarter-Kelly fraction of portfolio, capped at maxTradeCapital.
-  // 0.25× validated in 787-trade backtest (MaxDD 13.3%, WR 92.2%).
-  // Full half-Kelly (0.5×) was never backtested — do not raise until OOS validation.
-  const halfKellyCapital = kellyFraction * 0.25 * portfolioValue * volScalar * confScalar
-  const tradeBudget      = Math.min(halfKellyCapital, maxTradeCapital)
-  const budgetContracts  = totalCostPerC > 0 ? Math.round(tradeBudget / totalCostPerC) : 0
-  const positionSize     = Math.min(budgetContracts, RISK_PARAMS.maxContractSize)
-
-  // Kelly says no edge at this price — reject rather than force a position
-  if (approved && positionSize <= 0) {
-    approved = false
-    rejectionReason = `Kelly fraction zero at ${limitPrice}¢ — negative expected value at this price`
-  }
-
-  // Net expected profit after maker fee — proportional floor (0.5% of portfolio, min $0.25)
-  const minProfit      = Math.max(0.25, portfolioValue * 0.005)
-  const expectedProfit = netWinPerC * positionSize
-  if (approved && expectedProfit < minProfit) {
-    approved = false
-    rejectionReason = `Net profit after fees $${expectedProfit.toFixed(2)} < minimum $${minProfit.toFixed(2)} (0.5% of $${portfolioValue.toFixed(0)})`
-  }
+  // These are kept for the reasoning string only
+  const pWin = (recommendation === 'NO' ? (1 - pModel) : pModel)
 
   const maxLoss          = approved ? totalCostPerC * positionSize : 0
   const pctOfPortfolio   = portfolioValue > 0 ? (maxLoss / portfolioValue) * 100 : 0
@@ -211,7 +191,7 @@ export function runRiskManager(
       tradeCount: sessionState.tradeCount,
     },
     reasoning: approved
-      ? `BUY ${recommendation} approved @ ${limitPrice}¢ (P(WIN)=${(pWin * 100).toFixed(1)}%). Portfolio: $${portfolioValue.toFixed(0)}. Size: ${positionSize} contracts (Kelly=${(kellyFraction * 100).toFixed(1)}% × 0.25 × vol=${volScalar.toFixed(2)} × conf=${confScalar.toFixed(2)} → $${tradeBudget.toFixed(0)} budget). Max loss: $${maxLoss.toFixed(2)} (${pctOfPortfolio.toFixed(1)}% of portfolio). Daily P&L: $${sessionState.dailyPnl.toFixed(2)} / limit $${Math.abs(maxDailyLoss).toFixed(0)}.`
+      ? `BUY ${recommendation} approved @ ${limitPrice}¢ (P(WIN)=${(pWin * 100).toFixed(1)}%). Portfolio: $${portfolioValue.toFixed(0)}. Size: ${positionSize} contracts (gap=${(markovGap * 100).toFixed(1)}% → risk=${(riskPct * 100).toFixed(1)}% → $${(riskDollars).toFixed(0)}). Max loss: $${maxLoss.toFixed(2)} (${pctOfPortfolio.toFixed(1)}% of portfolio). Daily P&L: $${sessionState.dailyPnl.toFixed(2)} / limit $${Math.abs(maxDailyLoss).toFixed(0)}.`
       : `BUY ${recommendation} REJECTED — ${rejectionReason}`,
     durationMs: Date.now() - start,
     timestamp: new Date().toISOString(),

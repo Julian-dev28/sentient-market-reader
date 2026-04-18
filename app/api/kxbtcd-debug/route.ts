@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { buildKalshiHeaders } from '@/lib/kalshi-auth'
+import { KALSHI_HOST, MONTHS_ET, getETParts } from '@/lib/kalshi'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -10,21 +11,10 @@ export const dynamic = 'force-dynamic'
  * Returns: { events, sampleMarkets, computedTicker }
  */
 export async function GET() {
-  const MONTHS_ET = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC']
   const now = new Date()
 
   // Compute what our ET-based ticker generator would produce
-  const parts = Object.fromEntries(
-    new Intl.DateTimeFormat('en-US', {
-      timeZone: 'America/New_York',
-      year: 'numeric', month: 'numeric', day: 'numeric',
-      hour: 'numeric', hour12: false,
-    }).formatToParts(now)
-      .filter(p => p.type !== 'literal')
-      .map(p => [p.type, parseInt(p.value)])
-  ) as Record<string, number>
-
-  const { year, month, day, hour } = parts
+  const { year, month, day, hour } = getETParts()
   const closeHour = (hour % 24) + 1
   const yy = String(year).slice(-2)
   const mon = MONTHS_ET[month - 1]
@@ -34,7 +24,7 @@ export async function GET() {
 
   // Fetch open events from Kalshi events API
   const eventsPath = '/trade-api/v2/events?series_ticker=KXBTCD&status=open&limit=20'
-  const eventsRes = await fetch(`https://api.elections.kalshi.com${eventsPath}`, {
+  const eventsRes = await fetch(`${KALSHI_HOST}${eventsPath}`, {
     headers: { ...buildKalshiHeaders('GET', eventsPath), Accept: 'application/json' },
     cache: 'no-store',
   }).catch(() => null)
@@ -44,7 +34,7 @@ export async function GET() {
 
   // Also fetch the computed ticker's markets to see what we get
   const computedPath = `/trade-api/v2/markets?event_ticker=${computedTicker}&limit=10`
-  const computedRes = await fetch(`https://api.elections.kalshi.com${computedPath}`, {
+  const computedRes = await fetch(`${KALSHI_HOST}${computedPath}`, {
     headers: { ...buildKalshiHeaders('GET', computedPath), Accept: 'application/json' },
     cache: 'no-store',
   }).catch(() => null)

@@ -144,7 +144,9 @@ export async function DELETE(req: NextRequest) {
         if (existing.documents.length) {
           await databases.deleteDocument(dbId, colId, existing.documents[0].$id)
         }
-      } catch { /* ignore */ }
+      } catch (e) {
+        console.error('[kalshi-connect] Failed to delete credentials from Appwrite DB:', e)
+      }
     }
     return NextResponse.json({ ok: true })
   }

@@ -7,7 +7,7 @@
  *   KALSHI-ACCESS-TIMESTAMP — Unix ms timestamp (as string)
  *   KALSHI-ACCESS-SIGNATURE — Base64 RSA-PSS signature
  *
- * Signature payload: `${timestamp}\n${method}\n${path}`
+ * Signature payload: `${timestamp}${method}${path}` (direct concat, no separators)
  */
 
 import { readFileSync } from 'fs'
@@ -67,7 +67,8 @@ export function buildKalshiHeaders(method: string, path: string): Record<string,
       'KALSHI-ACCESS-SIGNATURE': signature,
       'Accept': 'application/json',
     }
-  } catch {
+  } catch (e) {
+    console.error('[kalshi-auth] RSA signing failed — requests will be unauthenticated:', e)
     return { 'Accept': 'application/json' }
   }
 }

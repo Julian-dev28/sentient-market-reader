@@ -6,9 +6,10 @@
  *
  * Pipeline DAG:
  *   MarketDiscovery ──┐
- *   PriceFeed ─────────┼──► SentimentAgent ──► ProbabilityModelAgent ──► RiskManager ──► Execution
+ *   PriceFeed ─────────┼──► SentimentAgent ──► ProbabilityModelAgent ──► MarkovChain ──► Execution
  *
- * AI mode (aiRisk=true): stages 3-6 replaced by a single Grok trading agent call.
+ * Markov chain IS the risk engine — entry filter + Kelly sizing + safety gates.
+ * AI mode (aiRisk=true): sentiment + probability from Grok; Markov still decides sizing.
  */
 
 import type {
@@ -19,11 +20,12 @@ import type {
   OHLCVCandle,
   DerivativesSignal,
   AgentResult,
+  AnyAgentResult,
   MarketDiscoveryOutput,
   PriceFeedOutput,
   SentimentOutput,
   ProbabilityOutput,
-  RiskOutput,
+  MarkovOutput,
   ExecutionOutput,
 } from '../types'
 import type { AIProvider } from '../llm-client'
@@ -32,7 +34,7 @@ import { runMarketDiscovery } from './market-discovery'
 import { runPriceFeed } from './price-feed'
 import { runSentiment } from './sentiment'
 import { runProbabilityModel } from './probability-model'
-import { runRiskManager } from './risk-manager'
+import { runMarkovAgent } from './markov'
 import { runExecution } from './execution'
 import { runGrokTradingAgent } from './grok-trading-agent'
 
@@ -53,8 +55,7 @@ export async function runAgentPipeline(
   derivatives?: DerivativesSignal | null,  // perp futures funding rate + basis
   orModelOverride?: string,    // override OpenRouter model ID for sentiment + probability stages
   signal?: AbortSignal,        // abort signal — cancels in-flight ROMA fetches when client disconnects
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  emit?: (key: string, result: AgentResult<any>) => void,  // SSE streaming callback
+  emit?: (key: string, result: AnyAgentResult) => void,  // SSE streaming callback
   portfolioValueCents: number = 0,  // live Kalshi balance (cash + positions) in cents
   apiKeys?: Record<string, string>, // per-provider API keys from user settings
   candles1h?: OHLCVCandle[],  // last 12 × 1h candles — intraday trend context
@@ -118,14 +119,37 @@ export async function runAgentPipeline(
     )
     emit?.('sentiment',   grok.sentiment)
     emit?.('probability', grok.probability)
-    emit?.('risk',        grok.risk)
-    emit?.('execution',   grok.execution)
+
+    const markovResultAI = runMarkovAgent(
+      pfResult.output.distanceFromStrikePct,
+      mdResult.output.strikePrice,
+      mdResult.output.activeMarket,
+      liveCandles,
+      candles,
+      portfolioValue,
+      mdResult.output.minutesUntilExpiry,
+      grok.probability.output.gkVol15m,
+      grok.probability.output.confidence,
+      useKxbtcd,
+    )
+    emit?.('markov', markovResultAI)
+
+    const execResultAI = await runExecution(
+      markovResultAI.output.recommendation,
+      markovResultAI.output.positionSize,
+      mdResult.output.activeMarket,
+      markovResultAI.output.approved,
+      portfolioValue > 0 ? portfolioValue : undefined,
+      mdResult.output.minutesUntilExpiry,
+      provider,
+    )
+    emit?.('execution', execResultAI)
 
     setLastAnalysis({
       pModel:         grok.probability.output.pModel,
       pMarket:        grok.probability.output.pMarket,
       edge:           grok.probability.output.edge,
-      recommendation: grok.probability.output.recommendation,
+      recommendation: markovResultAI.output.recommendation,
       sentimentScore: grok.sentiment.output.score,
       sentimentLabel: grok.sentiment.output.label,
       btcPrice:       enrichedQuote.price,
@@ -139,12 +163,12 @@ export async function runAgentPipeline(
       cycleCompletedAt: new Date().toISOString(),
       status: 'completed',
       agents: {
-        marketDiscovery: mdResult as AgentResult<MarketDiscoveryOutput>,
-        priceFeed:       pfResult as AgentResult<PriceFeedOutput>,
-        sentiment:       grok.sentiment   as AgentResult<SentimentOutput>,
-        probability:     grok.probability as AgentResult<ProbabilityOutput>,
-        risk:            grok.risk        as AgentResult<RiskOutput>,
-        execution:       grok.execution   as AgentResult<ExecutionOutput>,
+        marketDiscovery: mdResult          as AgentResult<MarketDiscoveryOutput>,
+        priceFeed:       pfResult          as AgentResult<PriceFeedOutput>,
+        sentiment:       grok.sentiment    as AgentResult<SentimentOutput>,
+        probability:     grok.probability  as AgentResult<ProbabilityOutput>,
+        markov:          markovResultAI    as AgentResult<MarkovOutput>,
+        execution:       execResultAI      as AgentResult<ExecutionOutput>,
       },
     }
   }
@@ -197,36 +221,27 @@ export async function runAgentPipeline(
   )
   emit?.('probability', probResult)
 
-  // ── Stage 5: Risk Manager ──────────────────────────────────────────────
-  const side = probResult.output.recommendation === 'YES' ? 'yes' : 'no'
-  const limitPrice =
-    mdResult.output.activeMarket
-      ? side === 'yes'
-        ? mdResult.output.activeMarket.yes_ask
-        : mdResult.output.activeMarket.no_ask
-      : 50
-  const riskResult = runRiskManager(
-    probResult.output.edgePct,
-    probResult.output.pModel,
-    probResult.output.recommendation,
-    limitPrice,
-    sentResult.output.score,
-    probResult.output.gkVol15m,
-    probResult.output.confidence,
+  // ── Stage 4.5: Markov Chain (IS the risk engine) ──────────────────────
+  const markovResult = runMarkovAgent(
+    pfResult.output.distanceFromStrikePct,
+    mdResult.output.strikePrice,
+    mdResult.output.activeMarket,
+    liveCandles,
+    candles,
     portfolioValue,
     mdResult.output.minutesUntilExpiry,
-    pfResult.output.distanceFromStrikePct,
-    probResult.output.volOfVol,
-    useKxbtcd,  // isHourly — adjusts entry window (10-45min) and daily trade cap (24)
+    probResult.output.gkVol15m,
+    probResult.output.confidence,
+    useKxbtcd,
   )
-  emit?.('risk', riskResult)
+  emit?.('markov', markovResult)
 
-  // ── Stage 6: Execution ─────────────────────────────────────────────────
+  // ── Stage 5: Execution ─────────────────────────────────────────────────
   const execResult = await runExecution(
-    probResult.output.recommendation,
-    riskResult.output.positionSize,
+    markovResult.output.recommendation,
+    markovResult.output.positionSize,
     mdResult.output.activeMarket,
-    riskResult.output.approved,
+    markovResult.output.approved,
     portfolioValue > 0 ? portfolioValue : undefined,
     mdResult.output.minutesUntilExpiry,
     provider,
@@ -252,12 +267,12 @@ export async function runAgentPipeline(
     cycleCompletedAt: new Date().toISOString(),
     status: 'completed',
     agents: {
-      marketDiscovery: mdResult as AgentResult<MarketDiscoveryOutput>,
-      priceFeed:       pfResult as AgentResult<PriceFeedOutput>,
-      sentiment:       sentResult as AgentResult<SentimentOutput>,
-      probability:     probResult as AgentResult<ProbabilityOutput>,
-      risk:            riskResult as AgentResult<RiskOutput>,
-      execution:       execResult as AgentResult<ExecutionOutput>,
+      marketDiscovery: mdResult     as AgentResult<MarketDiscoveryOutput>,
+      priceFeed:       pfResult     as AgentResult<PriceFeedOutput>,
+      sentiment:       sentResult   as AgentResult<SentimentOutput>,
+      probability:     probResult   as AgentResult<ProbabilityOutput>,
+      markov:          markovResult as AgentResult<MarkovOutput>,
+      execution:       execResult   as AgentResult<ExecutionOutput>,
     },
   }
 }

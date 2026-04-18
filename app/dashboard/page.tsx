@@ -8,8 +8,19 @@ import MarketCard from '@/components/MarketCard'
 import PriceChart from '@/components/PriceChart'
 import AgentPipeline from '@/components/AgentPipeline'
 import SignalPanel from '@/components/SignalPanel'
+import MarkovPanel from '@/components/MarkovPanel'
 import PositionsPanel from '@/components/PositionsPanel'
 import PipelineHistory from '@/components/PipelineHistory'
+
+type TradeAlert = {
+  action: string
+  side: 'yes' | 'no'
+  limitPrice: number
+  ticker: string
+  edge: number
+  pModel: number
+  windowKey: string
+}
 
 export default function Home() {
   const [botActive, setBotActive]           = useState(false)
@@ -73,11 +84,12 @@ export default function Home() {
   )
 
   // Keep marketTicker in sync with the pipeline's active market
-  const md   = pipeline?.agents.marketDiscovery.output
-  const pf   = pipeline?.agents.priceFeed.output
-  const prob = pipeline?.agents.probability.output ?? null
-  const sent = pipeline?.agents.sentiment.output ?? null
-  const exec = pipeline?.agents.execution.output
+  const md     = pipeline?.agents.marketDiscovery.output
+  const pf     = pipeline?.agents.priceFeed.output
+  const prob   = pipeline?.agents.probability.output ?? null
+  const sent   = pipeline?.agents.sentiment.output ?? null
+  const exec   = pipeline?.agents.execution.output
+  const markov = pipeline?.agents.markov?.output ?? null
 
   useEffect(() => {
     const t = md?.activeMarket?.ticker ?? null
@@ -85,7 +97,6 @@ export default function Home() {
   }, [md?.activeMarket?.ticker])
 
   // ── Trade alert pop-up ─────────────────────────────────────────────────────
-  type TradeAlert = { action: string; side: 'yes' | 'no'; limitPrice: number; ticker: string; edge: number; pModel: number; windowKey: string }
   const [tradeAlert, setTradeAlert]       = useState<TradeAlert | null>(null)
   const [alertStatus, setAlertStatus]     = useState<'idle' | 'placing' | 'ok' | 'err'>('idle')
   const alertShownWindowRef               = useRef<string | null>(null)   // window key alert was shown for
@@ -409,6 +420,7 @@ export default function Home() {
               onRefresh={refreshMarket}
             />
             <SignalPanel probability={prob} sentiment={sent} strikePrice={strikePrice} />
+            <MarkovPanel markov={markov} />
 
             {exec && exec.action !== 'PASS' && (
               <div className="card bracket-card animate-fade-in" style={{
