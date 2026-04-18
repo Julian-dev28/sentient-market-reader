@@ -21,8 +21,8 @@ Create `.env.local` in the project root:
 
 ```env
 # Kalshi
-KALSHI_API_KEY=<YOUR_KALSHI_API_KEY_UUID>
-KALSHI_PRIVATE_KEY_PATH=./kalshi_private.pem
+KALSHI_API_KEY=<
+KALSHI_PRIVATE_KEY_PATH=..pem
 
 # LLM (required for AI mode)
 ANTHROPIC_API_KEY=sk-ant-...
@@ -105,7 +105,7 @@ Create credentials file:
 mkdir -p ~/.sentient-trader
 cat > ~/.sentient-trader/config.env << EOF
 KALSHI_API_KEY=<YOUR_KALSHI_API_KEY_UUID>
-KALSHI_PRIVATE_KEY_PATH=<project-root>/kalshi_private.pem
+KALSHI_PRIVATE_KEY_PATH=/absolute/path/to/kalshi_private.pem
 EOF
 ```
 
