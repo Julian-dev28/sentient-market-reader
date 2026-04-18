@@ -39,7 +39,9 @@ export default function AgentAllowancePanel({
   const [localKelly, setLocalKelly] = useState(kellyMode)
   const [localAiMode, setLocalAiMode] = useState(aiMode)
   const [localBankroll, setLocalBankroll] = useState(defaultBankroll || bankroll || 400)
-  const [kellyPct, setKellyPct] = useState(20)
+  const [kellyPct, setKellyPct]           = useState(20)
+  const [editingKellyPct, setEditingKellyPct] = useState(false)
+  const [kellyPctStr, setKellyPctStr]     = useState('20')
   const [liveD, setLiveD] = useState<number | undefined>(serverD)
   const liveDRef = useRef<number | undefined>(serverD)
 
@@ -101,18 +103,19 @@ export default function AgentAllowancePanel({
             Trade Agent
           </span>
           <span style={{
-            fontSize: 9, fontWeight: 700, padding: '2px 7px', borderRadius: 3,
-            textTransform: 'uppercase', letterSpacing: '0.07em',
+            fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 4,
             background: accentPale, border: `1px solid ${accentBdr}`,
             color: active ? accentDark : 'var(--blue-dark)',
           }}>
             {active ? 'LIVE' : 'IDLE'}
           </span>
           {(active ? kellyMode : localKelly) && (
-            <span className="pill pill-amber">KELLY</span>
+            <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 4, background: 'var(--amber-pale)', border: '1px solid var(--amber)', color: 'var(--amber)' }}>
+              KELLY
+            </span>
           )}
           {(active ? aiMode : localAiMode) && (
-            <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 7px', borderRadius: 3, textTransform: 'uppercase', letterSpacing: '0.07em', background: 'rgba(100,60,180,0.1)', border: '1px solid rgba(124,77,204,0.4)', color: '#7c4dcc' }}>
+            <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 4, background: 'rgba(100,60,180,0.12)', border: '1px solid #7c4dcc', color: '#7c4dcc' }}>
               GROK AI
             </span>
           )}
@@ -125,23 +128,28 @@ export default function AgentAllowancePanel({
       {/* Kelly / Fixed + AI Mode toggles — only show when not active */}
       {!active && (
         <>
-          <div className="seg-group" style={{ marginBottom: 6 }}>
+          <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
             {(['Fixed', 'Kelly'] as const).map(mode => (
-              <button key={mode}
-                onClick={() => setLocalKelly(mode === 'Kelly')}
-                className={`seg-btn${(mode === 'Kelly') === localKelly ? ' active-brown' : ''}`}
-              >
+              <button key={mode} onClick={() => setLocalKelly(mode === 'Kelly')} style={{
+                flex: 1, padding: '5px 0', borderRadius: 7, cursor: 'pointer', fontSize: 11, fontWeight: 700,
+                border: `1px solid ${(mode === 'Kelly') === localKelly ? 'var(--brown)' : 'var(--border)'}`,
+                background: (mode === 'Kelly') === localKelly ? 'var(--brown-pale)' : 'transparent',
+                color: (mode === 'Kelly') === localKelly ? 'var(--brown-dark)' : 'var(--text-muted)',
+                transition: 'all 0.15s',
+              }}>
                 {mode}
               </button>
             ))}
           </div>
-          <div className="seg-group" style={{ marginBottom: 10 }}>
-            {([['Quant', false], ['Grok AI', true]] as const).map(([label, val]) => (
-              <button key={label}
-                onClick={() => setLocalAiMode(val)}
-                className={`seg-btn${localAiMode === val ? (val ? '' : ' active-blue') : ''}`}
-                style={localAiMode === val && val ? { background: '#7c4dcc', color: '#fff' } : {}}
-              >
+          <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+            {([['ROMA', false], ['Grok AI', true]] as const).map(([label, val]) => (
+              <button key={label} onClick={() => setLocalAiMode(val)} style={{
+                flex: 1, padding: '5px 0', borderRadius: 7, cursor: 'pointer', fontSize: 11, fontWeight: 700,
+                border: `1px solid ${localAiMode === val ? (val ? '#7c4dcc' : 'var(--blue)') : 'var(--border)'}`,
+                background: localAiMode === val ? (val ? 'rgba(100,60,180,0.12)' : 'rgba(58,114,168,0.12)') : 'transparent',
+                color: localAiMode === val ? (val ? '#7c4dcc' : 'var(--blue-dark)') : 'var(--text-muted)',
+                transition: 'all 0.15s',
+              }}>
                 {label}
               </button>
             ))}
@@ -174,24 +182,52 @@ export default function AgentAllowancePanel({
 
           {/* Kelly percentage slider */}
           <div style={{ padding: '10px 12px', borderRadius: 10, background: 'var(--bg-secondary)', border: '1px solid var(--border-bright)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
               <span style={{ fontSize: 8, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: 600 }}>
                 Per Trade
               </span>
-              <span style={{ fontSize: 8, fontFamily: 'var(--font-geist-mono)', color: 'var(--amber)', fontWeight: 700 }}>
-                {kellyPct}% = ${Math.max(1, (localBankroll * kellyPct / 100)).toFixed(2)}
+              <span style={{ display: 'flex', alignItems: 'center', gap: 3, fontFamily: 'var(--font-geist-mono)', fontSize: 8, color: 'var(--amber)', fontWeight: 700 }}>
+                {editingKellyPct ? (
+                  <input
+                    autoFocus type="number" min="1" max="100" step="1"
+                    value={kellyPctStr}
+                    onChange={e => setKellyPctStr(e.target.value)}
+                    onBlur={() => {
+                      const v = Math.max(1, Math.min(100, parseInt(kellyPctStr) || kellyPct))
+                      setKellyPct(v); setKellyPctStr(String(v)); setEditingKellyPct(false)
+                    }}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+                      if (e.key === 'Escape') { setKellyPctStr(String(kellyPct)); setEditingKellyPct(false) }
+                    }}
+                    style={{
+                      width: 36, fontFamily: 'var(--font-geist-mono)', fontSize: 11, fontWeight: 800,
+                      color: 'var(--amber)', background: 'transparent', border: 'none',
+                      borderBottom: '1px solid var(--amber)', outline: 'none', textAlign: 'right', padding: 0,
+                    }}
+                  />
+                ) : (
+                  <span
+                    onClick={() => { setKellyPctStr(String(kellyPct)); setEditingKellyPct(true) }}
+                    title="Click to type a value"
+                    style={{ cursor: 'text', borderBottom: '1px dashed rgba(176,118,16,0.4)', fontSize: 11, fontWeight: 800 }}
+                  >
+                    {kellyPct}%
+                  </span>
+                )}
+                <span style={{ fontSize: 8 }}> = ${Math.max(1, (localBankroll * kellyPct / 100)).toFixed(2)}</span>
               </span>
             </div>
             <input
-              type="range" min="5" max="50" step="5"
+              type="range" min="1" max="100" step="1"
               value={kellyPct}
-              onChange={e => setKellyPct(parseInt(e.target.value))}
+              onChange={e => { const v = parseInt(e.target.value); setKellyPct(v); setKellyPctStr(String(v)) }}
               style={{ width: '100%', accentColor: 'var(--amber)' }}
             />
             <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 2 }}>
-              <span style={{ fontSize: 7, color: 'var(--text-muted)' }}>5% safe</span>
+              <span style={{ fontSize: 7, color: 'var(--text-muted)' }}>1% safe</span>
               <span style={{ fontSize: 7, color: 'var(--text-muted)' }}>25% optimal</span>
-              <span style={{ fontSize: 7, color: 'var(--red)' }}>50% risky</span>
+              <span style={{ fontSize: 7, color: 'var(--red)' }}>100% yolo</span>
             </div>
           </div>
         </div>
@@ -368,23 +404,27 @@ export default function AgentAllowancePanel({
       {!active ? (
         <button
           onClick={() => onStart(localKelly, localBankroll, kellyPct, localAiMode)}
-          className="btn-flat btn-solid-green"
-          style={{ width: '100%', padding: '11px 0' }}
-          onMouseEnter={e => { e.currentTarget.style.opacity = '0.85' }}
+          style={{
+            width: '100%', padding: '12px 0', borderRadius: 9, cursor: 'pointer',
+            border: '1px solid var(--green)',
+            background: 'var(--green)',
+            fontSize: 13, fontWeight: 800, color: '#fff', letterSpacing: '0.03em',
+            boxShadow: '0 2px 12px rgba(80,168,120,0.25)', transition: 'all 0.15s',
+          }}
+          onMouseEnter={e => { e.currentTarget.style.opacity = '0.88' }}
           onMouseLeave={e => { e.currentTarget.style.opacity = '1' }}
         >
-          ▶ Start Agent
-          <span style={{ fontSize: 9, opacity: 0.75, fontWeight: 500, letterSpacing: '0.04em' }}>
-            {localKelly ? `· Kelly ${kellyPct}%` : '· Fixed'} {localAiMode ? '· Grok AI' : '· Quant'}
-          </span>
+          ▶ Start Agent {localKelly ? `· Kelly ${kellyPct}%` : '· Fixed'} {localAiMode ? '· Grok AI' : '· ROMA'}
         </button>
       ) : (
-        <button
-          onClick={onStop}
-          className="btn-flat btn-outline-pink"
-          style={{ width: '100%', padding: '11px 0' }}
+        <button onClick={onStop} style={{
+          width: '100%', padding: '12px 0', borderRadius: 9, cursor: 'pointer',
+          border: '1px solid var(--pink)', background: 'var(--pink-pale)',
+          fontSize: 13, fontWeight: 800, color: 'var(--pink)', letterSpacing: '0.03em',
+          transition: 'all 0.15s',
+        }}
           onMouseEnter={e => { e.currentTarget.style.background = 'var(--pink)'; e.currentTarget.style.color = '#fff' }}
-          onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--pink)' }}
+          onMouseLeave={e => { e.currentTarget.style.background = 'var(--pink-pale)'; e.currentTarget.style.color = 'var(--pink)' }}
         >
           ■ Stop Agent
         </button>

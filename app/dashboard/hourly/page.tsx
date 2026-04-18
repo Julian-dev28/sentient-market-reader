@@ -85,12 +85,23 @@ export default function HourlyDashboard() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [md?.activeMarket?.ticker])
 
-  // Merge live market with pipeline data
+  // Merge live market with pipeline data — filter expired on both sources
   const mdMarket = md?.activeMarket ?? null
   const mdMarketExpired = mdMarket?.close_time
     ? new Date(mdMarket.close_time).getTime() < Date.now()
     : false
-  const activeMarket    = liveMarket ?? (mdMarketExpired ? null : mdMarket)
+  const liveMarketExpired = liveMarket?.close_time
+    ? new Date(liveMarket.close_time).getTime() < Date.now()
+    : false
+  const activeMarket = (liveMarket && !liveMarketExpired)
+    ? liveMarket
+    : (mdMarketExpired ? null : mdMarket)
+
+  // When the live market has expired, clear marketTicker so useMarketTick
+  // auto-discovers the next active KXBTCD market instead of polling the dead one.
+  useEffect(() => {
+    if (liveMarketExpired) setMarketTicker(null)
+  }, [liveMarketExpired])
   const currentBTCPrice = liveBTCPrice ?? pf?.currentPrice ?? 0
   const priceHistory    = livePriceHistory
 
@@ -192,9 +203,9 @@ export default function HourlyDashboard() {
               <br /><br />
               Risk guards: edge gate · $150 daily loss cap · 15% drawdown limit.
             </div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => setShowBotWarning(false)} className="btn-flat btn-outline-muted" style={{ flex: 1, padding: '10px 0' }}>Cancel</button>
-              <button onClick={() => { setShowBotWarning(false); setBotActive(true) }} className="btn-flat btn-solid-pink" style={{ flex: 1, padding: '10px 0' }}>▶ Start Agent</button>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button onClick={() => setShowBotWarning(false)} style={{ flex: 1, padding: '10px 0', borderRadius: 9, cursor: 'pointer', border: '1px solid var(--border)', background: 'var(--bg-secondary)', fontSize: 13, fontWeight: 700, color: 'var(--text-secondary)' }}>Cancel</button>
+              <button onClick={() => { setShowBotWarning(false); setBotActive(true) }} style={{ flex: 1, padding: '10px 0', borderRadius: 9, cursor: 'pointer', border: '1px solid var(--pink)', background: 'var(--pink)', fontSize: 13, fontWeight: 700, color: '#fff', boxShadow: '0 2px 10px rgba(224,111,160,0.35)' }}>▶ Start Agent</button>
             </div>
           </div>
         </div>
@@ -211,9 +222,9 @@ export default function HourlyDashboard() {
               <br /><br />
               Any signal will likely be <strong>near expiry when it completes</strong>.
             </div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => setShowLateWarning(false)} className="btn-flat btn-outline-muted" style={{ flex: 1, padding: '10px 0' }}>Cancel</button>
-              <button onClick={() => { setShowLateWarning(false); runCycle() }} className="btn-flat" style={{ flex: 1, padding: '10px 0', background: 'var(--amber)', border: '1px solid var(--amber)', color: '#fff' }}>Run Anyway</button>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button onClick={() => setShowLateWarning(false)} style={{ flex: 1, padding: '10px 0', borderRadius: 9, cursor: 'pointer', border: '1px solid var(--border)', background: 'var(--bg-secondary)', fontSize: 13, fontWeight: 700, color: 'var(--text-secondary)' }}>Cancel</button>
+              <button onClick={() => { setShowLateWarning(false); runCycle() }} style={{ flex: 1, padding: '10px 0', borderRadius: 9, cursor: 'pointer', border: '1px solid var(--amber)', background: 'var(--amber)', fontSize: 13, fontWeight: 700, color: '#fff' }}>Run Anyway</button>
             </div>
           </div>
         </div>
@@ -235,7 +246,7 @@ export default function HourlyDashboard() {
               </div>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 16 }}>
-              {[['Edge', `+${tradeAlert.edge.toFixed(1)}%`], ['P(model)', `${(tradeAlert.pModel * 100).toFixed(0)}%`]].map(([k, v]) => (
+              {[['Edge', `+${(tradeAlert.edge ?? 0).toFixed(1)}%`], ['P(model)', `${((tradeAlert.pModel ?? 0) * 100).toFixed(0)}%`]].map(([k, v]) => (
                 <div key={k} style={{ padding: '8px 10px', borderRadius: 9, background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
                   <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>{k}</div>
                   <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 16, fontWeight: 800, color: 'var(--text-primary)' }}>{v}</div>
@@ -243,9 +254,9 @@ export default function HourlyDashboard() {
               ))}
             </div>
             {alertStatus === 'idle' && (
-              <div style={{ display: 'flex', gap: 7 }}>
-                <button onClick={() => { setDismissedKey(tradeAlert.windowKey); setTradeAlert(null) }} className="btn-flat btn-outline-muted" style={{ flex: 1, padding: '10px 0' }}>Dismiss</button>
-                <button onClick={executeAlertTrade} className={`btn-flat ${tradeAlert.side === 'yes' ? 'btn-solid-green' : 'btn-solid-pink'}`} style={{ flex: 2, padding: '10px 0', fontSize: 13 }}>Buy $40</button>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => { setDismissedKey(tradeAlert.windowKey); setTradeAlert(null) }} style={{ flex: 1, padding: '10px 0', borderRadius: 9, cursor: 'pointer', border: '1px solid var(--border)', background: 'var(--bg-secondary)', fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)' }}>Dismiss</button>
+                <button onClick={executeAlertTrade} style={{ flex: 2, padding: '10px 0', borderRadius: 9, cursor: 'pointer', background: tradeAlert.side === 'yes' ? 'var(--green)' : 'var(--pink)', border: 'none', fontSize: 14, fontWeight: 800, color: '#fff' }}>Buy $40</button>
               </div>
             )}
             {alertStatus === 'placing' && <div style={{ textAlign: 'center', padding: '10px 0', fontSize: 12, color: 'var(--text-muted)' }}>Placing order...</div>}
@@ -258,13 +269,13 @@ export default function HourlyDashboard() {
       <main style={{ padding: '20px 24px', maxWidth: 1560, margin: '0 auto', position: 'relative', zIndex: 1 }}>
 
         {error && error !== 'KXBTCD_NO_MARKET' && (
-          <div style={{ marginBottom: 14, padding: '10px 16px', borderRadius: 4, background: 'var(--red-pale)', border: '1px solid rgba(192,69,62,0.3)', fontSize: 12, color: 'var(--red)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ marginBottom: 14, padding: '10px 16px', borderRadius: 12, background: 'var(--red-pale)', border: '1px solid rgba(192,69,62,0.3)', fontSize: 12, color: 'var(--red)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span>Pipeline error: {error}</span>
-            <button onClick={runCycle} style={{ background: 'transparent', border: '1px solid var(--red)', borderRadius: 4, padding: '3px 10px', color: 'var(--red)', cursor: 'pointer', fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Retry</button>
+            <button onClick={runCycle} style={{ background: 'transparent', border: '1px solid var(--red)', borderRadius: 6, padding: '3px 10px', color: 'var(--red)', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>Retry</button>
           </div>
         )}
         {error === 'KXBTCD_NO_MARKET' && (
-          <div style={{ marginBottom: 14, padding: '12px 18px', borderRadius: 4, background: 'rgba(224,111,160,0.06)', border: '1px solid rgba(224,111,160,0.2)', fontSize: 12, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ marginBottom: 14, padding: '12px 18px', borderRadius: 12, background: 'rgba(224,111,160,0.06)', border: '1px solid rgba(224,111,160,0.2)', fontSize: 12, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 10 }}>
             <span style={{ fontSize: 16 }}>◷</span>
             <span><strong style={{ color: 'var(--text-primary)' }}>No KXBTCD market open right now.</strong> Kalshi hourly BTC markets run during active trading hours. Check back later or <button onClick={runCycle} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--pink)', fontWeight: 700, fontSize: 12, padding: 0 }}>retry</button>.</span>
           </div>
@@ -298,8 +309,8 @@ export default function HourlyDashboard() {
                   {[
                     ['Contracts', String(exec.contracts)],
                     ['Limit',     `${exec.limitPrice}¢`],
-                    ['Cost',      `$${exec.estimatedCost.toFixed(2)}`],
-                    ['Max profit',`$${(exec.estimatedPayout - exec.estimatedCost).toFixed(2)}`],
+                    ['Cost',      `$${(exec.estimatedCost ?? 0).toFixed(2)}`],
+                    ['Max profit',`$${((exec.estimatedPayout ?? 0) - (exec.estimatedCost ?? 0)).toFixed(2)}`],
                   ].map(([k, v]) => (
                     <div key={k} style={{ padding: '8px', background: 'var(--bg-secondary)', borderRadius: 8, border: '1px solid var(--border)' }}>
                       <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>{k}</div>
@@ -328,22 +339,25 @@ export default function HourlyDashboard() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
 
             {/* Control bar */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
 
               {/* Mode badge */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px', borderRadius: 4, background: 'rgba(190,74,64,0.08)', border: '1px solid rgba(190,74,64,0.25)', flexShrink: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 8, background: 'rgba(224,111,160,0.12)', border: '1px solid rgba(224,111,160,0.3)', flexShrink: 0 }}>
                 <span style={{ fontSize: 11, color: 'var(--pink)', fontWeight: 800 }}>◷ 1H</span>
-                <span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>KXBTCD · {aiMode ? 'Grok' : 'Quant'}</span>
+                <span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 600 }}>KXBTCD · {aiMode ? 'Grok Forecast' : 'Quant'}</span>
               </div>
 
               {/* Quant | AI toggle */}
-              <div className="seg-group" style={{ flexShrink: 0 }}>
+              <div style={{ display: 'flex', borderRadius: 8, overflow: 'hidden', border: '1px solid rgba(224,111,160,0.3)', flexShrink: 0 }}>
                 {(['quant', 'ai'] as const).map(mode => (
-                  <button key={mode}
-                    onClick={() => handleAnalysisModeChange(mode)}
-                    className={`seg-btn${analysisMode === mode ? (mode === 'ai' ? ' active-pink' : ' active-brown') : ''}`}
-                    style={{ padding: '5px 14px' }}
-                  >
+                  <button key={mode} onClick={() => handleAnalysisModeChange(mode)} style={{
+                    padding: '5px 12px', cursor: 'pointer', border: 'none', fontSize: 11, fontWeight: 700,
+                    background: analysisMode === mode
+                      ? (mode === 'ai' ? 'var(--pink)' : 'var(--brown)')
+                      : 'transparent',
+                    color: analysisMode === mode ? '#fff' : 'var(--text-muted)',
+                    transition: 'all 0.15s',
+                  }}>
                     {mode === 'quant' ? '∑ Quant' : '◷ AI'}
                   </button>
                 ))}
@@ -351,16 +365,16 @@ export default function HourlyDashboard() {
 
               {/* Grok model picker — only in AI mode */}
               {aiMode && <div ref={grokMenuRef} style={{ position: 'relative', flex: 1, minWidth: 0 }}>
-                <button onClick={() => setGrokMenuOpen(v => !v)} style={{ width: '100%', textAlign: 'left', cursor: 'pointer', padding: '6px 12px', borderRadius: 4, border: '1px solid rgba(190,74,64,0.35)', background: 'rgba(190,74,64,0.05)', color: 'var(--pink)', display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--text-muted)', flexShrink: 0 }}>Model</span>
+                <button onClick={() => setGrokMenuOpen(v => !v)} style={{ width: '100%', textAlign: 'left', cursor: 'pointer', padding: '6px 12px', borderRadius: 8, border: '1px solid var(--pink)', background: 'rgba(224,111,160,0.07)', color: 'var(--pink)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 9, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--text-muted)', flexShrink: 0 }}>Model</span>
                   <span style={{ fontSize: 12, fontWeight: 600, flex: 1 }}>{selectedModel.label}</span>
                   <span style={{ fontSize: 10, opacity: 0.4, flexShrink: 0 }}>{grokMenuOpen ? '▲' : '▼'}</span>
                 </button>
                 {grokMenuOpen && (
-                  <div className="animate-fade-in" style={{ position: 'absolute', top: '100%', left: 0, marginTop: 4, zIndex: 200, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 4, boxShadow: '0 8px 32px rgba(0,0,0,0.18)', width: '100%', minWidth: 240 }}>
-                    <div style={{ padding: '5px 12px 3px', fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>xAI · Grok</div>
+                  <div className="animate-fade-in" style={{ position: 'absolute', top: '100%', left: 0, marginTop: 4, zIndex: 200, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, boxShadow: '0 8px 32px rgba(0,0,0,0.18)', width: '100%', minWidth: 240 }}>
+                    <div style={{ padding: '5px 12px 3px', fontSize: 9, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>xAI · Grok</div>
                     {GROK_MODELS.map(m => (
-                      <div key={m.id} onClick={() => handleGrokModelChange(m.id)} style={{ padding: '7px 14px', cursor: 'pointer', background: orModel === m.id ? 'rgba(190,74,64,0.08)' : 'transparent', borderLeft: orModel === m.id ? '2px solid var(--pink)' : '2px solid transparent', transition: 'background 0.1s' }} onMouseEnter={e => { if (orModel !== m.id) (e.currentTarget as HTMLElement).style.background = 'var(--bg-secondary)' }} onMouseLeave={e => { if (orModel !== m.id) (e.currentTarget as HTMLElement).style.background = 'transparent' }}>
+                      <div key={m.id} onClick={() => handleGrokModelChange(m.id)} style={{ padding: '7px 14px', cursor: 'pointer', background: orModel === m.id ? 'rgba(224,111,160,0.1)' : 'transparent', borderLeft: orModel === m.id ? '2px solid var(--pink)' : '2px solid transparent', transition: 'background 0.1s' }} onMouseEnter={e => { if (orModel !== m.id) (e.currentTarget as HTMLElement).style.background = 'var(--bg-secondary)' }} onMouseLeave={e => { if (orModel !== m.id) (e.currentTarget as HTMLElement).style.background = 'transparent' }}>
                         <div style={{ fontSize: 12, fontWeight: orModel === m.id ? 700 : 500, color: orModel === m.id ? 'var(--pink)' : 'var(--text-primary)' }}>{m.label}</div>
                         <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 1 }}>{m.sub}</div>
                       </div>
@@ -370,7 +384,7 @@ export default function HourlyDashboard() {
               </div>}
 
               {/* Run / Stop + expiry */}
-              <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 7 }}>
+              <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
                 <button
                   onClick={isRunning ? stopCycle : (serverLocked ? undefined : () => {
                     if (secondsUntilExpiry > 0 && secondsUntilExpiry < 600) {
@@ -380,17 +394,13 @@ export default function HourlyDashboard() {
                     }
                   })}
                   disabled={serverLocked && !isRunning}
-                  className={`btn-flat${isRunning ? ' btn-outline-pink' : serverLocked ? '' : ' btn-solid-pink'}`}
-                  style={{
-                    padding: '6px 18px',
-                    ...(serverLocked && !isRunning ? { border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-muted)', cursor: 'not-allowed' } : {}),
-                  }}
+                  style={{ padding: '7px 20px', borderRadius: 9, background: 'transparent', border: isRunning ? '1.5px solid var(--pink)' : serverLocked ? '1.5px solid var(--border)' : '1.5px solid var(--pink)', color: isRunning ? 'var(--pink)' : serverLocked ? 'var(--text-muted)' : 'var(--pink)', cursor: isRunning ? 'pointer' : serverLocked ? 'not-allowed' : 'pointer', fontSize: 12, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6, transition: 'all 0.2s', letterSpacing: '0.02em' }}
                 >
                   {isRunning
-                    ? <><span>■</span> Stop <span style={{ fontSize: 9, opacity: 0.5, fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>⇧R</span></>
+                    ? <><span>■</span> Stop <span style={{ fontSize: 9, opacity: 0.5, fontWeight: 400 }}>⇧R</span></>
                     : serverLocked
-                    ? <><span style={{ animation: 'spin-slow 1s linear infinite', display: 'inline-block' }}>◌</span> Running</>
-                    : <>▶ Run Cycle <span style={{ fontSize: 9, opacity: 0.5, fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>⇧R</span></>}
+                    ? <><span style={{ animation: 'spin-slow 1s linear infinite', display: 'inline-block' }}>◌</span> Running...</>
+                    : <>▶ Run Cycle <span style={{ fontSize: 9, opacity: 0.5, fontWeight: 400 }}>⇧R</span></>}
                 </button>
 
                 {secondsUntilExpiry > 0 && (() => {
@@ -399,8 +409,8 @@ export default function HourlyDashboard() {
                   const urgent = secondsUntilExpiry < 600
                   const color  = secondsUntilExpiry < 300 ? 'var(--pink)' : secondsUntilExpiry < 600 ? 'var(--amber)' : 'var(--green-dark)'
                   return (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 10px', borderRadius: 4, background: urgent ? 'var(--pink-pale)' : 'var(--bg-secondary)', border: `1px solid ${urgent ? 'rgba(190,74,64,0.3)' : 'var(--border)'}` }}>
-                      <span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em' }}>Closes</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 10px', borderRadius: 8, background: urgent ? 'var(--pink-pale)' : 'var(--bg-secondary)', border: `1px solid ${urgent ? 'rgba(224,111,160,0.3)' : 'var(--border)'}` }}>
+                      <span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Closes</span>
                       <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 14, fontWeight: 800, color, animation: urgent ? 'urgentPulse 1s ease infinite' : 'none' }}>
                         {m}:{String(s).padStart(2, '0')}
                       </span>
@@ -410,9 +420,9 @@ export default function HourlyDashboard() {
 
                 {/* AI monitor delta badge */}
                 {botActive && !isRunning && monitorDeltaPct !== null && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 9px', borderRadius: 4, background: 'rgba(190,74,64,0.06)', border: '1px solid rgba(190,74,64,0.25)' }} title="Grok re-runs when BTC moves ≥0.20% from last run">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 9px', borderRadius: 8, background: 'rgba(224,111,160,0.07)', border: '1px solid rgba(224,111,160,0.3)' }} title="Grok re-runs when BTC moves ≥0.20% from last run">
                     <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--pink)', display: 'inline-block', animation: 'pulse-live 2s ease-in-out infinite', flexShrink: 0 }} />
-                    <span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em' }}>Δ</span>
+                    <span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Δ</span>
                     <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 12, fontWeight: 700, color: Math.abs(monitorDeltaPct) >= 0.15 ? 'var(--amber)' : 'var(--pink)' }}>
                       {monitorDeltaPct >= 0 ? '+' : ''}{monitorDeltaPct.toFixed(2)}%
                     </span>
@@ -421,11 +431,11 @@ export default function HourlyDashboard() {
 
                 {/* Bot toggle */}
                 {!botActive ? (
-                  <button onClick={() => setShowBotWarning(true)} className="btn-flat btn-outline-pink" style={{ padding: '6px 14px', whiteSpace: 'nowrap' }}>
+                  <button onClick={() => setShowBotWarning(true)} style={{ padding: '7px 16px', borderRadius: 9, cursor: 'pointer', border: '1.5px solid rgba(224,111,160,0.4)', background: 'transparent', color: 'var(--pink)', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}>
                     ◷ Start Bot
                   </button>
                 ) : (
-                  <button onClick={() => setBotActive(false)} className="btn-flat btn-solid-pink" style={{ padding: '6px 14px', whiteSpace: 'nowrap' }}>
+                  <button onClick={() => setBotActive(false)} style={{ padding: '7px 16px', borderRadius: 9, cursor: 'pointer', border: '1.5px solid var(--pink)', background: 'var(--pink)', color: '#fff', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}>
                     ■ Stop Bot
                   </button>
                 )}
@@ -434,7 +444,7 @@ export default function HourlyDashboard() {
 
             {/* Next cycle countdown (bot mode) */}
             {botActive && !isRunning && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px', borderRadius: 4, background: 'rgba(190,74,64,0.05)', border: '1px solid rgba(190,74,64,0.2)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px', borderRadius: 10, background: 'rgba(224,111,160,0.06)', border: '1px solid rgba(224,111,160,0.2)' }}>
                 <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--pink)', display: 'inline-block', animation: 'pulse-live 2s ease-in-out infinite', flexShrink: 0 }} />
                 <span style={{ fontSize: 11, color: 'var(--text-secondary)', fontWeight: 600 }}>Grok auto-monitoring</span>
                 <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 11, color: 'var(--pink)', fontWeight: 700, marginLeft: 'auto' }}>next in {nextCycleIn}s</span>

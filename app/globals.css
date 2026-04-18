@@ -83,7 +83,7 @@ html, body {
 .card {
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 14px;
   padding: 20px;
   box-shadow: 0 1px 3px rgba(0,0,0,0.05), 0 1px 2px rgba(0,0,0,0.03);
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
@@ -251,50 +251,19 @@ html, body {
 .status-dot.error   { background: var(--red); }
 .status-dot.skipped { background: var(--amber); }
 
-/* ── Chip badges (Photon-style: flat, rectangular, no pills) ─────────── */
+/* ── Pill badges ──────────────────────────────────────────────────────── */
 .pill {
   display: inline-flex; align-items: center; gap: 4px;
-  padding: 2px 7px; border-radius: 3px;
-  font-size: 9px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase;
+  padding: 3px 10px; border-radius: 100px;
+  font-size: 10px; font-weight: 600; letter-spacing: 0.03em;
 }
-.pill-brown { background: var(--brown-pale);  border: 1px solid rgba(78,122,138,0.3);   color: var(--brown-dark); }
-.pill-pink  { background: var(--pink-pale);   border: 1px solid rgba(190,74,64,0.3);    color: var(--pink-dark); }
-.pill-blue  { background: var(--blue-pale);   border: 1px solid rgba(60,110,160,0.3);   color: var(--blue-dark); }
-.pill-green { background: var(--green-pale);  border: 1px solid rgba(46,158,104,0.3);   color: var(--green-dark); }
-.pill-red   { background: var(--red-pale);    border: 1px solid rgba(190,74,64,0.3);    color: var(--red); }
-.pill-amber { background: var(--amber-pale);  border: 1px solid rgba(176,118,16,0.35);  color: var(--amber); }
-.pill-cream { background: var(--bg-secondary); border: 1px solid var(--border);         color: var(--text-secondary); }
-
-/* ── Segmented controls (Photon-style) ───────────────────────────────── */
-.seg-group {
-  display: flex; border: 1px solid var(--border); border-radius: 4px; overflow: hidden;
-}
-.seg-btn {
-  flex: 1; padding: 5px 14px; border: none; cursor: pointer;
-  font-size: 10px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase;
-  background: transparent; color: var(--text-muted); transition: all 0.12s;
-}
-.seg-btn + .seg-btn { border-left: 1px solid var(--border); }
-.seg-btn.active-brown { background: var(--brown); color: #fff; }
-.seg-btn.active-blue  { background: var(--blue);  color: #fff; }
-.seg-btn.active-green { background: var(--green); color: #fff; }
-.seg-btn.active-pink  { background: var(--pink);  color: #fff; }
-
-/* ── Flat action buttons ─────────────────────────────────────────────── */
-.btn-flat {
-  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-  padding: 9px 16px; border-radius: 4px; cursor: pointer;
-  font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
-  transition: opacity 0.12s, background 0.12s;
-}
-.btn-flat:disabled { opacity: 0.45; cursor: not-allowed; }
-.btn-solid-green { background: var(--green); border: 1px solid var(--green);   color: #fff; }
-.btn-solid-pink  { background: var(--pink);  border: 1px solid var(--pink);    color: #fff; }
-.btn-solid-blue  { background: var(--blue);  border: 1px solid var(--blue);    color: #fff; }
-.btn-solid-brown { background: var(--brown); border: 1px solid var(--brown);   color: #fff; }
-.btn-outline-pink  { background: transparent; border: 1px solid var(--pink);   color: var(--pink); }
-.btn-outline-green { background: transparent; border: 1px solid var(--green);  color: var(--green-dark); }
-.btn-outline-muted { background: transparent; border: 1px solid var(--border); color: var(--text-muted); }
+.pill-brown { background: var(--brown-pale);  border: 1px solid rgba(91,122,153,0.25);   color: var(--brown-dark); }
+.pill-pink  { background: var(--pink-pale);   border: 1px solid rgba(217,48,48,0.25);    color: var(--pink-dark); }
+.pill-blue  { background: var(--blue-pale);   border: 1px solid rgba(0,102,204,0.25);    color: var(--blue-dark); }
+.pill-green { background: var(--green-pale);  border: 1px solid rgba(0,200,5,0.25);      color: var(--green-dark); }
+.pill-red   { background: var(--red-pale);    border: 1px solid rgba(217,48,48,0.25);    color: var(--red); }
+.pill-amber { background: var(--amber-pale);  border: 1px solid rgba(224,120,0,0.25);    color: var(--amber); }
+.pill-cream { background: var(--bg-secondary); border: 1px solid var(--border);          color: var(--text-secondary); }
 
 /* ── Accent text colors ───────────────────────────────────────────────── */
 .grad-brown-pink  { color: var(--pink); }

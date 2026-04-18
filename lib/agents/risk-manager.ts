@@ -39,7 +39,6 @@ const RISK_PARAMS = {
   minDistancePct:   0.02,  // skip near-strike noise (|dist| < 0.02% → ~50/50)
   minEntryPrice:     0,    // no floor — 62¢ and 71¢ zones both profitable
   maxEntryPrice:    72,    // ¢ — market efficiency cap: 71¢ zone (d>2.0) = 91.5% WR; 73¢+ zone = 66% WR (losing)
-  maxContractSize:  500,   // ceiling position size (contracts)
   maxTradePct:      15,    // % of portfolio per trade
 }
 // Computed giveback limit: how far (in $) today's P&L can fall from its peak before we stop.
@@ -170,7 +169,7 @@ export function runRiskManager(
   const riskPct    = Math.min(0.05, 0.01 + 0.08 * Math.max(0, markovGap - 0.15))
   const riskDollars  = portfolioValue * riskPct
   const budgetContracts = totalCostPerC > 0 ? Math.round(riskDollars / totalCostPerC) : 0
-  const positionSize    = Math.min(Math.max(1, budgetContracts), RISK_PARAMS.maxContractSize)
+  const positionSize    = Math.max(1, budgetContracts)
 
   // These are kept for the reasoning string only
   const pWin = (recommendation === 'NO' ? (1 - pModel) : pModel)

@@ -214,9 +214,9 @@ export async function runGrokTradingAgent(
     `  - If predictedPrice < $${strikePrice.toLocaleString()} → BUY NO`,
     `  - PASS only if you genuinely cannot forecast direction (e.g. BTC ±0.01% of strike with 2 min left)`,
     ``,
-    `STEP 3 — SIZE using quarter-Kelly:`,
+    `STEP 3 — SIZE using 18%-Kelly:`,
     `  pModel = P(BTC closes above strike) derived from your predicted price and volatility`,
-    `  f = max(0, (b×pWin − (1−pWin)) / b), budget = f × 0.25 × $${portfolioValue.toFixed(0)}, contracts = floor(budget / costPerC)`,
+    `  f = max(0, (b×pWin − (1−pWin)) / b), budget = f × 0.18 × $${portfolioValue.toFixed(0)}, contracts = floor(budget / costPerC)`,
     `  High conviction hourly call → size assertively.`,
     ``,
     `=== MULTI-TIMEFRAME TREND (PRIMARY SIGNALS) ===`,
@@ -307,7 +307,7 @@ export async function runGrokTradingAgent(
     `  EV(NO)  = (1-pModel) × (100 - ${noAsk} - fee) - pModel × (${noAsk} + fee)`,
     `  where fee ≈ 1.75% × P × (1-P) cents per contract`,
     `Bet whichever side has the higher POSITIVE EV. If both are ≤0, PASS.`,
-    `Size using quarter-Kelly: f = max(0, (b×pWin − (1−pWin)) / b), budget = f × 0.25 × ${portfolioValue.toFixed(0)}, contracts = floor(budget / costPerContract).`,
+    `Size using 18%-Kelly: f = max(0, (b×pWin − (1−pWin)) / b), budget = f × 0.18 × ${portfolioValue.toFixed(0)}, contracts = floor(budget / costPerContract).`,
     `At extreme prices (<20¢ or >80¢), Kelly produces small positions — that is CORRECT sizing, not a reason to PASS.`,
     ``,
     `=== HARD RULES (non-negotiable) ===`,
@@ -360,8 +360,8 @@ export async function runGrokTradingAgent(
           },
           key_signals: { type: 'array', items: { type: 'string' }, description: 'Top 3-5 signals driving this decision, most important first.' },
           reasoning: isHourly
-            ? { type: 'string', description: 'Hourly trade rationale as 6-8 bullet points, each starting with "• ". Cover: (1) predicted BTC price at hour close & why, (2) 4h macro trend, (3) 1h intraday trend, (4) key supporting signals (derivatives, momentum), (5) YES/NO decision from predicted price vs strike, (6) quarter-Kelly sizing math, (7) confidence & main uncertainty. Max 25 words per bullet.' }
-            : { type: 'string', description: 'Trade rationale as 8-10 bullet points, one per line, each starting with "• ". Cover: (1) pModel source & value, (2) d-score interpretation, (3) EV(YES) calc & result, (4) EV(NO) calc & result, (5) chosen action & why that side, (6) quarter-Kelly sizing math, (7) top 3 market signals, (8) confidence level & key uncertainty. Each bullet max 25 words. No prose paragraphs.' },
+            ? { type: 'string', description: 'Hourly trade rationale as 6-8 bullet points, each starting with "• ". Cover: (1) predicted BTC price at hour close & why, (2) 4h macro trend, (3) 1h intraday trend, (4) key supporting signals (derivatives, momentum), (5) YES/NO decision from predicted price vs strike, (6) 18%-Kelly sizing math, (7) confidence & main uncertainty. Max 25 words per bullet.' }
+            : { type: 'string', description: 'Trade rationale as 8-10 bullet points, one per line, each starting with "• ". Cover: (1) pModel source & value, (2) d-score interpretation, (3) EV(YES) calc & result, (4) EV(NO) calc & result, (5) chosen action & why that side, (6) 18%-Kelly sizing math, (7) top 3 market signals, (8) confidence level & key uncertainty. Each bullet max 25 words. No prose paragraphs.' },
         },
         required: ['sentiment_score', 'pModel', 'confidence', 'action', 'contracts', 'limitPrice', 'key_signals', 'reasoning'],
       },
@@ -378,7 +378,7 @@ export async function runGrokTradingAgent(
   let   action    = decision.action ?? 'PASS'
   let   limitPrice = Math.max(3, Math.min(97, Math.round(decision.limitPrice ?? (action === 'BUY_NO' ? noAsk : yesAsk))))
 
-  // ── Server-side quarter-Kelly contract cap ─────────────────────────────────
+  // ── Server-side 18%-Kelly contract cap ─────────────────────────────────
   // Grok massively over-sizes at extreme prices. Cap server-side regardless.
   const MAKER_FEE_RATE = 0.0175
   function kellyContracts(priceCents: number, pWin: number): number {
@@ -388,7 +388,7 @@ export async function runGrokTradingAgent(
     const cost = p + fee
     const b    = cost > 0 ? net / cost : 0
     const f    = b > 0 ? Math.max(0, (b * pWin - (1 - pWin)) / b) : 0
-    const budget = f * 0.25 * portfolioValue
+    const budget = f * 0.18 * portfolioValue
     return cost > 0 ? Math.floor(budget / cost) : 0
   }
   const pWinYes = pModel
@@ -400,12 +400,12 @@ export async function runGrokTradingAgent(
   const evYes = pWinYes * ((1 - yesAsk/100) - MAKER_FEE_RATE * (yesAsk/100) * (1 - yesAsk/100)) - (1 - pWinYes) * (yesAsk/100)
   const evNo  = pWinNo  * ((1 - noAsk/100)  - MAKER_FEE_RATE * (noAsk/100)  * (1 - noAsk/100))  - (1 - pWinNo)  * (noAsk/100)
 
-  // Cap Grok's contracts at quarter-Kelly (max affordable is a hard floor)
+  // Cap Grok's contracts at 18%-Kelly (max affordable is a hard floor)
   const maxAffordable = action === 'BUY_NO' ? maxContractsNo : maxContractsYes
   const kCap = action === 'BUY_NO' ? kellyNo : kellyYes
-  let contracts = Math.min(Math.max(0, Math.round(decision.contracts ?? 0)), maxAffordable, Math.max(kCap, 0), 500)
+  let contracts = Math.min(Math.max(0, Math.round(decision.contracts ?? 0)), maxAffordable, Math.max(kCap, 0))
   if (action !== 'PASS' && (decision.contracts ?? 0) > contracts) {
-    console.log(`[GrokTradingAgent] Kelly cap: Grok wanted ${decision.contracts} → ${contracts} contracts (quarter-Kelly budget)`)
+    console.log(`[GrokTradingAgent] Kelly cap: Grok wanted ${decision.contracts} → ${contracts} contracts (18%-Kelly budget)`)
   }
 
   // ── Hard safety gates ─────────────────────────────────────────────────────
@@ -441,7 +441,7 @@ export async function runGrokTradingAgent(
   }
   // 3. Kelly says no edge → block
   if (action !== 'PASS' && contracts <= 0) {
-    console.warn(`[GrokTradingAgent] Kelly gate: quarter-Kelly = 0 contracts at ${limitPrice}¢ — negative EV, blocking`)
+    console.warn(`[GrokTradingAgent] Kelly gate: 18%-Kelly = 0 contracts at ${limitPrice}¢ — negative EV, blocking`)
     action = 'PASS'
   }
 

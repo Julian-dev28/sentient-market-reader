@@ -9,7 +9,7 @@ Signals:
   4. Velocity gate        — price not rushing toward strike >40% of crossing speed
   5. Vol ≤ 1.25×ref       — skip chaotic high-vol windows
   6. Entry 6–9 min left   — 6-9min = 98.3% WR on live fills
-Sizing: confidence-tiered flat risk (no Kelly) — 1% at gap=0.15, scales to 5% at gap≥0.65
+Sizing: 20% fractional Kelly — scales with model confidence
 Daily loss cap 3%. No price gates — ANY profit after fees is acceptable.
 """
 
@@ -54,15 +54,14 @@ MIN_HURST            = 0.50
 VEL_SAFETY_RATIO     = 0.40
 
 # Markov: 65%+ conviction + state must be locked in (not noise)
-MARKOV_MIN_GAP       = 0.15
+MARKOV_MIN_GAP       = 0.11
 MIN_PERSIST          = 0.82
 
 # Vol regime
 MAX_VOL_MULT         = 1.25
 
 # Confidence-tiered flat risk (replaces Kelly)
-# risk_pct = min(5%, 1% + 8% × max(0, gap − 0.15))
-# gap=0.15 → 1%,  gap=0.40 → 3%,  gap=0.65+ → 5%
+# risk_pct = min(20%, KELLY_FRACTION × kelly_full)
 
 # Risk / sizing — MAX_ENTRY_PRICE_RM targets the market efficiency zone:
 # 65-73¢ windows are where Markov gets 93.8% WR but market only prices ~71¢.
@@ -74,11 +73,12 @@ MAX_ENTRY_PRICE_RM   = 72    # cap: only bet where market underprices our signal
 MIN_DIST_PCT         = 0.02
 MAX_CONTRACTS_RM     = 500
 REF_VOL_15M          = 0.002
-MAX_TRADE_PCT        = 0.15
+MAX_TRADE_PCT        = 0.20
+KELLY_FRACTION       = 0.18
 MAX_TRADES_PER_DAY   = 48
-MAX_DAILY_LOSS_PCT   = 3
-MAX_DAILY_LOSS_FLOOR = 50
-MAX_DAILY_LOSS_CAP   = 150
+MAX_DAILY_LOSS_PCT   = 25
+MAX_DAILY_LOSS_FLOOR = 0
+MAX_DAILY_LOSS_CAP   = 500
 MAX_GIVEBACK_MULT    = 1.5
 POLLER_INTERVAL_MIN  = 0.5
 BLOCKED_UTC_HOURS    = {11, 18}
@@ -213,8 +213,8 @@ def predict_from_momentum(P: list, current_state: int,
         'p_yes': p_yes, 'p_no': 1.0 - p_yes,
         'expected_drift_pct': exp_drift, 'required_drift_pct': required_drift,
         'sigma': sigma, 'z_score': z_score, 'persist': persist, 'j_star': j_star,
-        'enter_yes': p_yes >= 0.65 and persist >= 0.80,
-        'enter_no':  p_yes <= 0.35 and persist >= 0.80,
+        'enter_yes': p_yes >= 0.61 and persist >= 0.80,
+        'enter_no':  p_yes <= 0.39 and persist >= 0.80,
     }
 
 
@@ -549,12 +549,16 @@ def simulate(records: list) -> float:
         fee_per_c_raw    = MAKER_FEE_RATE * p_dollars * (1 - p_dollars)
         total_cost_per_c = p_dollars + fee_per_c_raw
 
-        # Confidence-tiered flat risk: 1% at gap=0.15, scales linearly to 5% at gap≥0.65
-        gap              = abs(r['p_yes'] - 0.5)
-        risk_pct         = min(0.05, 0.01 + 0.08 * max(0.0, gap - 0.15))
+        # 20% fractional Kelly sizing
+        p_win            = r['p_yes'] if r['side'] == 'yes' else (1.0 - r['p_yes'])
+        net_win_per_c    = (1.0 - p_dollars) - fee_per_c_raw
+        b_odds           = net_win_per_c / total_cost_per_c if total_cost_per_c > 0 else 1.0
+        kelly_full       = max(0.0, (b_odds * p_win - (1.0 - p_win)) / b_odds)
+        risk_pct         = min(MAX_TRADE_PCT, KELLY_FRACTION * kelly_full)
         risk_dollars     = cash * risk_pct
         budget_contracts = round(risk_dollars / total_cost_per_c) if total_cost_per_c > 0 else 1
-        contracts        = min(max(1, budget_contracts), MAX_CONTRACTS_RM, MAX_ORDER_DEPTH)
+        dynamic_cap      = max(MAX_ORDER_DEPTH, round(cash / STARTING_CASH * MAX_ORDER_DEPTH))
+        contracts        = min(max(1, budget_contracts), MAX_CONTRACTS_RM, dynamic_cap)
 
         avg_cents = (SLIPPAGE_FREE_CTRS * lp + (contracts - SLIPPAGE_FREE_CTRS) *
                      (lp + (contracts - SLIPPAGE_FREE_CTRS) * SLIPPAGE_CENTS_PER / 2)
@@ -643,7 +647,7 @@ def main():
     price_gate_str = f"entry≤{MAX_ENTRY_PRICE_RM}¢ (market efficiency)" if MAX_ENTRY_PRICE_RM > 0 else "no price gate"
     print(f"  Filters: Markov gap≥{MARKOV_MIN_GAP} · 6-9min · Hurst>{MIN_HURST} · vel<{VEL_SAFETY_RATIO:.0%}×cross · vol≤{MAX_VOL_MULT}×ref · {price_gate_str}")
     print("=" * W)
-    print(f"  {'Sizing: tiered flat risk (gap→risk%)':<40} {'1%@0.15 → 5%@0.65':>8}")
+    print(f"  {f'Sizing: {int(KELLY_FRACTION*100)}% fractional Kelly':<40} {f'min({int(MAX_TRADE_PCT*100)}%, {KELLY_FRACTION}×f*)':>8}")
     print(f"  {'Windows total':<40} {len(markets):>8}")
     print(f"  {'Qualified (all gates pass)':<40} {len(records):>8}  ({len(records)/max(len(markets),1)*100:.1f}%)")
     print(f"  {'Executed by agent':<40} {len(executed):>8}")
