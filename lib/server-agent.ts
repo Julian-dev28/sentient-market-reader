@@ -648,9 +648,9 @@ class ServerAgent extends EventEmitter {
     this.windowCloseAt = closeMs
 
     if (delayMs === 0) {
+      this.nextRunAt   = 0   // no countdown — scanning starts immediately
+      this.nextCycleIn = 0
       this.startDPoller(closeMs)
-      this.nextRunAt   = closeMs
-      this.nextCycleIn = Math.round(minutesLeft * 60)
     } else {
       this.agentPhase  = 'waiting'
       this.nextRunAt   = Date.now() + delayMs
