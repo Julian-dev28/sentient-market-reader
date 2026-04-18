@@ -53,11 +53,12 @@ export function getSessionState() {
   return { ...sessionState }
 }
 
-const MAKER_FEE_RATE = 0.0175
-const MAX_CONTRACTS  = 500
-const MAX_TRADE_PCT  = 0.15
-const REFERENCE_VOL  = 0.002
-const MIN_GAP        = 0.15   // |pYes − 0.5| must be ≥ this — matches backtest gate
+const MAKER_FEE_RATE   = 0.0175
+const MAX_TRADE_PCT    = 0.15
+const REFERENCE_VOL    = 0.002
+const BASE_BANKROLL    = 200    // starting bankroll the 25-contract cap was calibrated at
+const BASE_ORDER_CAP   = 25     // contracts at BASE_BANKROLL
+const MIN_GAP        = 0.11   // |pYes − 0.5| must be ≥ this — matches backtest gate
 const PERSIST_TAU    = 0.80   // momentum self-persistence threshold (mirrors chain.ts)
 
 export function runMarkovAgent(
@@ -115,8 +116,10 @@ export function runMarkovAgent(
   const enterNo  = hasHistory && forecast.enterNo
 
   // ── Gate: momentum must be locked-in (persist) and directionally decisive (gap) ──
+  // Under 1 minute left, time decay dominates — skip the persist gate entirely.
+  const effectivePersistTau = T <= 1 ? 0 : PERSIST_TAU
   const gap     = Math.abs(pYes - 0.5)
-  const gateOk  = hasHistory && forecast.persist >= PERSIST_TAU && gap >= MIN_GAP
+  const gateOk  = hasHistory && forecast.persist >= effectivePersistTau && gap >= MIN_GAP
 
   const recommendation: 'YES' | 'NO' | 'NO_TRADE' =
     !gateOk     ? 'NO_TRADE' :
@@ -128,10 +131,10 @@ export function runMarkovAgent(
     ? `Building momentum history (${historyLength}/${MIN_HISTORY} observations)`
     : !gateOk
     ? forecast.persist < PERSIST_TAU && gap < MIN_GAP
-      ? `Not confident enough (${(50 + gap * 100).toFixed(1)}% sure, need 65%+) and BTC momentum is too choppy (need 80%+ consistency)`
+      ? `Not confident enough (${(50 + gap * 100).toFixed(1)}% sure, need 61%+) and BTC momentum is too choppy (need 80%+ consistency)`
       : forecast.persist < PERSIST_TAU
       ? `BTC momentum is too choppy to call — only ${(forecast.persist * 100).toFixed(0)}% consistent (need 80%+)`
-      : `Not confident enough — model is ${(50 + gap * 100).toFixed(1)}% sure, need 65%+ to trade`
+      : `Not confident enough — model is ${(50 + gap * 100).toFixed(1)}% sure, need 61%+ to trade`
     : undefined
 
   // ── Suggested sizing (never a hard gate) ─────────────────────────────────
@@ -149,8 +152,9 @@ export function runMarkovAgent(
   const volScalar  = gkVol15m && gkVol15m > 0 ? Math.max(0.30, Math.min(1.50, REFERENCE_VOL / gkVol15m)) : 1.0
   const confScalar = confidence === 'high' ? 1.00 : confidence === 'low' ? 0.50 : 0.80
 
-  const budget      = Math.min(kelly * 0.25 * portfolioValue * volScalar * confScalar, portfolioValue * MAX_TRADE_PCT)
-  const positionSize = approved ? Math.max(1, Math.min(Math.round(budget / totalCostPerC), MAX_CONTRACTS)) : 0
+  const dynamicCap   = Math.max(BASE_ORDER_CAP, Math.round(portfolioValue / BASE_BANKROLL * BASE_ORDER_CAP))
+  const budget      = Math.min(kelly * 0.18 * portfolioValue * volScalar * confScalar, portfolioValue * MAX_TRADE_PCT)
+  const positionSize = approved ? Math.max(1, Math.min(Math.round(budget / totalCostPerC), dynamicCap)) : 0
   const maxLoss      = approved ? totalCostPerC * positionSize : 0
 
   // ── Reasoning ────────────────────────────────────────────────────────────

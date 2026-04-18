@@ -6,7 +6,7 @@
 import type { PipelineState, AgentTrade, AgentStats } from './types'
 
 export const CONFIDENCE_THRESHOLD = 1.0  // edge zone begins at d=1.0 (empirical: +5.5pp margin, Z=2.33, p<0.01)
-export const KELLY_FRACTION = 0.25
+export const KELLY_FRACTION = 0.18
 
 /** What the server-side agent is currently doing */
 export type AgentPhase =

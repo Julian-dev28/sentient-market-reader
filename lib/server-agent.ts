@@ -27,7 +27,7 @@ import { KELLY_FRACTION } from './agent-shared'
 import { recordTradeResult } from './agents/markov'
 import type { AgentStateSnapshot, AgentPhase } from './agent-shared'
 import { agentStore } from './agent-store'
-import { KALSHI_HOST, getCurrentEventTicker } from './kalshi'
+import { KALSHI_HOST, getCurrentEventTicker, parseKXBTC15MCloseMs } from './kalshi'
 
 // ── Constants ────────────────────────────────────────────────────────────────
 const TARGET_MINUTES_BEFORE_CLOSE = 14  // start monitoring 14 min before close (1 min into each 15-min window)
@@ -122,7 +122,7 @@ class ServerAgent extends EventEmitter {
   private orderFailed    = false
   private pipelineError  = false
   private kellyMode      = false
-  private kellyPct       = 0.25   // fraction e.g. 0.25 = 25%
+  private kellyPct       = 0.18   // fraction e.g. 0.18 = 18%
   private aiMode         = false   // true = unified Grok agent; false = ROMA multi-step
   private bankroll       = 0
   private orModel:     string | undefined
@@ -448,8 +448,8 @@ class ServerAgent extends EventEmitter {
         console.log(`[ServerAgent] Fast-path: edge ${edgePct.toFixed(2)}% < 6% — skip`)
         return
       }
-      const halfKellyCapital = kellyFrac * 0.25 * this.bankroll  // quarter-Kelly, matches main pipeline
-      const contracts        = Math.max(1, Math.min(Math.round(halfKellyCapital / totalCostPerC), 500))
+      const halfKellyCapital = kellyFrac * 0.18 * this.bankroll  // 18% Kelly, matches main pipeline
+      const contracts        = Math.max(1, Math.round(halfKellyCapital / totalCostPerC))
       const cost             = contracts * totalCostPerC
       if (cost < 1) return
       const expectedProfit = netWinPerC * contracts
@@ -680,9 +680,15 @@ class ServerAgent extends EventEmitter {
     try {
       // ── Fetch markets ──────────────────────────────────────────────────────
       let markets: KalshiMarket[] = []
-      const isTradeable = (m: KalshiMarket) =>
-        m.status === 'active' && m.yes_ask > 0 && m.yes_ask < 100 &&
-        (m.close_time ? new Date(m.close_time).getTime() > Date.now() : true)
+      const isTradeable = (m: KalshiMarket) => {
+        if (m.status !== 'active' || m.yes_ask <= 0 || m.yes_ask >= 100) return false
+        // If close_time is missing, parse the window-end from the ticker so expired
+        // markets (which Kalshi may not have settled yet) don't slip through the filter.
+        const closeMs = m.close_time
+          ? new Date(m.close_time).getTime()
+          : parseKXBTC15MCloseMs(m.event_ticker || m.ticker)
+        return closeMs > 0 && closeMs > Date.now()
+      }
 
       const eventTicker = getCurrentEventTicker()
       const eventPath   = `/trade-api/v2/markets?event_ticker=${eventTicker}&limit=5`
@@ -923,7 +929,7 @@ class ServerAgent extends EventEmitter {
       // Ignoring risk.positionSize here: Markov sizes against Kalshi balance which can
       // diverge from the Kelly bankroll, producing an understated contract count.
       const costPerContract = liveLimitPrice / 100
-      const contracts       = Math.max(1, Math.min(Math.floor(this.allowance / costPerContract), 500))
+      const contracts       = Math.max(1, Math.floor(this.allowance / costPerContract))
       const cost            = contracts * costPerContract
 
       let liveOrderId: string | undefined
