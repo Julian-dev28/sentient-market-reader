@@ -644,7 +644,7 @@ class ServerAgent extends EventEmitter {
     this.currentD        = 0
     this.lastCycleAt     = 0   // allow pipeline to fire immediately in the new window
 
-    const { delayMs, closeMs, minutesLeft } = getDelayMs()
+    const { delayMs, closeMs } = getDelayMs()
     this.windowCloseAt = closeMs
 
     if (delayMs === 0) {
