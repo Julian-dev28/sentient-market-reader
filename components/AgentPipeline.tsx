@@ -129,41 +129,41 @@ type AgentCardConfig = {
 
 // ── Agent cards (post-run results) ──────────────────────────────────────────
 const AGENTS_QUANT: AgentCardConfig[] = [
-  { key: 'marketDiscovery' as const, label: 'Market Discovery', short: 'MARKET',    icon: '◎', desc: 'KXBTC15M scan',     color: 'var(--brown)',  rgb: '74,124,142',  bg: 'var(--brown-pale)', border: 'rgba(74,124,142,0.22)' },
-  { key: 'priceFeed'       as const, label: 'Price Feed',       short: 'PRICE',     icon: '◈', desc: 'Coinbase BTC feed', color: 'var(--green)',  rgb: '45,158,107',  bg: 'var(--green-pale)', border: 'rgba(45,158,107,0.22)'    },
-  { key: 'sentiment'       as const, label: 'Sentiment',        short: 'SENTIMENT', icon: '◉', desc: 'quant signals',     color: 'var(--blue)',   rgb: '58,114,168',  bg: 'var(--blue-pale)',  border: 'rgba(58,114,168,0.22)'  },
-  { key: 'probability'     as const, label: 'Probability',      short: 'PROB',      icon: '⬟', desc: 'Brownian + d-gate', color: 'var(--amber)',  rgb: '184,121,10',  bg: 'var(--amber-pale)', border: 'rgba(184,121,10,0.22)'  },
-  { key: 'markov'          as const, label: 'Markov Engine',    short: 'MARKOV',    icon: '⬙', desc: 'Kelly + entry filter', color: 'var(--pink)',   rgb: '212,85,130',  bg: 'var(--pink-pale)',  border: 'rgba(212,85,130,0.22)'  },
-  { key: 'execution'       as const, label: 'Execution',        short: 'EXEC',      icon: '▶', desc: 'paper order',          color: 'var(--green)',  rgb: '45,158,107',  bg: 'var(--green-pale)', border: 'rgba(45,158,107,0.22)'    },
+  { key: 'marketDiscovery' as const, label: 'Market Discovery', short: 'MARKET',    icon: '◎', desc: 'KXBTC15M scan',        color: 'var(--brown)',  rgb: '74,124,142',  bg: 'var(--brown-pale)', border: 'rgba(74,124,142,0.22)' },
+  { key: 'priceFeed'       as const, label: 'Price Feed',       short: 'PRICE',     icon: '◈', desc: 'Coinbase BTC feed',    color: 'var(--green)',  rgb: '45,158,107',  bg: 'var(--green-pale)', border: 'rgba(45,158,107,0.22)' },
+  { key: 'markov'          as const, label: 'Markov Gate',      short: 'GATE',      icon: '⬙', desc: 'momentum regime gate', color: 'var(--pink)',   rgb: '212,85,130',  bg: 'var(--pink-pale)',  border: 'rgba(212,85,130,0.22)' },
+  { key: 'sentiment'       as const, label: 'Sentiment',        short: 'SENTIMENT', icon: '◉', desc: 'quant signals',        color: 'var(--blue)',   rgb: '58,114,168',  bg: 'var(--blue-pale)',  border: 'rgba(58,114,168,0.22)' },
+  { key: 'probability'     as const, label: 'Probability',      short: 'PROB',      icon: '⬟', desc: 'Brownian + d-gate',   color: 'var(--amber)',  rgb: '184,121,10',  bg: 'var(--amber-pale)', border: 'rgba(184,121,10,0.22)' },
+  { key: 'execution'       as const, label: 'Execution',        short: 'EXEC',      icon: '▶', desc: 'paper order',          color: 'var(--green)',  rgb: '45,158,107',  bg: 'var(--green-pale)', border: 'rgba(45,158,107,0.22)' },
 ]
 
 const AGENTS_AI: AgentCardConfig[] = [
   { key: 'marketDiscovery' as const, label: 'Market Discovery', short: 'MARKET',    icon: '◎', desc: 'KXBTC15M scan',        color: 'var(--brown)',  rgb: '74,124,142',  bg: 'var(--brown-pale)', border: 'rgba(74,124,142,0.22)' },
-  { key: 'priceFeed'       as const, label: 'Price Feed',       short: 'PRICE',     icon: '◈', desc: 'Coinbase BTC feed',    color: 'var(--green)',  rgb: '45,158,107',  bg: 'var(--green-pale)', border: 'rgba(45,158,107,0.22)'    },
-  { key: 'sentiment'       as const, label: 'Sentiment',        short: 'SENTIMENT', icon: '◉', desc: 'Grok AI',              color: 'var(--blue)',   rgb: '58,114,168',  bg: 'var(--blue-pale)',  border: 'rgba(58,114,168,0.22)'  },
-  { key: 'probability'     as const, label: 'Probability',      short: 'PROB',      icon: '⬟', desc: 'Grok AI',              color: 'var(--amber)',  rgb: '184,121,10',  bg: 'var(--amber-pale)', border: 'rgba(184,121,10,0.22)'  },
-  { key: 'markov'          as const, label: 'Markov Engine',    short: 'MARKOV',    icon: '⬙', desc: 'Kelly + entry filter', color: 'var(--pink)',   rgb: '212,85,130',  bg: 'var(--pink-pale)',  border: 'rgba(212,85,130,0.22)'  },
-  { key: 'execution'       as const, label: 'Execution',        short: 'EXEC',      icon: '▶', desc: 'Grok order',           color: 'var(--green)',  rgb: '45,158,107',  bg: 'var(--green-pale)', border: 'rgba(45,158,107,0.22)'    },
+  { key: 'priceFeed'       as const, label: 'Price Feed',       short: 'PRICE',     icon: '◈', desc: 'Coinbase BTC feed',    color: 'var(--green)',  rgb: '45,158,107',  bg: 'var(--green-pale)', border: 'rgba(45,158,107,0.22)' },
+  { key: 'markov'          as const, label: 'Markov Gate',      short: 'GATE',      icon: '⬙', desc: 'momentum regime gate', color: 'var(--pink)',   rgb: '212,85,130',  bg: 'var(--pink-pale)',  border: 'rgba(212,85,130,0.22)' },
+  { key: 'sentiment'       as const, label: 'Sentiment',        short: 'SENTIMENT', icon: '◉', desc: 'Grok AI',              color: 'var(--blue)',   rgb: '58,114,168',  bg: 'var(--blue-pale)',  border: 'rgba(58,114,168,0.22)' },
+  { key: 'probability'     as const, label: 'Probability',      short: 'PROB',      icon: '⬟', desc: 'Grok AI',              color: 'var(--amber)',  rgb: '184,121,10',  bg: 'var(--amber-pale)', border: 'rgba(184,121,10,0.22)' },
+  { key: 'execution'       as const, label: 'Execution',        short: 'EXEC',      icon: '▶', desc: 'Grok order',           color: 'var(--green)',  rgb: '45,158,107',  bg: 'var(--green-pale)', border: 'rgba(45,158,107,0.22)' },
 ]
 
 // Hourly KXBTCD + quant pipeline
 const AGENTS_QUANT_HOURLY: AgentCardConfig[] = [
   { key: 'marketDiscovery' as const, label: 'Market Discovery', short: 'MARKET',   icon: '◎', desc: 'KXBTCD hourly scan',   color: 'var(--brown)',  rgb: '74,124,142',  bg: 'var(--brown-pale)', border: 'rgba(74,124,142,0.22)' },
-  { key: 'priceFeed'       as const, label: 'Price Feed',       short: 'PRICE',    icon: '◈', desc: 'Coinbase BTC feed',    color: 'var(--green)',  rgb: '45,158,107',  bg: 'var(--green-pale)', border: 'rgba(45,158,107,0.22)'  },
-  { key: 'sentiment'       as const, label: 'Sentiment',        short: 'SENTIMENT',icon: '◉', desc: 'ROMA quant signals',   color: 'var(--blue)',   rgb: '58,114,168',  bg: 'var(--blue-pale)',  border: 'rgba(58,114,168,0.22)'  },
-  { key: 'probability'     as const, label: 'Probability',      short: 'PROB',     icon: '⬟', desc: 'Hourly P(YES) model',  color: 'var(--amber)',  rgb: '184,121,10',  bg: 'var(--amber-pale)', border: 'rgba(184,121,10,0.22)'  },
-  { key: 'markov'          as const, label: 'Markov Engine',    short: 'MARKOV',   icon: '⬙', desc: 'Kelly + entry filter', color: 'var(--pink)',   rgb: '212,85,130',  bg: 'var(--pink-pale)',  border: 'rgba(212,85,130,0.22)'  },
-  { key: 'execution'       as const, label: 'Execution',        short: 'EXEC',     icon: '▶', desc: 'KXBTCD order',         color: 'var(--green)',  rgb: '45,158,107',  bg: 'var(--green-pale)', border: 'rgba(45,158,107,0.22)'  },
+  { key: 'priceFeed'       as const, label: 'Price Feed',       short: 'PRICE',    icon: '◈', desc: 'Coinbase BTC feed',    color: 'var(--green)',  rgb: '45,158,107',  bg: 'var(--green-pale)', border: 'rgba(45,158,107,0.22)' },
+  { key: 'markov'          as const, label: 'Markov Gate',      short: 'GATE',     icon: '⬙', desc: 'momentum regime gate', color: 'var(--pink)',   rgb: '212,85,130',  bg: 'var(--pink-pale)',  border: 'rgba(212,85,130,0.22)' },
+  { key: 'sentiment'       as const, label: 'Sentiment',        short: 'SENTIMENT',icon: '◉', desc: 'ROMA quant signals',   color: 'var(--blue)',   rgb: '58,114,168',  bg: 'var(--blue-pale)',  border: 'rgba(58,114,168,0.22)' },
+  { key: 'probability'     as const, label: 'Probability',      short: 'PROB',     icon: '⬟', desc: 'Hourly P(YES) model',  color: 'var(--amber)',  rgb: '184,121,10',  bg: 'var(--amber-pale)', border: 'rgba(184,121,10,0.22)' },
+  { key: 'execution'       as const, label: 'Execution',        short: 'EXEC',     icon: '▶', desc: 'KXBTCD order',         color: 'var(--green)',  rgb: '45,158,107',  bg: 'var(--green-pale)', border: 'rgba(45,158,107,0.22)' },
 ]
 
 // Hourly KXBTCD mode — Grok price-prediction pipeline, different semantics
 const AGENTS_HOURLY: AgentCardConfig[] = [
-  { key: 'marketDiscovery' as const, label: 'Market Discovery', short: 'MARKET',   icon: '◎', desc: 'KXBTCD hourly scan',  color: 'var(--brown)',  rgb: '74,124,142',  bg: 'var(--brown-pale)', border: 'rgba(74,124,142,0.22)' },
-  { key: 'priceFeed'       as const, label: 'Price Feed',       short: 'PRICE',    icon: '◈', desc: 'Coinbase BTC feed',   color: 'var(--green)',  rgb: '45,158,107',  bg: 'var(--green-pale)', border: 'rgba(45,158,107,0.22)'  },
-  { key: 'sentiment'       as const, label: 'Grok Forecast',    short: 'FORECAST', icon: '◉', desc: 'Price prediction',    color: 'var(--blue)',   rgb: '58,114,168',  bg: 'var(--blue-pale)',  border: 'rgba(58,114,168,0.22)'  },
-  { key: 'probability'     as const, label: 'Price Model',      short: 'MODEL',    icon: '⬟', desc: 'Predicted vs strike', color: 'var(--amber)',  rgb: '184,121,10',  bg: 'var(--amber-pale)', border: 'rgba(184,121,10,0.22)'  },
-  { key: 'markov'          as const, label: 'Markov Engine',    short: 'MARKOV',   icon: '⬙', desc: 'Kelly + entry filter',color: 'var(--pink)',   rgb: '212,85,130',  bg: 'var(--pink-pale)',  border: 'rgba(212,85,130,0.22)'  },
-  { key: 'execution'       as const, label: 'Execution',        short: 'EXEC',     icon: '▶', desc: 'Grok order',          color: 'var(--green)',  rgb: '45,158,107',  bg: 'var(--green-pale)', border: 'rgba(45,158,107,0.22)'  },
+  { key: 'marketDiscovery' as const, label: 'Market Discovery', short: 'MARKET',   icon: '◎', desc: 'KXBTCD hourly scan',   color: 'var(--brown)',  rgb: '74,124,142',  bg: 'var(--brown-pale)', border: 'rgba(74,124,142,0.22)' },
+  { key: 'priceFeed'       as const, label: 'Price Feed',       short: 'PRICE',    icon: '◈', desc: 'Coinbase BTC feed',    color: 'var(--green)',  rgb: '45,158,107',  bg: 'var(--green-pale)', border: 'rgba(45,158,107,0.22)' },
+  { key: 'markov'          as const, label: 'Markov Gate',      short: 'GATE',     icon: '⬙', desc: 'momentum regime gate', color: 'var(--pink)',   rgb: '212,85,130',  bg: 'var(--pink-pale)',  border: 'rgba(212,85,130,0.22)' },
+  { key: 'sentiment'       as const, label: 'Grok Forecast',    short: 'FORECAST', icon: '◉', desc: 'Price prediction',     color: 'var(--blue)',   rgb: '58,114,168',  bg: 'var(--blue-pale)',  border: 'rgba(58,114,168,0.22)' },
+  { key: 'probability'     as const, label: 'Price Model',      short: 'MODEL',    icon: '⬟', desc: 'Predicted vs strike',  color: 'var(--amber)',  rgb: '184,121,10',  bg: 'var(--amber-pale)', border: 'rgba(184,121,10,0.22)' },
+  { key: 'execution'       as const, label: 'Execution',        short: 'EXEC',     icon: '▶', desc: 'Grok order',           color: 'var(--green)',  rgb: '45,158,107',  bg: 'var(--green-pale)', border: 'rgba(45,158,107,0.22)' },
 ]
 
 function shortenProvider(raw: string): string {

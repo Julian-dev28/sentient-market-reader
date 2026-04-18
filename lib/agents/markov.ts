@@ -57,6 +57,8 @@ const MAKER_FEE_RATE = 0.0175
 const MAX_CONTRACTS  = 500
 const MAX_TRADE_PCT  = 0.15
 const REFERENCE_VOL  = 0.002
+const MIN_GAP        = 0.15   // |pYes − 0.5| must be ≥ this — matches backtest gate
+const PERSIST_TAU    = 0.80   // momentum self-persistence threshold (mirrors chain.ts)
 
 export function runMarkovAgent(
   distanceFromStrikePct: number,
@@ -112,16 +114,20 @@ export function runMarkovAgent(
   const enterYes = hasHistory && forecast.enterYes
   const enterNo  = hasHistory && forecast.enterNo
 
-  // ── Recommendation ───────────────────────────────────────────────────────
-  const recommendation: 'YES' | 'NO' | 'NO_TRADE' =
-    !hasHistory   ? 'NO_TRADE' :
-    pYes > 0.5    ? 'YES'      :
-    pNo  > 0.5    ? 'NO'       :
-                    'NO_TRADE'
+  // ── Gate: momentum must be locked-in (persist) and directionally decisive (gap) ──
+  const gap     = Math.abs(pYes - 0.5)
+  const gateOk  = hasHistory && forecast.persist >= PERSIST_TAU && gap >= MIN_GAP
 
-  const approved         = recommendation !== 'NO_TRADE'
-  const rejectionReason  = !hasHistory
+  const recommendation: 'YES' | 'NO' | 'NO_TRADE' =
+    !gateOk     ? 'NO_TRADE' :
+    pYes > 0.5  ? 'YES'      :
+                  'NO'
+
+  const approved        = gateOk
+  const rejectionReason = !hasHistory
     ? `Building momentum history (${historyLength}/${MIN_HISTORY} transitions)`
+    : !gateOk
+    ? `Gate failed — persist ${(forecast.persist * 100).toFixed(0)}% < ${(PERSIST_TAU * 100).toFixed(0)}% OR gap ${(gap * 100).toFixed(1)}% < ${(MIN_GAP * 100).toFixed(0)}%`
     : undefined
 
   // ── Suggested sizing (never a hard gate) ─────────────────────────────────

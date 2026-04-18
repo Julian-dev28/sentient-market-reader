@@ -6,10 +6,11 @@
  *
  * Pipeline DAG:
  *   MarketDiscovery ──┐
- *   PriceFeed ─────────┼──► SentimentAgent ──► ProbabilityModelAgent ──► MarkovChain ──► Execution
+ *   PriceFeed ─────────┼──► Markov (gate) ──► Sentiment ──► Probability ──► Execution
  *
- * Markov chain IS the risk engine — entry filter + Kelly sizing + safety gates.
- * AI mode (aiRisk=true): sentiment + probability from Grok; Markov still decides sizing.
+ * Markov runs first as a regime gate — if momentum isn't locked-in and decisive,
+ * the pipeline short-circuits (no LLM calls, no trade). When it passes, Sentiment +
+ * Probability run, and Execution only fires if both models agree on direction.
  */
 
 import type {
@@ -30,6 +31,7 @@ import type {
 } from '../types'
 import type { AIProvider } from '../llm-client'
 import { getLastAnalysis, setLastAnalysis } from '../pipeline-lock'
+import { computeGarmanKlassVol } from '../indicators'
 import { runMarketDiscovery } from './market-discovery'
 import { runPriceFeed } from './price-feed'
 import { runSentiment } from './sentiment'
@@ -94,10 +96,52 @@ export async function runAgentPipeline(
   const pfResult = runPriceFeed(enrichedQuote, mdResult.output.strikePrice)
   emit?.('priceFeed', pfResult)
 
-  // ── AI mode: single Grok agent replaces stages 3-6 ────────────────────────
-  // Grok receives the full market picture and makes ALL decisions with full
-  // capital authority: direction, probability, sizing, optional hedge.
-  // Quant mode (aiRisk=false) always runs the ROMA pipeline — even for KXBTCD hourly markets.
+  // ── Stage 2.5: Markov Gate ─────────────────────────────────────────────
+  // Runs before any LLM call. If momentum isn't locked-in and decisive, the
+  // entire downstream pipeline is skipped — no expensive Grok/ROMA calls.
+  const gkVolEarly = candles && candles.length >= 2 ? computeGarmanKlassVol(candles) : null
+  const markovGate = runMarkovAgent(
+    pfResult.output.distanceFromStrikePct,
+    mdResult.output.strikePrice,
+    mdResult.output.activeMarket,
+    liveCandles,
+    candles,
+    portfolioValue,
+    mdResult.output.minutesUntilExpiry,
+    gkVolEarly,
+    undefined,   // confidence unknown until Probability runs; defaults to medium scalar
+    useKxbtcd,
+  )
+  emit?.('markov', markovGate)
+
+  if (!markovGate.output.approved) {
+    const passExec = await runExecution(
+      'NO_TRADE',
+      0,
+      mdResult.output.activeMarket,
+      false,
+      portfolioValue > 0 ? portfolioValue : undefined,
+      mdResult.output.minutesUntilExpiry,
+      provider,
+    )
+    emit?.('execution', passExec)
+    return {
+      cycleId,
+      cycleStartedAt,
+      cycleCompletedAt: new Date().toISOString(),
+      status: 'completed',
+      agents: {
+        marketDiscovery: mdResult   as AgentResult<MarketDiscoveryOutput>,
+        priceFeed:       pfResult   as AgentResult<PriceFeedOutput>,
+        sentiment:       { agentName: 'SentimentAgent', status: 'done', output: { score: 0, label: 'neutral', momentum: 0, orderbookSkew: 0, signals: ['Markov gate blocked'], provider: 'skipped' }, reasoning: 'Markov gate blocked', durationMs: 0, timestamp: new Date().toISOString() } as AgentResult<SentimentOutput>,
+        probability:     { agentName: 'ProbabilityModelAgent', status: 'done', output: { pModel: 0.5, pMarket: 0.5, edge: 0, edgePct: 0, recommendation: 'NO_TRADE', confidence: 'low', provider: 'skipped', gkVol15m: gkVolEarly, volOfVol: null, dScore: null }, reasoning: 'Markov gate blocked', durationMs: 0, timestamp: new Date().toISOString() } as unknown as AgentResult<ProbabilityOutput>,
+        markov:          markovGate as AgentResult<MarkovOutput>,
+        execution:       passExec   as AgentResult<ExecutionOutput>,
+      },
+    }
+  }
+
+  // ── AI mode: Grok replaces Sentiment + Probability when gate passes ────
   if (aiRisk) {
     const grok = await runGrokTradingAgent(
       enrichedQuote,
@@ -115,30 +159,23 @@ export async function runAgentPipeline(
       prevContext,
       candles1h,
       candles4h,
-      useKxbtcd,  // isHourly — changes prompt + relaxes 15m-calibrated gates
+      useKxbtcd,
     )
     emit?.('sentiment',   grok.sentiment)
     emit?.('probability', grok.probability)
 
-    const markovResultAI = runMarkovAgent(
-      pfResult.output.distanceFromStrikePct,
-      mdResult.output.strikePrice,
-      mdResult.output.activeMarket,
-      liveCandles,
-      candles,
-      portfolioValue,
-      mdResult.output.minutesUntilExpiry,
-      grok.probability.output.gkVol15m,
-      grok.probability.output.confidence,
-      useKxbtcd,
-    )
-    emit?.('markov', markovResultAI)
+    // Direction alignment: only execute if Grok agrees with Markov
+    const grokRec    = grok.probability.output.recommendation
+    const markovRec  = markovGate.output.recommendation
+    const aligned    = grokRec === markovRec
+    const finalRec   = aligned ? markovRec : 'NO_TRADE'
+    const finalSize  = aligned ? markovGate.output.positionSize : 0
 
     const execResultAI = await runExecution(
-      markovResultAI.output.recommendation,
-      markovResultAI.output.positionSize,
+      finalRec,
+      finalSize,
       mdResult.output.activeMarket,
-      markovResultAI.output.approved,
+      aligned && markovGate.output.approved,
       portfolioValue > 0 ? portfolioValue : undefined,
       mdResult.output.minutesUntilExpiry,
       provider,
@@ -149,7 +186,7 @@ export async function runAgentPipeline(
       pModel:         grok.probability.output.pModel,
       pMarket:        grok.probability.output.pMarket,
       edge:           grok.probability.output.edge,
-      recommendation: markovResultAI.output.recommendation,
+      recommendation: finalRec,
       sentimentScore: grok.sentiment.output.score,
       sentimentLabel: grok.sentiment.output.label,
       btcPrice:       enrichedQuote.price,
@@ -167,20 +204,20 @@ export async function runAgentPipeline(
         priceFeed:       pfResult          as AgentResult<PriceFeedOutput>,
         sentiment:       grok.sentiment    as AgentResult<SentimentOutput>,
         probability:     grok.probability  as AgentResult<ProbabilityOutput>,
-        markov:          markovResultAI    as AgentResult<MarkovOutput>,
+        markov:          markovGate        as AgentResult<MarkovOutput>,
         execution:       execResultAI      as AgentResult<ExecutionOutput>,
       },
     }
   }
 
-  // ── Stage 3: Sentiment — price + orderbook ──────────────────────────────
+  // ── Stage 3: Sentiment ─────────────────────────────────────────────────
   const sentResult = await runSentiment(
     enrichedQuote,
     mdResult.output.strikePrice,
     pfResult.output.distanceFromStrikePct,
     mdResult.output.minutesUntilExpiry,
     mdResult.output.activeMarket,
-    orderbook,   // real Kalshi orderbook depth — wired into OB imbalance scoring
+    orderbook,
     provider,
     romaMode,
     providers,
@@ -192,13 +229,13 @@ export async function runAgentPipeline(
     orModelOverride,
     signal,
     apiKeys,
-    aiRisk,      // true = Grok-powered sentiment
+    aiRisk,
     candles1h,
     candles4h,
   )
   emit?.('sentiment', sentResult)
 
-  // ── Stage 4: Probability ───────────────────────────────────────────────────
+  // ── Stage 4: Probability ───────────────────────────────────────────────
   const probResult = await runProbabilityModel(
     sentResult.output.score,
     sentResult.output.signals,
@@ -214,46 +251,36 @@ export async function runAgentPipeline(
     orModelOverride,
     signal,
     apiKeys,
-    aiRisk,      // true = Grok-powered probability
+    aiRisk,
     candles1h,
     candles4h,
-    useKxbtcd,   // isHourly — skips 15m-calibrated d-gate
+    useKxbtcd,
   )
   emit?.('probability', probResult)
 
-  // ── Stage 4.5: Markov Chain (IS the risk engine) ──────────────────────
-  const markovResult = runMarkovAgent(
-    pfResult.output.distanceFromStrikePct,
-    mdResult.output.strikePrice,
-    mdResult.output.activeMarket,
-    liveCandles,
-    candles,
-    portfolioValue,
-    mdResult.output.minutesUntilExpiry,
-    probResult.output.gkVol15m,
-    probResult.output.confidence,
-    useKxbtcd,
-  )
-  emit?.('markov', markovResult)
+  // ── Stage 5: Execution — only if Markov + Probability agree on direction ──
+  const probRec   = probResult.output.recommendation
+  const mrkRec    = markovGate.output.recommendation
+  const aligned   = probRec !== 'NO_TRADE' && mrkRec !== 'NO_TRADE' && probRec === mrkRec
+  const finalRec  = aligned ? mrkRec : 'NO_TRADE'
+  const finalSize = aligned ? markovGate.output.positionSize : 0
 
-  // ── Stage 5: Execution ─────────────────────────────────────────────────
   const execResult = await runExecution(
-    markovResult.output.recommendation,
-    markovResult.output.positionSize,
+    finalRec,
+    finalSize,
     mdResult.output.activeMarket,
-    markovResult.output.approved,
+    aligned,
     portfolioValue > 0 ? portfolioValue : undefined,
     mdResult.output.minutesUntilExpiry,
     provider,
   )
   emit?.('execution', execResult)
 
-  // Store result for next cycle's context
   setLastAnalysis({
     pModel:         probResult.output.pModel,
     pMarket:        probResult.output.pMarket,
     edge:           probResult.output.edge,
-    recommendation: probResult.output.recommendation,
+    recommendation: finalRec,
     sentimentScore: sentResult.output.score,
     sentimentLabel: sentResult.output.label,
     btcPrice:       quote.price,
@@ -271,7 +298,7 @@ export async function runAgentPipeline(
       priceFeed:       pfResult     as AgentResult<PriceFeedOutput>,
       sentiment:       sentResult   as AgentResult<SentimentOutput>,
       probability:     probResult   as AgentResult<ProbabilityOutput>,
-      markov:          markovResult as AgentResult<MarkovOutput>,
+      markov:          markovGate   as AgentResult<MarkovOutput>,
       execution:       execResult   as AgentResult<ExecutionOutput>,
     },
   }
