@@ -397,54 +397,6 @@ export default function Home() {
               onRefresh={refreshMarket}
             />
             <SignalPanel probability={prob} sentiment={sent} strikePrice={strikePrice} />
-            <MarkovPanel markov={markov} />
-
-            {exec && exec.action !== 'PASS' && (
-              <div className="card bracket-card animate-fade-in" style={{
-                borderColor: exec.action === 'BUY_YES' ? 'rgba(45,158,107,0.3)' : 'rgba(58,114,168,0.3)',
-                background: 'var(--bg-card)',
-              }}>
-                <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6,
-                  color: exec.action === 'BUY_YES' ? 'var(--green-dark)' : 'var(--blue-dark)' }}>
-                  <span style={{ fontSize: 16 }}>{exec.action === 'BUY_YES' ? '↑' : '↓'}</span>
-                  {exec.action === 'BUY_YES' ? 'BUY YES' : 'BUY NO'} — Latest Signal
-                  <span style={{ marginLeft: 'auto', fontSize: 9, fontWeight: 700, color: 'var(--green-dark)', background: 'var(--green-pale)', border: '1px solid rgba(45,158,107,0.25)', borderRadius: 4, padding: '1px 5px' }}>LIVE</span>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 7 }}>
-                  {[
-                    ['Contracts', String(exec.contracts)],
-                    ['Limit',     `${exec.limitPrice}¢`],
-                    ['Cost',      `$${exec.estimatedCost.toFixed(2)}`],
-                    ['Max profit',`$${(exec.estimatedPayout - exec.estimatedCost).toFixed(2)}`],
-                  ].map(([k, v]) => (
-                    <div key={k} style={{ padding: '8px', background: 'var(--bg-secondary)', borderRadius: 8, border: '1px solid var(--border)' }}>
-                      <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>{k}</div>
-                      <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>{v}</div>
-                    </div>
-                  ))}
-                </div>
-                <div style={{ marginTop: 8, fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.5 }}>
-                  {exec.rationale.replace('Paper trade only — no real order placed.', 'Live mode — real order placed via Kalshi API.')}
-                </div>
-
-                {/* Prices at pipeline run */}
-                {md?.activeMarket && (
-                  <div style={{ marginTop: 10, padding: '7px 10px', borderRadius: 8, background: 'var(--bg-secondary)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 12 }}>
-                    <span style={{ fontSize: 8, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', flexShrink: 0 }}>At run</span>
-                    {[
-                      ['YES ask', md.activeMarket.yes_ask],
-                      ['YES bid', md.activeMarket.yes_bid],
-                      ['NO ask',  md.activeMarket.no_ask],
-                    ].map(([label, val]) => (
-                      <span key={label as string} style={{ fontSize: 10, color: 'var(--text-secondary)' }}>
-                        <span style={{ color: 'var(--text-muted)', marginRight: 3 }}>{label}</span>
-                        <span style={{ fontFamily: 'var(--font-geist-mono)', fontWeight: 700, color: 'var(--text-primary)' }}>{val}¢</span>
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
           </div>
 
           {/* ─── CENTER ─── */}
@@ -642,6 +594,52 @@ export default function Home() {
           {/* ─── RIGHT ─── */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <PositionsPanel liveMode={true} />
+            <MarkovPanel markov={markov} />
+
+            {exec && exec.action !== 'PASS' && (
+              <div className="card bracket-card animate-fade-in" style={{
+                borderColor: exec.action === 'BUY_YES' ? 'rgba(45,158,107,0.3)' : 'rgba(58,114,168,0.3)',
+                background: 'var(--bg-card)',
+              }}>
+                <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6,
+                  color: exec.action === 'BUY_YES' ? 'var(--green-dark)' : 'var(--blue-dark)' }}>
+                  <span style={{ fontSize: 16 }}>{exec.action === 'BUY_YES' ? '↑' : '↓'}</span>
+                  {exec.action === 'BUY_YES' ? 'BUY YES' : 'BUY NO'} — Latest Signal
+                  <span style={{ marginLeft: 'auto', fontSize: 9, fontWeight: 700, color: 'var(--green-dark)', background: 'var(--green-pale)', border: '1px solid rgba(45,158,107,0.25)', borderRadius: 4, padding: '1px 5px' }}>LIVE</span>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 7 }}>
+                  {[
+                    ['Contracts', String(exec.contracts)],
+                    ['Limit',     `${exec.limitPrice}¢`],
+                    ['Cost',      `$${exec.estimatedCost.toFixed(2)}`],
+                    ['Max profit',`$${(exec.estimatedPayout - exec.estimatedCost).toFixed(2)}`],
+                  ].map(([k, v]) => (
+                    <div key={k} style={{ padding: '8px', background: 'var(--bg-secondary)', borderRadius: 4, border: '1px solid var(--border)' }}>
+                      <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>{k}</div>
+                      <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>{v}</div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ marginTop: 8, fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                  {exec.rationale.replace('Paper trade only — no real order placed.', 'Live mode — real order placed via Kalshi API.')}
+                </div>
+                {md?.activeMarket && (
+                  <div style={{ marginTop: 10, padding: '7px 10px', borderRadius: 4, background: 'var(--bg-secondary)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <span style={{ fontSize: 8, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', flexShrink: 0 }}>At run</span>
+                    {[
+                      ['YES ask', md.activeMarket.yes_ask],
+                      ['YES bid', md.activeMarket.yes_bid],
+                      ['NO ask',  md.activeMarket.no_ask],
+                    ].map(([label, val]) => (
+                      <span key={label as string} style={{ fontSize: 10, color: 'var(--text-secondary)' }}>
+                        <span style={{ color: 'var(--text-muted)', marginRight: 3 }}>{label}</span>
+                        <span style={{ fontFamily: 'var(--font-geist-mono)', fontWeight: 700, color: 'var(--text-primary)' }}>{val}¢</span>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </main>
