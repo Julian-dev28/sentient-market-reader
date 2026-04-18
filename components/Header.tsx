@@ -77,12 +77,13 @@ export default function Header({ cycleId, isRunning, lastCompletedAt, onRunCycle
           const effectiveActive = active || (isLast15m && pathname?.startsWith('/dashboard') && !pathname?.startsWith('/dashboard/hourly'))
           return (
             <Link key={href} href={href} style={{
-              fontSize: 11, fontWeight: effectiveActive ? 700 : 500,
-              padding: '4px 12px', borderRadius: 7, textDecoration: 'none',
-              background: effectiveActive ? 'var(--bg-secondary)' : 'transparent',
-              color: effectiveActive ? 'var(--text-primary)' : 'var(--text-muted)',
-              border: effectiveActive ? '1px solid var(--border)' : '1px solid transparent',
-              transition: 'all 0.15s',
+              fontSize: 10, fontWeight: 700,
+              padding: '4px 12px', borderRadius: 4, textDecoration: 'none',
+              letterSpacing: '0.05em', textTransform: 'uppercase',
+              background: effectiveActive ? 'var(--brown)' : 'transparent',
+              color: effectiveActive ? '#fff' : 'var(--text-muted)',
+              border: effectiveActive ? '1px solid var(--brown)' : '1px solid transparent',
+              transition: 'all 0.12s',
             }}>
               {label}
             </Link>
@@ -106,7 +107,7 @@ export default function Header({ cycleId, isRunning, lastCompletedAt, onRunCycle
 
         {/* Cycle badge */}
         <div style={{
-          padding: '5px 12px', borderRadius: 9,
+          padding: '5px 12px', borderRadius: 4,
           background: 'var(--brown-pale)',
           border: '1px solid var(--border-bright)',
         }}>
@@ -123,7 +124,7 @@ export default function Header({ cycleId, isRunning, lastCompletedAt, onRunCycle
             title="Data is stale — click to re-run pipeline"
             style={{
               display: 'flex', alignItems: 'center', gap: 6,
-              padding: '4px 10px', borderRadius: 8, cursor: onRunCycle ? 'pointer' : 'default',
+              padding: '4px 10px', borderRadius: 4, cursor: onRunCycle ? 'pointer' : 'default',
               border: `1px solid ${stale ? 'rgba(212,85,130,0.5)' : 'rgba(212,135,44,0.4)'}`,
               background: stale ? 'rgba(212,85,130,0.08)' : 'rgba(212,135,44,0.08)',
               transition: 'all 0.3s',
@@ -155,7 +156,7 @@ export default function Header({ cycleId, isRunning, lastCompletedAt, onRunCycle
           title="Settings"
           style={{
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            width: 30, height: 30, borderRadius: 8,
+            width: 30, height: 30, borderRadius: 4,
             border: '1px solid var(--border)', background: 'transparent',
             color: 'var(--text-muted)', textDecoration: 'none', fontSize: 15,
             transition: 'all 0.15s',

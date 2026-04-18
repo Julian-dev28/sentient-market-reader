@@ -220,26 +220,18 @@ export default function Home() {
               <br /><br />
               Risk guards: 3% min edge · $150 daily loss cap · 15% drawdown limit · 48 trades/day max.
             </div>
-            <div style={{ display: 'flex', gap: 10 }}>
+            <div style={{ display: 'flex', gap: 8 }}>
               <button
                 onClick={() => setShowBotWarning(false)}
-                style={{
-                  flex: 1, padding: '10px 0', borderRadius: 9, cursor: 'pointer',
-                  border: '1px solid var(--border)', background: 'var(--bg-secondary)',
-                  fontSize: 13, fontWeight: 700, color: 'var(--text-secondary)',
-                }}
+                className="btn-flat btn-outline-muted"
+                style={{ flex: 1, padding: '10px 0' }}
               >
                 Cancel
               </button>
               <button
                 onClick={confirmStartBot}
-                style={{
-                  flex: 1, padding: '10px 0', borderRadius: 9, cursor: 'pointer',
-                  border: '1px solid var(--green-dark)',
-                  background: 'var(--green)',
-                  fontSize: 13, fontWeight: 700, color: '#fff',
-                  boxShadow: '0 2px 10px rgba(78,138,94,0.35)',
-                }}
+                className="btn-flat btn-solid-green"
+                style={{ flex: 1, padding: '10px 0' }}
               >
                 ▶ Start Agent
               </button>
@@ -265,26 +257,18 @@ export default function Home() {
               <br /><br />
               Any signal generated will likely be <strong>outdated by the time it completes</strong>.
             </div>
-            <div style={{ display: 'flex', gap: 10 }}>
+            <div style={{ display: 'flex', gap: 8 }}>
               <button
                 onClick={() => setShowLateWarning(false)}
-                style={{
-                  flex: 1, padding: '10px 0', borderRadius: 9, cursor: 'pointer',
-                  border: '1px solid var(--border)', background: 'var(--bg-secondary)',
-                  fontSize: 13, fontWeight: 700, color: 'var(--text-secondary)',
-                }}
+                className="btn-flat btn-outline-muted"
+                style={{ flex: 1, padding: '10px 0' }}
               >
                 Cancel
               </button>
               <button
                 onClick={() => { setShowLateWarning(false); runCycle() }}
-                style={{
-                  flex: 1, padding: '10px 0', borderRadius: 9, cursor: 'pointer',
-                  border: '1px solid var(--amber)',
-                  background: 'var(--amber)',
-                  fontSize: 13, fontWeight: 700, color: '#fff',
-                  boxShadow: '0 2px 10px rgba(212,135,44,0.35)',
-                }}
+                className="btn-flat"
+                style={{ flex: 1, padding: '10px 0', background: 'var(--amber)', border: '1px solid var(--amber)', color: '#fff' }}
               >
                 Run Anyway
               </button>
@@ -343,24 +327,17 @@ export default function Home() {
 
             {/* Action buttons */}
             {alertStatus === 'idle' && (
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button onClick={() => { setDismissedKey(tradeAlert.windowKey); setTradeAlert(null) }} style={{
-                  flex: 1, padding: '10px 0', borderRadius: 9, cursor: 'pointer',
-                  border: '1px solid var(--border)', background: 'var(--bg-secondary)',
-                  fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)',
-                }}>
+              <div style={{ display: 'flex', gap: 7 }}>
+                <button onClick={() => { setDismissedKey(tradeAlert.windowKey); setTradeAlert(null) }}
+                  className="btn-flat btn-outline-muted"
+                  style={{ flex: 1, padding: '10px 0' }}
+                >
                   Dismiss
                 </button>
-                <button onClick={executeAlertTrade} style={{
-                  flex: 2, padding: '10px 0', borderRadius: 9, cursor: 'pointer',
-                  border: tradeAlert.side === 'yes' ? '1px solid var(--green-dark)' : '1px solid var(--pink)',
-                  background: tradeAlert.side === 'yes'
-                    ? 'var(--green)'
-                    : 'var(--pink)',
-                  fontSize: 14, fontWeight: 800, color: '#fff',
-                  boxShadow: tradeAlert.side === 'yes' ? '0 2px 12px rgba(45,158,107,0.35)' : '0 2px 12px rgba(212,85,130,0.35)',
-                  letterSpacing: '0.01em',
-                }}>
+                <button onClick={executeAlertTrade}
+                  className={`btn-flat ${tradeAlert.side === 'yes' ? 'btn-solid-green' : 'btn-solid-pink'}`}
+                  style={{ flex: 2, padding: '10px 0', fontSize: 13 }}
+                >
                   Buy $40
                 </button>
               </div>
@@ -398,8 +375,8 @@ export default function Home() {
             <span>Pipeline error: {error}</span>
             <button onClick={runCycle} style={{
               background: 'transparent', border: '1px solid var(--red)',
-              borderRadius: 6, padding: '3px 10px', color: 'var(--red)',
-              cursor: 'pointer', fontSize: 11, fontWeight: 600,
+              borderRadius: 4, padding: '3px 10px', color: 'var(--red)',
+              cursor: 'pointer', fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase',
             }}>Retry</button>
           </div>
         )}
@@ -478,20 +455,13 @@ export default function Home() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
 
                 {/* QUANT | AI mode toggle */}
-                <div style={{ display: 'flex', borderRadius: 8, border: '1px solid var(--border)', overflow: 'hidden', flexShrink: 0 }}>
+                <div className="seg-group" style={{ flexShrink: 0 }}>
                   {(['quant', 'ai'] as const).map(mode => (
                     <button
                       key={mode}
                       onClick={() => handleAnalysisModeChange(mode)}
-                      style={{
-                        padding: '6px 14px', cursor: 'pointer', border: 'none',
-                        fontSize: 11, fontWeight: 800, letterSpacing: '0.05em', textTransform: 'uppercase',
-                        background: analysisMode === mode
-                          ? (mode === 'ai' ? 'var(--blue)' : 'var(--brown)')
-                          : 'var(--bg-secondary)',
-                        color: analysisMode === mode ? '#fff' : 'var(--text-muted)',
-                        transition: 'all 0.15s',
-                      }}
+                      className={`seg-btn${analysisMode === mode ? (mode === 'ai' ? ' active-blue' : ' active-brown') : ''}`}
+                      style={{ padding: '6px 16px' }}
                     >
                       {mode === 'quant' ? '∑ Quant' : '✦ AI'}
                     </button>
@@ -513,9 +483,9 @@ export default function Home() {
                         onClick={() => setGrokMenuOpen(v => !v)}
                         style={{
                           width: '100%', textAlign: 'left', cursor: 'pointer',
-                          padding: '6px 12px', borderRadius: 8,
+                          padding: '6px 12px', borderRadius: 4,
                           border: '1px solid var(--blue)',
-                          background: 'rgba(58,114,168,0.08)',
+                          background: 'rgba(60,110,160,0.07)',
                           color: 'var(--blue-dark)',
                           display: 'flex', alignItems: 'center', gap: 8,
                         }}
@@ -529,7 +499,7 @@ export default function Home() {
                         <div className="animate-fade-in" style={{
                           position: 'absolute', top: '100%', left: 0, marginTop: 4, zIndex: 200,
                           background: 'var(--bg-card)', border: '1px solid var(--border)',
-                          borderRadius: 10, boxShadow: '0 8px 32px rgba(0,0,0,0.18)',
+                          borderRadius: 4, boxShadow: '0 8px 32px rgba(0,0,0,0.18)',
                           width: '100%', minWidth: 240,
                         }}>
                           <div style={{ padding: '5px 12px 3px', fontSize: 9, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
@@ -563,18 +533,18 @@ export default function Home() {
                   onClick={() => setShowSettings(v => !v)}
                   title="Advanced settings"
                   style={{
-                    width: 32, height: 32, borderRadius: 8, cursor: 'pointer', flexShrink: 0,
+                    width: 30, height: 30, borderRadius: 4, cursor: 'pointer', flexShrink: 0,
                     border: showSettings ? '1px solid var(--brown)' : '1px solid var(--border)',
-                    background: showSettings ? 'var(--brown-pale)' : 'var(--bg-secondary)',
-                    color: showSettings ? 'var(--brown)' : 'var(--text-muted)',
-                    fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    transition: 'all 0.15s',
+                    background: showSettings ? 'var(--brown)' : 'transparent',
+                    color: showSettings ? '#fff' : 'var(--text-muted)',
+                    fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    transition: 'all 0.12s',
                   }}>
                   ⚙
                 </button>
 
                 {/* Run / Stop + expiry — pushed right */}
-                <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 7 }}>
                   <button
                     onClick={isRunning ? stopCycle : (serverLocked ? undefined : () => {
                       if (secondsUntilExpiry > 0 && secondsUntilExpiry < 120) {
@@ -584,21 +554,17 @@ export default function Home() {
                       }
                     })}
                     disabled={serverLocked && !isRunning}
+                    className={`btn-flat${isRunning ? ' btn-outline-pink' : serverLocked ? '' : ' btn-solid-green'}`}
                     style={{
-                      padding: '7px 20px', borderRadius: 9, background: 'transparent',
-                      border: isRunning ? '1.5px solid var(--pink)' : serverLocked ? '1.5px solid var(--border)' : '1.5px solid var(--green)',
-                      color: isRunning ? 'var(--pink)' : serverLocked ? 'var(--text-muted)' : 'var(--green-dark)',
-                      cursor: isRunning ? 'pointer' : serverLocked ? 'not-allowed' : 'pointer',
-                      fontSize: 12, fontWeight: 700,
-                      display: 'flex', alignItems: 'center', gap: 6,
-                      transition: 'all 0.2s', letterSpacing: '0.02em',
+                      padding: '6px 18px',
+                      ...(serverLocked && !isRunning ? { border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-muted)', cursor: 'not-allowed' } : {}),
                     }}
                   >
                     {isRunning
-                      ? <><span>■</span> Stop <span style={{ fontSize: 9, opacity: 0.5, fontWeight: 400 }}>⇧R</span></>
+                      ? <><span>■</span> Stop <span style={{ fontSize: 9, opacity: 0.5, fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>⇧R</span></>
                       : serverLocked
-                      ? <><span style={{ animation: 'spin-slow 1s linear infinite', display: 'inline-block' }}>◌</span> Running...</>
-                      : <>▶ Run Cycle <span style={{ fontSize: 9, opacity: 0.5, fontWeight: 400 }}>⇧R</span></>}
+                      ? <><span style={{ animation: 'spin-slow 1s linear infinite', display: 'inline-block' }}>◌</span> Running</>
+                      : <>▶ Run Cycle <span style={{ fontSize: 9, opacity: 0.5, fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>⇧R</span></>}
                   </button>
 
                   {secondsUntilExpiry > 0 && (() => {
@@ -609,11 +575,11 @@ export default function Home() {
                     return (
                       <div style={{
                         display: 'flex', alignItems: 'center', gap: 5,
-                        padding: '5px 10px', borderRadius: 8,
+                        padding: '5px 10px', borderRadius: 4,
                         background: urgent ? 'var(--pink-pale)' : 'var(--bg-secondary)',
-                        border: `1px solid ${urgent ? '#3a1020' : 'var(--border)'}`,
+                        border: `1px solid ${urgent ? 'rgba(190,74,64,0.4)' : 'var(--border)'}`,
                       }}>
-                        <span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Exp</span>
+                        <span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em' }}>Exp</span>
                         <span style={{
                           fontFamily: 'var(--font-geist-mono)', fontSize: 14, fontWeight: 800, color,
                           animation: urgent ? 'urgentPulse 1s ease infinite' : 'none',
@@ -624,15 +590,15 @@ export default function Home() {
                     )
                   })()}
 
-                  {/* AI monitor badge — shows live Δ from last run vs 0.20% trigger */}
+                  {/* AI monitor badge */}
                   {aiRisk && botActive && !isRunning && monitorDeltaPct !== null && (
                     <div style={{
                       display: 'flex', alignItems: 'center', gap: 4,
-                      padding: '5px 9px', borderRadius: 8,
-                      background: 'rgba(58,114,168,0.07)', border: '1px solid #8ab4cf',
+                      padding: '5px 9px', borderRadius: 4,
+                      background: 'rgba(60,110,160,0.06)', border: '1px solid rgba(60,110,160,0.25)',
                     }} title="Grok re-runs when BTC moves ≥0.20% from last run">
                       <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--blue)', display: 'inline-block', animation: 'pulse-live 2s ease-in-out infinite', flexShrink: 0 }} />
-                      <span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Δ</span>
+                      <span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em' }}>Δ</span>
                       <span style={{
                         fontFamily: 'var(--font-geist-mono)', fontSize: 12, fontWeight: 700,
                         color: Math.abs(monitorDeltaPct) >= 0.15 ? 'var(--amber)' : 'var(--blue)',
@@ -650,7 +616,7 @@ export default function Home() {
                 <div className="animate-fade-in" style={{
                   position: 'absolute', top: '100%', left: 0, marginTop: 6, zIndex: 50,
                   background: 'var(--bg-card)', border: '1px solid var(--border)',
-                  borderRadius: 12, padding: '12px 16px',
+                  borderRadius: 4, padding: '12px 16px',
                   boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
                   minWidth: 200,
                 }}>

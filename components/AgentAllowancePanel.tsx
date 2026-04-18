@@ -101,19 +101,18 @@ export default function AgentAllowancePanel({
             Trade Agent
           </span>
           <span style={{
-            fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 4,
+            fontSize: 9, fontWeight: 700, padding: '2px 7px', borderRadius: 3,
+            textTransform: 'uppercase', letterSpacing: '0.07em',
             background: accentPale, border: `1px solid ${accentBdr}`,
             color: active ? accentDark : 'var(--blue-dark)',
           }}>
             {active ? 'LIVE' : 'IDLE'}
           </span>
           {(active ? kellyMode : localKelly) && (
-            <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 4, background: 'var(--amber-pale)', border: '1px solid var(--amber)', color: 'var(--amber)' }}>
-              KELLY
-            </span>
+            <span className="pill pill-amber">KELLY</span>
           )}
           {(active ? aiMode : localAiMode) && (
-            <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 4, background: 'rgba(100,60,180,0.12)', border: '1px solid #7c4dcc', color: '#7c4dcc' }}>
+            <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 7px', borderRadius: 3, textTransform: 'uppercase', letterSpacing: '0.07em', background: 'rgba(100,60,180,0.1)', border: '1px solid rgba(124,77,204,0.4)', color: '#7c4dcc' }}>
               GROK AI
             </span>
           )}
@@ -126,28 +125,23 @@ export default function AgentAllowancePanel({
       {/* Kelly / Fixed + AI Mode toggles — only show when not active */}
       {!active && (
         <>
-          <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+          <div className="seg-group" style={{ marginBottom: 6 }}>
             {(['Fixed', 'Kelly'] as const).map(mode => (
-              <button key={mode} onClick={() => setLocalKelly(mode === 'Kelly')} style={{
-                flex: 1, padding: '5px 0', borderRadius: 7, cursor: 'pointer', fontSize: 11, fontWeight: 700,
-                border: `1px solid ${(mode === 'Kelly') === localKelly ? 'var(--brown)' : 'var(--border)'}`,
-                background: (mode === 'Kelly') === localKelly ? 'var(--brown-pale)' : 'transparent',
-                color: (mode === 'Kelly') === localKelly ? 'var(--brown-dark)' : 'var(--text-muted)',
-                transition: 'all 0.15s',
-              }}>
+              <button key={mode}
+                onClick={() => setLocalKelly(mode === 'Kelly')}
+                className={`seg-btn${(mode === 'Kelly') === localKelly ? ' active-brown' : ''}`}
+              >
                 {mode}
               </button>
             ))}
           </div>
-          <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
-            {([['ROMA', false], ['Grok AI', true]] as const).map(([label, val]) => (
-              <button key={label} onClick={() => setLocalAiMode(val)} style={{
-                flex: 1, padding: '5px 0', borderRadius: 7, cursor: 'pointer', fontSize: 11, fontWeight: 700,
-                border: `1px solid ${localAiMode === val ? (val ? '#7c4dcc' : 'var(--blue)') : 'var(--border)'}`,
-                background: localAiMode === val ? (val ? 'rgba(100,60,180,0.12)' : 'rgba(58,114,168,0.12)') : 'transparent',
-                color: localAiMode === val ? (val ? '#7c4dcc' : 'var(--blue-dark)') : 'var(--text-muted)',
-                transition: 'all 0.15s',
-              }}>
+          <div className="seg-group" style={{ marginBottom: 10 }}>
+            {([['Quant', false], ['Grok AI', true]] as const).map(([label, val]) => (
+              <button key={label}
+                onClick={() => setLocalAiMode(val)}
+                className={`seg-btn${localAiMode === val ? (val ? '' : ' active-blue') : ''}`}
+                style={localAiMode === val && val ? { background: '#7c4dcc', color: '#fff' } : {}}
+              >
                 {label}
               </button>
             ))}
@@ -374,27 +368,23 @@ export default function AgentAllowancePanel({
       {!active ? (
         <button
           onClick={() => onStart(localKelly, localBankroll, kellyPct, localAiMode)}
-          style={{
-            width: '100%', padding: '12px 0', borderRadius: 9, cursor: 'pointer',
-            border: '1px solid var(--green)',
-            background: 'var(--green)',
-            fontSize: 13, fontWeight: 800, color: '#fff', letterSpacing: '0.03em',
-            boxShadow: '0 2px 12px rgba(80,168,120,0.25)', transition: 'all 0.15s',
-          }}
-          onMouseEnter={e => { e.currentTarget.style.opacity = '0.88' }}
+          className="btn-flat btn-solid-green"
+          style={{ width: '100%', padding: '11px 0' }}
+          onMouseEnter={e => { e.currentTarget.style.opacity = '0.85' }}
           onMouseLeave={e => { e.currentTarget.style.opacity = '1' }}
         >
-          ▶ Start Agent {localKelly ? `· Kelly ${kellyPct}%` : '· Fixed'} {localAiMode ? '· Grok AI' : '· ROMA'}
+          ▶ Start Agent
+          <span style={{ fontSize: 9, opacity: 0.75, fontWeight: 500, letterSpacing: '0.04em' }}>
+            {localKelly ? `· Kelly ${kellyPct}%` : '· Fixed'} {localAiMode ? '· Grok AI' : '· Quant'}
+          </span>
         </button>
       ) : (
-        <button onClick={onStop} style={{
-          width: '100%', padding: '12px 0', borderRadius: 9, cursor: 'pointer',
-          border: '1px solid var(--pink)', background: 'var(--pink-pale)',
-          fontSize: 13, fontWeight: 800, color: 'var(--pink)', letterSpacing: '0.03em',
-          transition: 'all 0.15s',
-        }}
+        <button
+          onClick={onStop}
+          className="btn-flat btn-outline-pink"
+          style={{ width: '100%', padding: '11px 0' }}
           onMouseEnter={e => { e.currentTarget.style.background = 'var(--pink)'; e.currentTarget.style.color = '#fff' }}
-          onMouseLeave={e => { e.currentTarget.style.background = 'var(--pink-pale)'; e.currentTarget.style.color = 'var(--pink)' }}
+          onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--pink)' }}
         >
           ■ Stop Agent
         </button>
