@@ -55,7 +55,7 @@ if _env_path.exists():
             os.environ.setdefault(k.strip(), v.strip())
 
 KALSHI_API_KEY   = os.environ.get("KALSHI_API_KEY", "")
-KALSHI_KEY_PATH  = os.environ.get("KALSHI_PRIVATE_KEY_PATH", "./kalshi_private_julian.pem")
+KALSHI_KEY_PATH  = os.environ.get("KALSHI_PRIVATE_KEY_PATH", "./kalshi_private.pem")
 
 # ── Kalshi RSA-PSS auth ───────────────────────────────────────────────────────
 def _build_kalshi_headers(method: str, path: str) -> dict:

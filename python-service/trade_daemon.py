@@ -38,7 +38,7 @@ if _env_path.exists():
 
 KALSHI_BASE    = "https://api.elections.kalshi.com/trade-api/v2"
 KALSHI_API_KEY = os.environ.get("KALSHI_API_KEY", "")
-KALSHI_PEM     = os.environ.get("KALSHI_PRIVATE_KEY_PATH", "./kalshi_private_julian.pem")
+KALSHI_PEM     = os.environ.get("KALSHI_PRIVATE_KEY_PATH", "./kalshi_private.pem")
 
 MAX_DAILY_LOSS   = 50.0   # $ hard stop for the day
 MAX_GIVEBACK_X   = 1.5    # stop if peak P&L drops by this × MAX_DAILY_LOSS
