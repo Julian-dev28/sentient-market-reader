@@ -131,20 +131,19 @@ function TradeBox({ yesBid, yesAsk, noBid, noAsk, ticker, liveMode, side, onSide
       </div>
 
       {/* Quick amounts */}
-      <div style={{ display: 'flex', gap: 5, marginBottom: 10 }}>
+      <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
         {QUICK_AMTS.map(q => (
           <button key={q}
             disabled={order.status === 'placing'}
             onClick={() => { setAmtStr(String(q)); if (liveMode) placeIt(q) }}
             title={liveMode ? `Buy ${side} for $${q}` : `Set amount to $${q}`}
             style={{
-              flex: 1, padding: '7px 0', borderRadius: 4,
+              flex: 1, padding: '8px 0', borderRadius: 8,
               border: `1px solid ${liveMode ? 'var(--border-bright)' : 'var(--border)'}`,
               background: 'var(--bg-secondary)',
-              fontSize: 11, fontWeight: 700, color: liveMode ? col : 'var(--text-muted)',
+              fontSize: 12, fontWeight: 700, color: liveMode ? col : 'var(--text-muted)',
               cursor: order.status === 'placing' ? 'not-allowed' : 'pointer',
-              transition: 'all 0.1s', fontFamily: 'var(--font-geist-mono)',
-              letterSpacing: '0.02em',
+              transition: 'all 0.12s', fontFamily: 'var(--font-geist-mono)',
             }}
             onMouseEnter={e => { if (liveMode && order.status !== 'placing') { e.currentTarget.style.background = colPale; e.currentTarget.style.borderColor = colLight } }}
             onMouseLeave={e => { e.currentTarget.style.background = 'var(--bg-secondary)'; e.currentTarget.style.borderColor = liveMode ? 'var(--border-bright)' : 'var(--border)' }}
@@ -182,18 +181,18 @@ function TradeBox({ yesBid, yesAsk, noBid, noAsk, ticker, liveMode, side, onSide
       {order.status === 'idle' && (
         <button onClick={() => placeIt()} disabled={!liveMode}
           style={{
-            width: '100%', padding: '11px 0', borderRadius: 4,
-            border: `1px solid ${liveMode ? colLight : 'var(--border)'}`,
+            width: '100%', padding: '12px 0', borderRadius: 10,
+            border: 'none',
             background: liveMode ? colLight : 'var(--bg-secondary)',
-            fontSize: 11, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase',
+            fontSize: 13, fontWeight: 700, letterSpacing: '0.02em',
             color: liveMode ? '#fff' : 'var(--text-muted)',
             cursor: liveMode ? 'pointer' : 'not-allowed',
-            transition: 'opacity 0.12s',
+            transition: 'opacity 0.15s',
           }}
           onMouseEnter={e => { if (liveMode) e.currentTarget.style.opacity = '0.85' }}
           onMouseLeave={e => { e.currentTarget.style.opacity = '1' }}
         >
-          {liveMode ? `Buy ${isYes ? 'YES' : 'NO'} · $${actualCost}` : `Paper · ${isYes ? 'YES' : 'NO'} @ ${ask}¢`}
+          {liveMode ? `Buy ${isYes ? 'Yes' : 'No'} · $${actualCost}` : `Paper · ${isYes ? 'Yes' : 'No'} @ ${ask}¢`}
         </button>
       )}
       {order.status === 'placing' && (
