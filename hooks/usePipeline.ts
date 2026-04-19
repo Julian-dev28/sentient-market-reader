@@ -248,8 +248,11 @@ export function usePipeline(
               setError(`Order failed: ${errMsg}`)
             } else {
               const orderData = await orderRes.json()
-              console.log(`[bot] Order placed: ${exec.side.toUpperCase()} ${contracts}× @ ${submitPrice}¢ IOC — id=${orderData?.order?.order_id ?? 'n/a'}`)
-              if (autoWindowKey) tradedWindowRef.current = autoWindowKey  // one trade per window
+              const filled = contracts - (orderData?.order?.remaining_count ?? 0)
+              console.log(`[bot] Order: ${exec.side.toUpperCase()} ${filled}/${contracts} filled @ ${submitPrice}¢ IOC — id=${orderData?.order?.order_id ?? 'n/a'}`)
+              // Lock the window only if at least 1 contract filled.
+              // Zero fill = IOC cancelled (no liquidity at our price) → allow retry next cycle.
+              if (autoWindowKey && filled > 0) tradedWindowRef.current = autoWindowKey
             }
             // IOC orders either fill immediately or cancel — no polling loop needed
           } catch (e) { console.error('[bot] Order exception:', e) }
