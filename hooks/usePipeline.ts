@@ -24,6 +24,7 @@ export function usePipeline(
   btcPrice?: number,     // live BTC price — used for strike-flip detection
   strikePrice?: number,  // current market strike price
   marketMode: '15m' | 'hourly' = '15m',  // '15m' = KXBTC15M, 'hourly' = KXBTCD
+  strategyParams?: { minGap?: number; persistTau?: number; maxEntryPrice?: number },
 ) {
   // Separate storage keys so the hourly page never loads stale 15m state
   const STORAGE_KEY = marketMode === 'hourly' ? 'sentient-pipeline-hourly' : 'sentient-pipeline'
@@ -118,6 +119,9 @@ export function usePipeline(
       if (provider2) params.set('provider2', provider2)
       if (providers && providers.length > 1) params.set('providers', providers.join(','))
       if (orModel) params.set('orModel', orModel)
+      if (strategyParams?.minGap      != null) params.set('minGap',        String(strategyParams.minGap))
+      if (strategyParams?.persistTau  != null) params.set('persistTau',    String(strategyParams.persistTau))
+      if (strategyParams?.maxEntryPrice != null) params.set('maxEntryPrice', String(strategyParams.maxEntryPrice))
 
       // Read user-provided API keys from localStorage and send as a header
       const reqHeaders: Record<string, string> = { Accept: 'text/event-stream' }

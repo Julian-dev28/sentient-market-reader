@@ -72,6 +72,8 @@ export function runMarkovAgent(
   gkVol15m?: number | null,
   confidence?: 'high' | 'medium' | 'low',
   isHourly: boolean = false,
+  minGapOverride?: number,
+  persistTauOverride?: number,
 ): AgentResult<MarkovOutput> {
   const start = Date.now()
   checkDailyReset()
@@ -117,9 +119,11 @@ export function runMarkovAgent(
 
   // ── Gate: momentum must be locked-in (persist) and directionally decisive (gap) ──
   // Under 1 minute left, time decay dominates — skip the persist gate entirely.
-  const effectivePersistTau = T <= 1 ? 0 : PERSIST_TAU
+  const activeMinGap      = minGapOverride     ?? MIN_GAP
+  const activePersistTau  = persistTauOverride ?? PERSIST_TAU
+  const effectivePersistTau = T <= 1 ? 0 : activePersistTau
   const gap     = Math.abs(pYes - 0.5)
-  const gateOk  = hasHistory && forecast.persist >= effectivePersistTau && gap >= MIN_GAP
+  const gateOk  = hasHistory && forecast.persist >= effectivePersistTau && gap >= activeMinGap
 
   const recommendation: 'YES' | 'NO' | 'NO_TRADE' =
     !gateOk     ? 'NO_TRADE' :
@@ -130,11 +134,11 @@ export function runMarkovAgent(
   const rejectionReason = !hasHistory
     ? `Building momentum history (${historyLength}/${MIN_HISTORY} observations)`
     : !gateOk
-    ? forecast.persist < PERSIST_TAU && gap < MIN_GAP
-      ? `Not confident enough (${(50 + gap * 100).toFixed(1)}% sure, need 61%+) and BTC momentum is too choppy (need 80%+ consistency)`
-      : forecast.persist < PERSIST_TAU
-      ? `BTC momentum is too choppy to call — only ${(forecast.persist * 100).toFixed(0)}% consistent (need 80%+)`
-      : `Not confident enough — model is ${(50 + gap * 100).toFixed(1)}% sure, need 61%+ to trade`
+    ? forecast.persist < activePersistTau && gap < activeMinGap
+      ? `Not confident enough (${(50 + gap * 100).toFixed(1)}% sure, need ${(50 + activeMinGap * 100).toFixed(0)}%+) and BTC momentum is too choppy (need ${(activePersistTau * 100).toFixed(0)}%+ consistency)`
+      : forecast.persist < activePersistTau
+      ? `BTC momentum is too choppy to call — only ${(forecast.persist * 100).toFixed(0)}% consistent (need ${(activePersistTau * 100).toFixed(0)}%+)`
+      : `Not confident enough — model is ${(50 + gap * 100).toFixed(1)}% sure, need ${(50 + activeMinGap * 100).toFixed(0)}%+ to trade`
     : undefined
 
   // Position sizing is now handled by RiskManager — Markov provides signal only

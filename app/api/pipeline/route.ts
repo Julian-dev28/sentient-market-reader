@@ -42,6 +42,15 @@ export async function GET(req: NextRequest) {
 
   const orModelOverride = req.nextUrl.searchParams.get('orModel') || undefined
 
+  const rawMinGap      = req.nextUrl.searchParams.get('minGap')
+  const rawPersistTau  = req.nextUrl.searchParams.get('persistTau')
+  const rawMaxPrice    = req.nextUrl.searchParams.get('maxEntryPrice')
+  const strategyParams = (rawMinGap || rawPersistTau || rawMaxPrice) ? {
+    minGap:        rawMinGap     ? parseFloat(rawMinGap)     : undefined,
+    persistTau:    rawPersistTau ? parseFloat(rawPersistTau) : undefined,
+    maxEntryPrice: rawMaxPrice   ? parseInt(rawMaxPrice)     : undefined,
+  } : undefined
+
   let apiKeys: Record<string, string> | undefined
   const keysHeader = req.headers.get('x-provider-keys')
   if (keysHeader) {
@@ -341,6 +350,7 @@ export async function GET(req: NextRequest) {
             candles1h,
             candles4h,
             isHourlyMode ? kxbtcdMarket : null,  // only activate KXBTCD in hourly mode
+            strategyParams,
           )
           enc('done', pipeline)
         } catch (err) {

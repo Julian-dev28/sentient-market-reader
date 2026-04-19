@@ -35,13 +35,32 @@ export default function Home() {
 
   const aiRisk = analysisMode === 'ai'  // derived — AI mode enables ROMA risk manager
 
+  const STRATEGY_DEFAULTS = { minGap: 0.11, persistTau: 0.80, maxEntryPrice: 72 }
+  const [strategyParams, setStrategyParams] = useState(STRATEGY_DEFAULTS)
+  const [showStrategyPanel, setShowStrategyPanel] = useState(false)
+
   // Sync from localStorage after hydration
   useEffect(() => {
     const saved = localStorage.getItem('sentient-grok-model')
     if (saved) setOrModel(saved)
     const mode = localStorage.getItem('sentient-analysis-mode')
     if (mode === 'quant' || mode === 'ai') setAnalysisMode(mode)
+    try {
+      const sp = localStorage.getItem('sentient-strategy-params')
+      if (sp) setStrategyParams({ ...STRATEGY_DEFAULTS, ...JSON.parse(sp) })
+    } catch { /* ignore */ }
   }, [])
+
+  function updateStrategyParam(key: keyof typeof STRATEGY_DEFAULTS, value: number) {
+    const next = { ...strategyParams, [key]: value }
+    setStrategyParams(next)
+    localStorage.setItem('sentient-strategy-params', JSON.stringify(next))
+  }
+
+  function resetStrategyParams() {
+    setStrategyParams(STRATEGY_DEFAULTS)
+    localStorage.setItem('sentient-strategy-params', JSON.stringify(STRATEGY_DEFAULTS))
+  }
 
   function handleGrokModelChange(m: string) {
     setOrModel(m)
@@ -81,6 +100,7 @@ export default function Home() {
     analysisMode === 'ai' ? (orModel || 'grok-3') : undefined,  // only pass model in AI mode
     liveBTCPrice || undefined, liveStrikePrice || undefined,
     '15m',
+    strategyParams,
   )
 
   // Keep marketTicker in sync with the pipeline's active market
@@ -519,9 +539,25 @@ export default function Home() {
                   )
                 })()}
 
+                {/* Strategy params button */}
+                <button
+                  onClick={() => { setShowStrategyPanel(v => !v); setShowSettings(false) }}
+                  title="Algo parameters"
+                  style={{
+                    height: 32, borderRadius: 8, cursor: 'pointer', flexShrink: 0,
+                    padding: '0 10px',
+                    border: showStrategyPanel ? '1px solid var(--blue)' : '1px solid var(--border)',
+                    background: showStrategyPanel ? 'var(--blue-pale)' : 'var(--bg-secondary)',
+                    color: showStrategyPanel ? 'var(--blue)' : 'var(--text-muted)',
+                    fontSize: 10, fontWeight: 700, letterSpacing: '0.04em',
+                    transition: 'all 0.15s',
+                  }}>
+                  PARAMS
+                </button>
+
                 {/* Settings gear */}
                 <button
-                  onClick={() => setShowSettings(v => !v)}
+                  onClick={() => { setShowSettings(v => !v); setShowStrategyPanel(false) }}
                   title="Advanced settings"
                   style={{
                     width: 32, height: 32, borderRadius: 8, cursor: 'pointer', flexShrink: 0,
@@ -625,6 +661,44 @@ export default function Home() {
                     {analysisMode === 'quant'
                       ? 'd-score · Cornish-Fisher CF-VaR · GK vol · Kelly sizing. Deterministic & fast.'
                       : 'Quant pipeline + Grok AI risk manager (ROMA). Switch model above.'}
+                  </div>
+                </div>
+              )}
+
+              {showStrategyPanel && (
+                <div className="animate-fade-in" style={{
+                  position: 'absolute', top: '100%', right: 0, marginTop: 6, zIndex: 50,
+                  background: 'var(--bg-card)', border: '1px solid var(--blue)',
+                  borderRadius: 12, padding: '14px 16px',
+                  boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+                  minWidth: 260,
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                    <div style={{ fontSize: 9, fontWeight: 800, color: 'var(--blue)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Algo Parameters</div>
+                    <button onClick={resetStrategyParams} style={{ fontSize: 9, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>reset</button>
+                  </div>
+                  {([
+                    { key: 'minGap',         label: 'Min gap',          unit: '%',  min: 0.05, max: 0.40, step: 0.01, display: (v: number) => (v * 100).toFixed(0),  parse: (s: string) => parseFloat(s) / 100 },
+                    { key: 'persistTau',     label: 'Min persistence',  unit: '%',  min: 0.50, max: 0.99, step: 0.01, display: (v: number) => (v * 100).toFixed(0),  parse: (s: string) => parseFloat(s) / 100 },
+                    { key: 'maxEntryPrice',  label: 'Max entry price',  unit: '¢',  min: 50,   max: 97,   step: 1,    display: (v: number) => String(v),              parse: (s: string) => parseInt(s) },
+                  ] as const).map(({ key, label, unit, min, max, step, display, parse }) => (
+                    <div key={key} style={{ marginBottom: 10 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                        <span style={{ fontSize: 10, color: 'var(--text-secondary)', fontWeight: 600 }}>{label}</span>
+                        <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 11, fontWeight: 700, color: 'var(--blue)' }}>
+                          {display(strategyParams[key])}{unit}
+                        </span>
+                      </div>
+                      <input
+                        type="range" min={min} max={max} step={step}
+                        value={display(strategyParams[key])}
+                        onChange={e => updateStrategyParam(key as keyof typeof STRATEGY_DEFAULTS, parse(e.target.value))}
+                        style={{ width: '100%', accentColor: 'var(--blue)', cursor: 'pointer' }}
+                      />
+                    </div>
+                  ))}
+                  <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 4, lineHeight: 1.5 }}>
+                    Applied on next pipeline run. Saved to localStorage.
                   </div>
                 </div>
               )}

@@ -77,6 +77,7 @@ export function runRiskManager(
   volOfVol?: number | null,
   isHourly: boolean = false,
   markov?: MarkovOutput | null,
+  maxEntryPriceOverride?: number,
 ): AgentResult<RiskOutput> {
   const start = Date.now()
   checkDailyReset()
@@ -132,9 +133,9 @@ export function runRiskManager(
   } else if (limitPrice < RISK_PARAMS.minEntryPrice) {
     approved = false
     rejectionReason = `BUY ${recommendation} entry price ${limitPrice}¢ below min ${RISK_PARAMS.minEntryPrice}¢ — model has no edge at near-50/50 prices`
-  } else if (limitPrice > RISK_PARAMS.maxEntryPrice) {
+  } else if (limitPrice > (maxEntryPriceOverride ?? RISK_PARAMS.maxEntryPrice)) {
     approved = false
-    rejectionReason = `BUY ${recommendation} entry price ${limitPrice}¢ above max ${RISK_PARAMS.maxEntryPrice}¢ — fee eats >12% of gross margin at this price`
+    rejectionReason = `BUY ${recommendation} entry price ${limitPrice}¢ above max ${maxEntryPriceOverride ?? RISK_PARAMS.maxEntryPrice}¢ — fee eats >12% of gross margin at this price`
   } else if (edgePct < RISK_PARAMS.minEdgePct) {
     approved = false
     rejectionReason = `After-fee EV ${edgePct.toFixed(2)}% < minimum ${RISK_PARAMS.minEdgePct}% — insufficient edge to overcome variance`

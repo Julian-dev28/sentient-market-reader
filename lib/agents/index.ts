@@ -64,6 +64,7 @@ export async function runAgentPipeline(
   candles1h?: OHLCVCandle[],  // last 12 × 1h candles — intraday trend context
   candles4h?: OHLCVCandle[],  // last 7 × 4h candles — macro trend context
   kxbtcdMarket?: KalshiMarket | null,  // highest-liquidity KXBTCD hourly strike (passed in hourly mode)
+  strategyParams?: { minGap?: number; persistTau?: number; maxEntryPrice?: number },
 ): Promise<PipelineState> {
   const cycleId = ++cycleCounter
   const cycleStartedAt = new Date().toISOString()
@@ -112,6 +113,8 @@ export async function runAgentPipeline(
     gkVolEarly,
     undefined,
     useKxbtcd,
+    strategyParams?.minGap,
+    strategyParams?.persistTau,
   )
   emit?.('markov', markovGate)
 
@@ -287,6 +290,7 @@ export async function runAgentPipeline(
     probResult.output.volOfVol,
     useKxbtcd,
     markovGate.output,
+    strategyParams?.maxEntryPrice,
   )
   emit?.('risk', riskResult)
 
