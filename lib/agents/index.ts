@@ -39,6 +39,7 @@ import { runProbabilityModel } from './probability-model'
 import { runMarkovAgent } from './markov'
 import { runExecution } from './execution'
 import { runGrokTradingAgent } from './grok-trading-agent'
+import { runRiskManager } from './risk-manager'
 
 let cycleCounter = 0
 
@@ -257,18 +258,50 @@ export async function runAgentPipeline(
   )
   emit?.('probability', probResult)
 
-  // ── Stage 5: Execution — only if Markov + Probability agree on direction ──
-  const probRec   = probResult.output.recommendation
-  const mrkRec    = markovGate.output.recommendation
-  const aligned   = probRec !== 'NO_TRADE' && mrkRec !== 'NO_TRADE' && probRec === mrkRec
-  const finalRec  = aligned ? mrkRec : 'NO_TRADE'
-  const finalSize = aligned ? markovGate.output.positionSize : 0
+  // ── Stage 5: Risk Manager — gates price cap, timing, edge, and sizes position ──
+  const probRec = probResult.output.recommendation
+  const mrkRec  = markovGate.output.recommendation
+  const aligned = probRec !== 'NO_TRADE' && mrkRec !== 'NO_TRADE' && probRec === mrkRec
 
+  let finalRec: 'YES' | 'NO' | 'NO_TRADE' = aligned ? mrkRec : 'NO_TRADE'
+  let finalSize = 0
+
+  const market = mdResult.output.activeMarket
+  const candidatePrice = finalRec === 'YES'
+    ? (market?.yes_ask ?? 50)
+    : finalRec === 'NO'
+      ? (market?.no_ask ?? 50)
+      : 50
+
+  const riskResult = runRiskManager(
+    probResult.output.edgePct,
+    probResult.output.pModel,
+    finalRec,
+    candidatePrice,
+    sentResult.output.score,
+    gkVolEarly,
+    probResult.output.confidence,
+    portfolioValue > 0 ? portfolioValue : 500,
+    mdResult.output.minutesUntilExpiry,
+    pfResult.output.distanceFromStrikePct,
+    probResult.output.volOfVol,
+    useKxbtcd,
+    markovGate.output,
+  )
+  emit?.('risk', riskResult)
+
+  if (riskResult.output.approved) {
+    finalSize = riskResult.output.positionSize
+  } else {
+    finalRec = 'NO_TRADE'
+  }
+
+  // ── Stage 6: Execution ────────────────────────────────────────────────────
   const execResult = await runExecution(
     finalRec,
     finalSize,
     mdResult.output.activeMarket,
-    aligned,
+    finalRec !== 'NO_TRADE',
     portfolioValue > 0 ? portfolioValue : undefined,
     mdResult.output.minutesUntilExpiry,
     provider,
@@ -298,6 +331,7 @@ export async function runAgentPipeline(
       sentiment:       sentResult   as AgentResult<SentimentOutput>,
       probability:     probResult   as AgentResult<ProbabilityOutput>,
       markov:          markovGate   as AgentResult<MarkovOutput>,
+      risk:            riskResult,
       execution:       execResult   as AgentResult<ExecutionOutput>,
     },
   }
