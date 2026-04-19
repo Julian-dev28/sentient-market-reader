@@ -168,7 +168,10 @@ export function runRiskManager(
     ? Math.abs(markov.pHatYes - 0.5)
     : Math.abs((recommendation === 'NO' ? (1 - pModel) : pModel) - 0.5)
   const riskPct    = Math.min(0.05, 0.01 + 0.08 * Math.max(0, markovGap - 0.15))
-  const riskDollars  = portfolioValue * riskPct
+  // Scale down position when vol is elevated vs baseline (0.002 per 15-min candle).
+  // At 2× baseline vol, position halves. At 0.5× baseline, position is uncapped (clamped to 1.0).
+  const volScale   = (gkVol15m && gkVol15m > 0) ? Math.min(1, REFERENCE_VOL_15M / gkVol15m) : 1
+  const riskDollars  = portfolioValue * riskPct * volScale
   const budgetContracts = totalCostPerC > 0 ? Math.round(riskDollars / totalCostPerC) : 0
   const positionSize    = Math.max(1, budgetContracts)
 
@@ -191,7 +194,7 @@ export function runRiskManager(
       tradeCount: sessionState.tradeCount,
     },
     reasoning: approved
-      ? `BUY ${recommendation} approved @ ${limitPrice}¢ (P(WIN)=${(pWin * 100).toFixed(1)}%). Portfolio: $${portfolioValue.toFixed(0)}. Size: ${positionSize} contracts (gap=${(markovGap * 100).toFixed(1)}% → risk=${(riskPct * 100).toFixed(1)}% → $${(riskDollars).toFixed(0)}). Max loss: $${maxLoss.toFixed(2)} (${pctOfPortfolio.toFixed(1)}% of portfolio). Daily P&L: $${sessionState.dailyPnl.toFixed(2)} / limit $${Math.abs(maxDailyLoss).toFixed(0)}.`
+      ? `BUY ${recommendation} approved @ ${limitPrice}¢ (P(WIN)=${(pWin * 100).toFixed(1)}%). Portfolio: $${portfolioValue.toFixed(0)}. Size: ${positionSize} contracts (gap=${(markovGap * 100).toFixed(1)}% → risk=${(riskPct * 100).toFixed(1)}%${volScale < 1 ? ` × vol-scale ${volScale.toFixed(2)}` : ''} → $${riskDollars.toFixed(0)}). Max loss: $${maxLoss.toFixed(2)} (${pctOfPortfolio.toFixed(1)}% of portfolio). Daily P&L: $${sessionState.dailyPnl.toFixed(2)} / limit $${Math.abs(maxDailyLoss).toFixed(0)}.`
       : `BUY ${recommendation} REJECTED — ${rejectionReason}`,
     durationMs: Date.now() - start,
     timestamp: new Date().toISOString(),

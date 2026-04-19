@@ -54,6 +54,7 @@ export function usePipeline(
   const lastCycleStrikeRef   = useRef<number>(0)   // strike price when last cycle completed
   const isRunningRef         = useRef<boolean>(false)
   const aiRiskRef            = useRef<boolean>(aiRisk)
+  const tradedWindowRef      = useRef<string | null>(null)  // window key of last auto-placed trade
 
   // Restore persisted state after mount — must be useEffect (not useState init)
   // so SSR and client both start with the same values and hydration passes.
@@ -198,7 +199,13 @@ export function usePipeline(
       if (!tickerOk && exec.marketTicker) {
         console.error(`[bot] BLOCKED: ticker ${exec.marketTicker} is wrong series for ${marketMode} mode (expected ${expectedPrefix})`)
       }
-      if (autoTrade && liveMode && exec.action !== 'PASS' && exec.side && exec.limitPrice && exec.marketTicker && tickerOk) {
+      // Derive the market window key (e.g. "KXBTC15M-26APR190615") to dedup per window.
+      const autoWindowKey = exec.marketTicker?.split('-').slice(0, 2).join('-') ?? null
+      const alreadyTradedThisWindow = autoWindowKey && tradedWindowRef.current === autoWindowKey
+      if (alreadyTradedThisWindow) {
+        console.log(`[bot] Skipping — already placed a trade in window ${autoWindowKey}`)
+      }
+      if (autoTrade && liveMode && exec.action !== 'PASS' && exec.side && exec.limitPrice && exec.marketTicker && tickerOk && !alreadyTradedThisWindow) {
         const contracts = Math.max(1, exec.contracts ?? Math.floor(100 / (exec.limitPrice / 100)))
         // Fetch fresh quote right before submitting.
         // Use the pipeline's limit price as our cap — the IOC order will fill at the
@@ -242,6 +249,7 @@ export function usePipeline(
             } else {
               const orderData = await orderRes.json()
               console.log(`[bot] Order placed: ${exec.side.toUpperCase()} ${contracts}× @ ${submitPrice}¢ IOC — id=${orderData?.order?.order_id ?? 'n/a'}`)
+              if (autoWindowKey) tradedWindowRef.current = autoWindowKey  // one trade per window
             }
             // IOC orders either fill immediately or cancel — no polling loop needed
           } catch (e) { console.error('[bot] Order exception:', e) }
