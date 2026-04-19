@@ -11,6 +11,7 @@ import type {
   ProbabilityOutput,
   MarkovOutput,
   ExecutionOutput,
+  RiskOutput,
 } from '@/lib/types'
 
 // ── ROMA stage definitions ──────────────────────────────────────────────────
@@ -480,7 +481,7 @@ function MarkovBody({ output, color }: { output: MarkovOutput; color: string }) 
 }
 
 
-function ExecutionBody({ output, color }: { output: ExecutionOutput; color: string }) {
+function ExecutionBody({ output, color, riskRejectionReason }: { output: ExecutionOutput; color: string; riskRejectionReason?: string }) {
   const action  = output.action ?? 'PASS'
   const cost    = output.estimatedCost ?? 0
   const payout  = output.estimatedPayout ?? 0
@@ -550,7 +551,7 @@ function ExecutionBody({ output, color }: { output: ExecutionOutput; color: stri
 
       {isPass && (
         <div style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic', lineHeight: 1.5 }}>
-          No trade this cycle — insufficient edge or risk limit reached.
+          {riskRejectionReason ?? 'No trade this cycle — insufficient edge or risk limit reached.'}
         </div>
       )}
     </div>
@@ -565,6 +566,7 @@ function AgentCard({
   pipelineRunning,
   aiMode,
   isHourly,
+  riskRejectionReason,
 }: {
   agent: AgentCardConfig
   result?: PipelineState['agents'][keyof PipelineState['agents']]
@@ -572,6 +574,7 @@ function AgentCard({
   pipelineRunning?: boolean
   aiMode?: boolean
   isHourly?: boolean
+  riskRejectionReason?: string
 }) {
   const status: AgentStatus = result?.status ?? 'idle'
   const done    = status === 'done'
@@ -643,7 +646,7 @@ function AgentCard({
           if (agent.key === 'sentiment')       return <SentimentBody       output={result.output as SentimentOutput}       color={agent.color} />
           if (agent.key === 'probability')     return <ProbabilityBody     output={result.output as ProbabilityOutput}     color={agent.color} aiMode={aiMode} />
           if (agent.key === 'markov')          return <MarkovBody          output={result.output as MarkovOutput}          color={agent.color} />
-          if (agent.key === 'execution')       return <ExecutionBody       output={result.output as ExecutionOutput}       color={agent.color} />
+          if (agent.key === 'execution')       return <ExecutionBody       output={result.output as ExecutionOutput}       color={agent.color} riskRejectionReason={riskRejectionReason} />
           return null
         })() : pending ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 11, color: 'var(--text-muted)', padding: '6px 0' }}>
@@ -735,7 +738,10 @@ export default function AgentPipeline({
               const result = isRunning
                 ? streamingAgents?.[agent.key]
                 : pipeline?.agents[agent.key]
-              return <AgentCard key={agent.key} agent={agent} result={result} index={i} pipelineRunning={isRunning} aiMode={aiMode} isHourly={isHourly} />
+              const riskRejectionReason = agent.key === 'execution'
+                ? (pipeline?.agents.risk?.output as RiskOutput | undefined)?.rejectionReason
+                : undefined
+              return <AgentCard key={agent.key} agent={agent} result={result} index={i} pipelineRunning={isRunning} aiMode={aiMode} isHourly={isHourly} riskRejectionReason={riskRejectionReason} />
             })}
           </div>
 
