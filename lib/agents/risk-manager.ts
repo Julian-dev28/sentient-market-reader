@@ -121,12 +121,6 @@ export function runRiskManager(
   } else if (distanceFromStrikePct !== undefined && Math.abs(distanceFromStrikePct) < RISK_PARAMS.minDistancePct) {
     approved = false
     rejectionReason = `Price too close to strike (${distanceFromStrikePct.toFixed(4)}% — near-strike trades are ~50/50 noise)`
-  } else if (sessionState.dailyPnl <= maxDailyLoss) {
-    approved = false
-    rejectionReason = `Daily loss limit reached ($${Math.abs(maxDailyLoss).toFixed(0)} = ${RISK_PARAMS.maxDailyLossPct}% of $${portfolioValue.toFixed(0)} portfolio)`
-  } else if (givebackDollars >= givebackLimit) {
-    approved = false
-    rejectionReason = `Session giveback limit: gave back $${givebackDollars.toFixed(2)} from peak $${sessionState.peakPnl.toFixed(2)} (limit: $${givebackLimit.toFixed(0)} = ${RISK_PARAMS.maxGivebackMult}× daily loss cap)`
   } else if (sessionState.tradeCount >= maxTrades) {
     approved = false
     rejectionReason = `Daily trade count cap reached (${maxTrades})`
