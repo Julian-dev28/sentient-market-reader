@@ -35,7 +35,7 @@ export default function PriceChart({
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef    = useRef<HTMLCanvasElement>(null)
-  const rafRef       = useRef<number>()
+  const rafRef       = useRef<number | undefined>(undefined)
 
   // All live state lives in a ref — RAF closure reads it without stale captures
   const live = useRef({
