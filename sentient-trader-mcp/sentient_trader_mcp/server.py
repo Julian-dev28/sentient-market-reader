@@ -364,11 +364,11 @@ async def _analyze(market: dict, bankroll: float) -> dict:
     vol_ok    = gk is None or gk <= REF_VOL_15M * MAX_VOL_MULT
     hurst_ok  = hurst is None or hurst >= MIN_HURST
     markov_ok = has_history and gap >= MARKOV_MIN_GAP and persist >= MIN_PERSIST
-    is_golden = 65 <= yes_ask <= 73
+    limit_price = round(yes_ask if p_yes > 0.5 else no_ask)  # actual trade price
+    is_golden = 65 <= limit_price <= 73   # use trade price, not always yes_ask
     time_ok   = (3 <= minutes_left <= 12) if is_golden else (6 <= minutes_left <= 9)
-    limit_price = round(yes_ask if p_yes > 0.5 else no_ask)
     price_ok  = limit_price <= MAX_ENTRY_PRICE
-    dist_ok   = abs(dist_pct) >= 0.02
+    dist_ok   = abs(dist_pct) >= 0.10    # raised from 0.02 — near-ATM momentum crosses strike in window
 
     reasons: list[str] = []
     if not has_history:  reasons.append(f"building Markov history ({len(full_history)}/20)")
@@ -527,6 +527,8 @@ async def _dispatch(name: str, args: dict) -> Any:
             return {"error": "contracts must be > 0"}
         if not (1 <= limit_price <= 99):
             return {"error": "limit_price must be 1–99 cents"}
+        if limit_price > MAX_ENTRY_PRICE:
+            return {"error": f"BLOCKED: {limit_price}¢ > MAX_ENTRY_PRICE {MAX_ENTRY_PRICE}¢ — run analyze_signal first and only place if approved=true"}
         body = {
             "ticker": ticker, "action": "buy", "side": side, "type": "limit",
             "count": contracts,
