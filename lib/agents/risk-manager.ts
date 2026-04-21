@@ -36,7 +36,7 @@ const RISK_PARAMS = {
   minEdgePct:        0,    // disabled
   minMinutesLeft:    6,    // skip if < 6 min left — 6-9min = 98.3% WR vs 3-6min = 91.7% WR on live fills
   maxMinutesLeft:    9,    // live fills: 9-12min window is 69.5% wr (signal not settled)
-  minDistancePct:   0.10,  // skip near-ATM trades (|dist| < 0.10% → momentum easily crosses strike in window)
+  minDistancePct:   0.05,  // skip near-ATM trades — backtest: 0.05 gives 336 trades @76.8% WR vs 0.10 gives 173 @85% (more volume, better absolute return)
   minEntryPrice:     0,    // no floor — 62¢ and 71¢ zones both profitable
   maxEntryPrice:    72,    // ¢ — market efficiency cap: 71¢ zone (d>2.0) = 91.5% WR; 73¢+ zone = 66% WR (losing)
   maxTradePct:      15,    // % of portfolio per trade

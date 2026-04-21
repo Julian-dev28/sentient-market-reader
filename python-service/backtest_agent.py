@@ -333,7 +333,7 @@ def _process_market_agent(mkt: dict, candles_5m: list, candles_15m: list) -> Opt
     is_golden = 65 <= limit_price <= 73
     time_ok   = (3 <= minutes_left <= 12) if is_golden else (6 <= minutes_left <= 9)
     price_ok  = limit_price <= MAX_ENTRY_PRICE
-    dist_ok   = abs(dist_pct) >= 0.10
+    dist_ok   = abs(dist_pct) >= 0.05
 
     reasons = []
     if not has_history:  reasons.append(f"history {len(full_history)}/{MIN_HISTORY}")

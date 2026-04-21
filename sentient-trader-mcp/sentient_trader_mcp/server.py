@@ -368,7 +368,7 @@ async def _analyze(market: dict, bankroll: float) -> dict:
     is_golden = 65 <= limit_price <= 73   # use trade price, not always yes_ask
     time_ok   = (3 <= minutes_left <= 12) if is_golden else (6 <= minutes_left <= 9)
     price_ok  = limit_price <= MAX_ENTRY_PRICE
-    dist_ok   = abs(dist_pct) >= 0.10    # raised from 0.02 — near-ATM momentum crosses strike in window
+    dist_ok   = abs(dist_pct) >= 0.05    # 0.05 sweet spot: 336 trades @76.8% WR vs 0.10 @85% with only 173 trades
 
     reasons: list[str] = []
     if not has_history:  reasons.append(f"building Markov history ({len(full_history)}/20)")
