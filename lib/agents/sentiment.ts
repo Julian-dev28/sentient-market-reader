@@ -1,6 +1,7 @@
 import type { AgentResult, SentimentOutput, BTCQuote, KalshiMarket, KalshiOrderbook, OHLCVCandle, DerivativesSignal } from '../types'
 import { llmToolCall, type AIProvider } from '../llm-client'
 import { computeQuantSignals, formatQuantBrief } from '../indicators'
+import { callPythonRoma, formatRomaTrace } from '../roma/python-client'
 
 /** Format last N 15-min candles as a compact context block for the LLM.
  *  Input: newest-first [ts, low, high, open, close, volume]
@@ -297,6 +298,70 @@ ${prevContext}`] : []),
     } catch (err) {
       console.error('[SentimentAgent] Grok AI mode failed — falling back to quant:', err instanceof Error ? err.message : err)
       // Fall through to quant result below
+    }
+  }
+
+  // ── ROMA path: LLM-powered sentiment via Sentient roma-dspy ─────────────────
+  // Used when provider is non-grok (Grok has its own aiMode path above).
+  // Falls back to pure quant if the Python service is unavailable.
+  if (provider !== 'grok') {
+    const romaGoal =
+      `Assess short-term BTC directional sentiment for this Kalshi KXBTC15M 15-minute prediction window. ` +
+      `Determine: (1) the dominant price momentum direction from the quantitative indicators, ` +
+      `(2) whether BTC's current position relative to strike is favorable for YES or NO, ` +
+      `(3) confidence level given time pressure (${minutesUntilExpiry.toFixed(1)} min left). ` +
+      `Produce a directional sentiment score: -1.0 = strongly bearish (NO wins), +1.0 = strongly bullish (YES wins).`
+
+    try {
+      const romaResult = await callPythonRoma(romaGoal, context, {
+        romaMode,
+        provider,
+        modelOverride: orModelOverride,
+        apiKeys,
+        signal,
+      })
+      const romaTrace = formatRomaTrace(romaResult)
+
+      const extracted = await llmToolCall<{
+        score: number
+        label: SentimentOutput['label']
+        signals: string[]
+      }>({
+        provider,
+        modelOverride: orModelOverride,
+        tier: 'fast',
+        maxTokens: 512,
+        toolName: 'extract_sentiment',
+        toolDescription: 'Extract structured BTC sentiment data from ROMA analysis output',
+        schema: {
+          properties: {
+            score:   { type: 'number', description: 'Sentiment score: -1.0 = strongly bearish, +1.0 = strongly bullish' },
+            label:   { type: 'string', enum: ['strongly_bullish', 'bullish', 'neutral', 'bearish', 'strongly_bearish'] },
+            signals: { type: 'array', items: { type: 'string' }, description: 'Top 3-5 signals from the ROMA analysis' },
+          },
+          required: ['score', 'label', 'signals'],
+        },
+        prompt: `Extract structured sentiment data from this ROMA analysis:\n\n${romaResult.answer}`,
+      })
+
+      const romaScore = Math.max(-1, Math.min(1, extracted.score))
+      return {
+        agentName: `SentimentAgent (roma-dspy · ${romaResult.provider})`,
+        status: 'done',
+        output: {
+          score:         romaScore,
+          label:         extracted.label,
+          momentum:      quant.velocity?.velocityPerMin ?? 0,
+          orderbookSkew: quant.obImbalance?.simple ?? 0,
+          signals:       extracted.signals.slice(0, 5),
+          provider:      `roma-dspy/${romaResult.provider}`,
+        },
+        reasoning: romaTrace + `\n\nScore: ${romaScore.toFixed(3)} (${extracted.label}) — ${extracted.signals.join(' | ')}`,
+        durationMs: Date.now() - start,
+        timestamp: new Date().toISOString(),
+      }
+    } catch (err) {
+      console.warn('[SentimentAgent] ROMA failed, falling back to quant:', err instanceof Error ? err.message : err)
     }
   }
 

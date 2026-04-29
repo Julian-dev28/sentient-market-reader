@@ -1,6 +1,7 @@
 import type { AgentResult, ProbabilityOutput, KalshiMarket, OHLCVCandle, DerivativesSignal } from '../types'
 import { llmToolCall, type AIProvider } from '../llm-client'
 import { computeQuantSignals, formatQuantBrief } from '../indicators'
+import { callPythonRoma, formatRomaTrace } from '../roma/python-client'
 
 export async function runProbabilityModel(
   sentimentScore: number | null,    // null when running in parallel with sentiment agent
@@ -145,6 +146,101 @@ export async function runProbabilityModel(
     } catch (err) {
       console.error('[ProbabilityModelAgent] Grok AI mode failed — falling back to quant:', err instanceof Error ? err.message : err)
       // Fall through to quant (with d-gate) below
+    }
+  }
+
+  // ── ROMA path: LLM-powered probability via Sentient roma-dspy ──────────────
+  // Used when provider is non-grok (Grok has its own aiMode path above).
+  // Receives quant priors as context; direction lock is applied to ROMA's pModel.
+  // Falls back to pure quant if the Python service is unavailable.
+  if (provider !== 'grok') {
+    const aboveStrikeRoma = distanceFromStrikePct >= 0
+    const distUSDRoma = strikePrice > 0 ? Math.abs(distanceFromStrikePct / 100) * strikePrice : 0
+
+    const romaGoal =
+      `Estimate P(YES) — the probability that BTC closes AT OR ABOVE the Kalshi strike at window expiry. ` +
+      `BTC is currently ${aboveStrikeRoma ? 'ABOVE' : 'BELOW'} strike by $${distUSDRoma.toFixed(0)}. ` +
+      `${minutesUntilExpiry.toFixed(1)} minutes remain. ` +
+      `Use the quantitative priors and market signals provided to estimate P(YES) and give a trade recommendation.`
+
+    const romaContext = [
+      sentimentScore !== null ? `Sentiment score: ${sentimentScore.toFixed(4)} (range -1 bearish → +1 bullish)` : null,
+      sentimentSignals?.length ? `Sentiment signals: ${sentimentSignals.join(' | ')}` : null,
+      `BTC vs strike: ${aboveStrikeRoma ? '+' : ''}${distanceFromStrikePct.toFixed(4)}% ($${distUSDRoma.toFixed(0)} ${aboveStrikeRoma ? 'above' : 'below'})`,
+      `Minutes to close: ${minutesUntilExpiry.toFixed(2)}`,
+      `Market-implied P(YES): ${(pMarket * 100).toFixed(1)}¢`,
+      `Brownian physics prior P(YES): ${pBrownian !== null ? (pBrownian * 100).toFixed(1) + '%' : 'n/a'}`,
+      `D-score: ${dScore !== null ? dScore.toFixed(3) : 'n/a'} (d>2.0=71¢ entry zone 91.5% WR; entry >72¢ blocked by risk-mgr)`,
+      `σ_15m: ${quant.gkVol15m !== null ? (quant.gkVol15m * 100).toFixed(3) + '%' : 'n/a'}`,
+      quantBrief,
+    ].filter(Boolean).join('\n')
+
+    try {
+      const romaResult = await callPythonRoma(romaGoal, romaContext, {
+        romaMode,
+        provider,
+        modelOverride: orModelOverride,
+        apiKeys,
+        signal,
+      })
+      const romaTrace = formatRomaTrace(romaResult)
+
+      const extracted = await llmToolCall<{
+        pModel: number
+        recommendation: ProbabilityOutput['recommendation']
+        confidence: ProbabilityOutput['confidence']
+      }>({
+        provider,
+        modelOverride: orModelOverride,
+        tier: 'fast',
+        maxTokens: 512,
+        toolName: 'extract_probability',
+        toolDescription: 'Extract probability estimate and trade recommendation from ROMA analysis',
+        schema: {
+          properties: {
+            pModel:         { type: 'number', description: `P(YES) 0.0–1.0. Direction lock enforced: must be ${aboveStrikeRoma ? '≥ 0.50' : '≤ 0.50'}.` },
+            recommendation: { type: 'string', enum: ['YES', 'NO', 'NO_TRADE'], description: 'YES = buy YES. NO = buy NO. NO_TRADE = insufficient edge.' },
+            confidence:     { type: 'string', enum: ['high', 'medium', 'low'] },
+          },
+          required: ['pModel', 'recommendation', 'confidence'],
+        },
+        prompt: `Extract probability estimate and recommendation from this ROMA analysis:\n\n${romaResult.answer}\n\nMarket-implied P(YES): ${(pMarket * 100).toFixed(1)}%`,
+      })
+
+      // Apply direction lock — same rule as quant model
+      let pModelRoma = Math.max(0.05, Math.min(0.95, extracted.pModel))
+      if (aboveStrikeRoma  && pModelRoma < 0.5) pModelRoma = 1 - pModelRoma
+      if (!aboveStrikeRoma && pModelRoma > 0.5) pModelRoma = 1 - pModelRoma
+      pModelRoma = Math.max(0.05, Math.min(0.95, pModelRoma))
+
+      const recRoma        = extracted.recommendation
+      const entryPriceRoma = recRoma === 'YES' ? pMarket : noAsk
+      const feeRoma        = 0.0175 * entryPriceRoma * (1 - entryPriceRoma)
+      const pWinRoma       = recRoma === 'YES' ? pModelRoma : (1 - pModelRoma)
+      const edgeRoma       = pWinRoma * ((1 - entryPriceRoma) - feeRoma) + (1 - pWinRoma) * (-entryPriceRoma - feeRoma)
+      const edgePctRoma    = edgeRoma * 100
+
+      return {
+        agentName: `ProbabilityModelAgent (roma-dspy · ${romaResult.provider})`,
+        status: 'done',
+        output: {
+          pModel:         pModelRoma,
+          pMarket,
+          edge:           edgeRoma,
+          edgePct:        edgePctRoma,
+          recommendation: recRoma,
+          confidence:     extracted.confidence,
+          provider:       `roma-dspy/${romaResult.provider}`,
+          gkVol15m:       quant.gkVol15m,
+          volOfVol:       quant.volOfVol,
+          dScore,
+        },
+        reasoning: romaTrace + `\n\nP(YES)=${(pModelRoma * 100).toFixed(1)}% vs P(mkt)=${(pMarket * 100).toFixed(1)}% — edge: ${edgePctRoma >= 0 ? '+' : ''}${edgePctRoma.toFixed(1)}%. Rec: ${recRoma} (${extracted.confidence})`,
+        durationMs: Date.now() - start,
+        timestamp: new Date().toISOString(),
+      }
+    } catch (err) {
+      console.warn('[ProbabilityModelAgent] ROMA failed, falling back to quant:', err instanceof Error ? err.message : err)
     }
   }
 
