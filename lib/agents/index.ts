@@ -171,8 +171,41 @@ export async function runAgentPipeline(
     emit?.('probability', grok.probability)
 
     // Grok has final say — no direction alignment requirement
-    const finalRec  = grok.probability.output.recommendation
-    const finalSize = grok.execution.output.contracts ?? 0
+    let finalRec  = grok.probability.output.recommendation
+    let finalSize = grok.execution.output.contracts ?? 0
+
+    // ── Risk gates apply to ALL paths — AI mode is not exempt ─────────────
+    const marketAI = mdResult.output.activeMarket
+    const candidatePriceAI = finalRec === 'YES'
+      ? (marketAI?.yes_ask ?? 50)
+      : finalRec === 'NO'
+        ? (marketAI?.no_ask ?? 50)
+        : 50
+
+    const riskResultAI = runRiskManager(
+      grok.probability.output.edgePct,
+      grok.probability.output.pModel,
+      finalRec,
+      candidatePriceAI,
+      grok.sentiment.output.score,
+      gkVolEarly,
+      grok.probability.output.confidence,
+      portfolioValue > 0 ? portfolioValue : 500,
+      mdResult.output.minutesUntilExpiry,
+      pfResult.output.distanceFromStrikePct,
+      grok.probability.output.volOfVol,
+      useKxbtcd,
+      markovGate.output,
+      strategyParams?.maxEntryPrice,
+    )
+    emit?.('risk', riskResultAI)
+
+    if (riskResultAI.output.approved) {
+      finalSize = riskResultAI.output.positionSize
+    } else {
+      finalRec = 'NO_TRADE'
+      finalSize = 0
+    }
 
     const execResultAI = await runExecution(
       finalRec,

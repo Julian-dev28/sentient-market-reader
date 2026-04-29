@@ -90,6 +90,23 @@ export function parseKXBTC15MCloseMs(ticker: string): number {
   return Date.UTC(year, month, day, hour - etOffsetHours, min)
 }
 
+/**
+ * Parse the close-time UTC ms from a KXBTCD event ticker.
+ * Ticker format: KXBTCD-{YY}{MON}{DD}{HH} where HH is the closing ET hour.
+ * Returns 0 if parsing fails.
+ */
+export function parseKXBTCDCloseMs(ticker: string): number {
+  const m = ticker.match(/(\d{2})(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)(\d{2})(\d{2})$/)
+  if (!m) return 0
+  const year  = 2000 + parseInt(m[1])
+  const month = MONTHS_ET.indexOf(m[2])  // 0-based
+  if (month < 0) return 0
+  const day  = parseInt(m[3])
+  const hour = parseInt(m[4])
+  const etOffsetHours = (month >= 2 && month <= 10) ? -4 : -5  // EDT Mar–Nov, EST otherwise
+  return Date.UTC(year, month, day, hour - etOffsetHours, 0, 0, 0)
+}
+
 /** Find the nearest-expiry open market in the series */
 export function findNearestMarket(markets: KalshiMarket[]): KalshiMarket | null {
   if (!markets.length) return null

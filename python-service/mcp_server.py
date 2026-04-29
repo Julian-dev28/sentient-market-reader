@@ -36,7 +36,8 @@ from run_backtest import (
     build_markov_history, build_transition_matrix, predict_from_momentum,
     price_change_to_state, gk_vol, compute_hurst, simulate, process_market,
     MARKOV_MIN_GAP, MIN_PERSIST, KELLY_FRACTION, MAX_TRADE_PCT,
-    MAX_ENTRY_PRICE_RM, MAKER_FEE_RATE, STARTING_CASH, DAYS_BACK,
+    MAX_ENTRY_PRICE_RM, MAX_ENTRY_PRICE_YES, MAX_ENTRY_PRICE_NO,
+    MAKER_FEE_RATE, STARTING_CASH, DAYS_BACK,
     EMPIRICAL_PRICE_BY_D, BLOCKED_UTC_HOURS,
 )
 
@@ -379,12 +380,14 @@ async def _dispatch(name: str, args: dict) -> Any:
         for d_lo, d_hi, emp_p in EMPIRICAL_PRICE_BY_D:
             if d_lo <= d_abs < d_hi:
                 in_money_price = emp_p; break
-        limit_price = round(yes_ask if p_yes > 0.5 else no_ask)
-        price_ok = limit_price <= MAX_ENTRY_PRICE_RM
+        side_is_yes = p_yes > 0.5
+        limit_price = round(yes_ask if side_is_yes else no_ask)
+        price_cap   = MAX_ENTRY_PRICE_YES if side_is_yes else MAX_ENTRY_PRICE_NO
+        price_ok    = limit_price <= price_cap
 
         rec = "NO_TRADE"
         if markov_ok and not blocked and vol_ok and hurst_ok and time_ok and price_ok:
-            rec = "YES" if p_yes > 0.5 else "NO"
+            rec = "YES" if side_is_yes else "NO"
 
         # Kelly sizing
         p_win        = p_yes if rec == "YES" else (1 - p_yes)
@@ -410,7 +413,7 @@ async def _dispatch(name: str, args: dict) -> Any:
         if not vol_ok:         reasons.append(f"high vol regime (GK={gk:.4f})")
         if not hurst_ok:       reasons.append(f"mean-reverting (Hurst={hurst:.2f})")
         if not time_ok:        reasons.append(f"timing: {minutes_left:.1f}min outside window")
-        if not price_ok:       reasons.append(f"price {limit_price}¢ > {MAX_ENTRY_PRICE_RM}¢ cap")
+        if not price_ok:       reasons.append(f"price {limit_price}¢ > {'YES' if side_is_yes else 'NO'} cap {price_cap}¢")
 
         return {
             "recommendation":   rec,

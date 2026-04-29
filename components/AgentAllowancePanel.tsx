@@ -25,7 +25,7 @@ interface AgentAllowancePanelProps {
   onStart: (kellyMode: boolean, bankroll: number, kellyPct: number, aiMode: boolean) => void
   onStop: () => void
   onSetAllowance: (amount: number, kellyMode?: boolean, bankroll?: number) => void
-  onRunCycle: () => void
+  onRunCycle?: () => void
 }
 
 export default function AgentAllowancePanel({
@@ -45,13 +45,23 @@ export default function AgentAllowancePanel({
   const [liveD, setLiveD] = useState<number | undefined>(serverD)
   const liveDRef = useRef<number | undefined>(serverD)
 
-  useEffect(() => { setLiveD(serverD); liveDRef.current = serverD }, [serverD])
-  useEffect(() => { setLocalKelly(kellyMode) }, [kellyMode])
-  useEffect(() => { setLocalAiMode(aiMode) }, [aiMode])
+  // Mirror serverD -> liveD only when it actually changes. Using a ref guard
+  // avoids the effect triggering React's "Maximum update depth exceeded" guard
+  // when the parent re-renders with an equivalent serverD on every SSE tick.
+  useEffect(() => {
+    if (serverD === liveDRef.current) return
+    liveDRef.current = serverD
+    setLiveD(serverD)
+  }, [serverD])
+  useEffect(() => { setLocalKelly(prev => prev !== kellyMode ? kellyMode : prev) }, [kellyMode])
+  useEffect(() => { setLocalAiMode(prev => prev !== aiMode ? aiMode : prev) }, [aiMode])
   // Prefer defaultBankroll (live Kalshi balance) over server bankroll for initial display
   useEffect(() => {
-    if (defaultBankroll && defaultBankroll > 0 && !active) setLocalBankroll(defaultBankroll)
-    else if (bankroll > 0) setLocalBankroll(bankroll)
+    if (defaultBankroll && defaultBankroll > 0 && !active) {
+      setLocalBankroll(prev => prev !== defaultBankroll ? defaultBankroll : prev)
+    } else if (bankroll > 0) {
+      setLocalBankroll(prev => prev !== bankroll ? bankroll : prev)
+    }
   }, [defaultBankroll, bankroll, active])
 
   // Fetch BTC price every 5s and compute % distance from strike — only while monitoring
@@ -64,8 +74,11 @@ export default function AgentAllowancePanel({
         const { price } = await res.json()
         if (!price || price <= 0 || !strikePrice) return
         const distPct = ((price - strikePrice) / strikePrice) * 100
-        setLiveD(distPct)
+        // Guard against redundant state updates (pipeline may re-trigger this
+        // effect rapidly via strikePrice/agentPhase changes).
+        if (liveDRef.current === distPct) return
         liveDRef.current = distPct
+        setLiveD(distPct)
       } catch {}
     }
     compute()

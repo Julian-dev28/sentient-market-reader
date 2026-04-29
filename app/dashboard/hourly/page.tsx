@@ -17,8 +17,6 @@ import PipelineHistory from '@/components/PipelineHistory'
 // - Late-start warning at 10 min remaining (not 2 min).
 
 export default function HourlyDashboard() {
-  const [botActive, setBotActive]             = useState(false)
-  const [showBotWarning, setShowBotWarning]   = useState(false)
   const [showLateWarning, setShowLateWarning] = useState(false)
   const [analysisMode, setAnalysisMode]       = useState<'ai' | 'quant'>('ai')
   const [orModel, setOrModel]                 = useState<string>('grok-3')
@@ -64,8 +62,8 @@ export default function HourlyDashboard() {
 
   // Pipeline — always hourly + AI (Grok price prediction)
   const aiMode = analysisMode === 'ai'
-  const { pipeline, history, streamingAgents, isRunning, serverLocked, nextCycleIn, error, runCycle, stopCycle, monitorDeltaPct } = usePipeline(
-    true, botActive, aiMode, undefined, undefined,
+  const { pipeline, history, streamingAgents, isRunning, serverLocked, error, runCycle, stopCycle } = usePipeline(
+    true, false, aiMode, undefined, undefined,
     aiMode ? (orModel || 'grok-3') : undefined,
     liveBTCPrice || undefined, liveStrikePrice || undefined,
     'hourly',
@@ -189,27 +187,6 @@ export default function HourlyDashboard() {
         lastCompletedAt={pipeline?.cycleCompletedAt}
         onRunCycle={isRunning || serverLocked ? undefined : runCycle}
       />
-
-      {/* Bot start modal */}
-      {showBotWarning && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.35)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div className="card animate-fade-in" style={{ maxWidth: 420, width: '90%', padding: '28px 28px' }}>
-            <div style={{ fontSize: 22, marginBottom: 10 }}>◷</div>
-            <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-primary)', marginBottom: 8 }}>Start Hourly Trading Agent?</div>
-            <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 20 }}>
-              The bot will run Grok price prediction at the start of each hour window and automatically place a <strong>$100 live order</strong> when the signal clears risk checks.
-              <br /><br />
-              <span style={{ color: 'var(--pink)', fontWeight: 700 }}>⚠ Live mode — real money will be used.</span>
-              <br /><br />
-              Risk guards: edge gate · $150 daily loss cap · 15% drawdown limit.
-            </div>
-            <div style={{ display: 'flex', gap: 10 }}>
-              <button onClick={() => setShowBotWarning(false)} style={{ flex: 1, padding: '10px 0', borderRadius: 9, cursor: 'pointer', border: '1px solid var(--border)', background: 'var(--bg-secondary)', fontSize: 13, fontWeight: 700, color: 'var(--text-secondary)' }}>Cancel</button>
-              <button onClick={() => { setShowBotWarning(false); setBotActive(true) }} style={{ flex: 1, padding: '10px 0', borderRadius: 9, cursor: 'pointer', border: '1px solid var(--pink)', background: 'var(--pink)', fontSize: 13, fontWeight: 700, color: '#fff', boxShadow: '0 2px 10px rgba(224,111,160,0.35)' }}>▶ Start Agent</button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Late-start warning */}
       {showLateWarning && (
@@ -418,38 +395,8 @@ export default function HourlyDashboard() {
                   )
                 })()}
 
-                {/* AI monitor delta badge */}
-                {botActive && !isRunning && monitorDeltaPct !== null && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 9px', borderRadius: 8, background: 'rgba(224,111,160,0.07)', border: '1px solid rgba(224,111,160,0.3)' }} title="Grok re-runs when BTC moves ≥0.20% from last run">
-                    <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--pink)', display: 'inline-block', animation: 'pulse-live 2s ease-in-out infinite', flexShrink: 0 }} />
-                    <span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Δ</span>
-                    <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 12, fontWeight: 700, color: Math.abs(monitorDeltaPct) >= 0.15 ? 'var(--amber)' : 'var(--pink)' }}>
-                      {monitorDeltaPct >= 0 ? '+' : ''}{monitorDeltaPct.toFixed(2)}%
-                    </span>
-                  </div>
-                )}
-
-                {/* Bot toggle */}
-                {!botActive ? (
-                  <button onClick={() => setShowBotWarning(true)} style={{ padding: '7px 16px', borderRadius: 9, cursor: 'pointer', border: '1.5px solid rgba(224,111,160,0.4)', background: 'transparent', color: 'var(--pink)', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}>
-                    ◷ Start Bot
-                  </button>
-                ) : (
-                  <button onClick={() => setBotActive(false)} style={{ padding: '7px 16px', borderRadius: 9, cursor: 'pointer', border: '1.5px solid var(--pink)', background: 'var(--pink)', color: '#fff', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}>
-                    ■ Stop Bot
-                  </button>
-                )}
               </div>
             </div>
-
-            {/* Next cycle countdown (bot mode) */}
-            {botActive && !isRunning && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px', borderRadius: 10, background: 'rgba(224,111,160,0.06)', border: '1px solid rgba(224,111,160,0.2)' }}>
-                <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--pink)', display: 'inline-block', animation: 'pulse-live 2s ease-in-out infinite', flexShrink: 0 }} />
-                <span style={{ fontSize: 11, color: 'var(--text-secondary)', fontWeight: 600 }}>Grok auto-monitoring</span>
-                <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 11, color: 'var(--pink)', fontWeight: 700, marginLeft: 'auto' }}>next in {nextCycleIn}s</span>
-              </div>
-            )}
 
             <PriceChart priceHistory={priceHistory} strikePrice={strikePrice} currentPrice={currentBTCPrice} />
             <AgentPipeline pipeline={pipeline} isRunning={isRunning} streamingAgents={streamingAgents} aiMode={aiMode} marketMode="hourly" />

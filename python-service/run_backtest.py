@@ -63,13 +63,14 @@ MAX_VOL_MULT         = 1.25
 # Confidence-tiered flat risk (replaces Kelly)
 # risk_pct = min(20%, KELLY_FRACTION × kelly_full)
 
-# Risk / sizing — MAX_ENTRY_PRICE_RM targets the market efficiency zone:
-# 65-73¢ windows are where Markov gets 93.8% WR but market only prices ~71¢.
-# 79-85¢ windows need 82% WR to profit — Markov only delivers 76% there.
+# Risk / sizing — side-specific entry price caps from live trade analysis (147 fills, Apr 19-22):
+# YES≤72¢: all buckets ≤72¢ are +EV. YES 72¢+ = -$9.34/trade (67% WR vs 76% needed).
+# NO≤65¢:  NO 65-72¢ = -$7.71/trade (53% WR vs 69% needed) — consensus-following bad payout.
+# Backtest unchanged: EMPIRICAL_PRICE_BY_D never generates NO above ~38¢, so NO cap is implicit.
 MIN_ENTRY_PRICE_RM   = 0     # no floor — let any price through
-MAX_ENTRY_PRICE_RM   = 72    # cap: only bet where market underprices our signal
-                             # 71¢ zone (d>2.0): 91.5% WR, market prices ~71¢ → massive edge
-                             # 73¢ zone (d∈[0.5,0.8]): 66% WR, market prices 73¢ → losing
+MAX_ENTRY_PRICE_YES  = 72    # ¢ — YES cap: market underprices our momentum signal at ≤72¢
+MAX_ENTRY_PRICE_NO   = 65    # ¢ — NO cap: above 65¢ NO = consensus trade with bad payout ratio
+MAX_ENTRY_PRICE_RM   = MAX_ENTRY_PRICE_YES  # kept for external imports expecting this name
 MIN_DIST_PCT         = 0.02
 MAX_CONTRACTS_RM     = 500
 REF_VOL_15M          = 0.002
@@ -81,7 +82,7 @@ MAX_DAILY_LOSS_FLOOR = 0
 MAX_DAILY_LOSS_CAP   = 500
 MAX_GIVEBACK_MULT    = 1.5
 POLLER_INTERVAL_MIN  = 0.5
-BLOCKED_UTC_HOURS    = {11, 18}
+BLOCKED_UTC_HOURS    = {8, 11, 16, 18, 21}  # live data: 8=44%WR, 16=36%WR, 21=40%WR (147 fills Apr 19-22)
 
 MAKER_FEE_RATE     = 0.0175
 MAX_ORDER_DEPTH    = 25
@@ -469,7 +470,8 @@ def process_market(mkt: dict, candles_15m: list, candles_5m: list) -> dict | Non
             no_ask, yes_ask = in_money_price, 100.0 - in_money_price
 
         limit_price_cents = round(yes_ask if rec == 'yes' else no_ask)
-        if MAX_ENTRY_PRICE_RM > 0 and limit_price_cents > MAX_ENTRY_PRICE_RM:
+        side_max_bt = MAX_ENTRY_PRICE_YES if rec == 'yes' else MAX_ENTRY_PRICE_NO
+        if side_max_bt > 0 and limit_price_cents > side_max_bt:
             continue
 
         p_gap      = abs(p_yes - 0.5)
@@ -536,7 +538,8 @@ def simulate(records: list) -> float:
         giveback_dollars = (session_peak_pnl - session_daily_pnl) if session_peak_pnl > 0 else 0.0
 
         skip_reason = None
-        if MAX_ENTRY_PRICE_RM > 0 and lp > MAX_ENTRY_PRICE_RM: skip_reason = f'price {lp}¢ > max {MAX_ENTRY_PRICE_RM}¢'
+        side_max_sim = MAX_ENTRY_PRICE_YES if r['side'] == 'yes' else MAX_ENTRY_PRICE_NO
+        if side_max_sim > 0 and lp > side_max_sim: skip_reason = f"price {lp}¢ > {'YES' if r['side']=='yes' else 'NO'} cap {side_max_sim}¢"
         elif session_daily_pnl <= max_daily_loss:      skip_reason = 'daily_loss_limit'
         elif giveback_dollars >= giveback_limit:        skip_reason = 'session_giveback'
         elif session_trade_count >= MAX_TRADES_PER_DAY: skip_reason = 'max_trades'

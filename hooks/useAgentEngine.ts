@@ -46,14 +46,27 @@ export function useAgentEngine(orModel?: string) {
   const [serverState, setServerState]       = useState<AgentStateSnapshot>(DEFAULT_STATE)
   const [streamingAgents, setStreamingAgents] = useState<PartialPipelineAgents>({})
   const esRef = useRef<EventSource | null>(null)
+  // Track the last applied state JSON so we can bail out on identical snapshots
+  // (the server pushes a fresh object every tick; without this guard every
+  // countdown tick schedules a re-render and React will eventually trip its
+  // "Maximum update depth exceeded" guard under bursty emits).
+  const lastStateJsonRef = useRef<string>('')
+
+  const applyServerState = useCallback((s: AgentStateSnapshot) => {
+    let j: string
+    try { j = JSON.stringify(s) } catch { j = '' }
+    if (j && j === lastStateJsonRef.current) return
+    lastStateJsonRef.current = j
+    setServerState(s)
+  }, [])
 
   // ── Hydrate state immediately on mount (no SSE delay) ───────────────────
   useEffect(() => {
     fetch('/api/agent/state')
       .then(r => r.json())
-      .then(s => setServerState(s))
+      .then(s => applyServerState(s))
       .catch(() => {})
-  }, [])
+  }, [applyServerState])
 
   // ── Subscribe to SSE stream ──────────────────────────────────────────────
   useEffect(() => {
@@ -67,19 +80,21 @@ export function useAgentEngine(orModel?: string) {
 
       es.addEventListener('state', (e: MessageEvent) => {
         if (destroyed) return
-        try { setServerState(JSON.parse(e.data)) } catch (e) { console.warn('[SSE] Malformed state frame:', e) }
+        try { applyServerState(JSON.parse(e.data)) } catch (err) { console.warn('[SSE] Malformed state frame:', err) }
       })
 
       es.addEventListener('agent', (e: MessageEvent) => {
         if (destroyed) return
         try {
-          const { key, result } = JSON.parse(e.data)
-          setStreamingAgents(prev => ({ ...prev, [key]: result }))
-        } catch (e) { console.warn('[SSE] Malformed agent frame:', e) }
+          const { key, result } = JSON.parse(e.data) as { key: keyof PartialPipelineAgents; result: PartialPipelineAgents[keyof PartialPipelineAgents] }
+          setStreamingAgents(prev => (prev[key] === result ? prev : { ...prev, [key]: result }))
+        } catch (err) { console.warn('[SSE] Malformed agent frame:', err) }
       })
 
       es.addEventListener('pipeline_start', () => {
-        if (!destroyed) setStreamingAgents({})
+        if (destroyed) return
+        // Preserve reference when already empty to avoid a no-op re-render.
+        setStreamingAgents(prev => (Object.keys(prev).length === 0 ? prev : {}))
       })
 
       es.onerror = () => {

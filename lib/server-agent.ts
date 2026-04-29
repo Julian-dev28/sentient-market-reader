@@ -33,8 +33,9 @@ import { KALSHI_HOST, getCurrentEventTicker, parseKXBTC15MCloseMs } from './kals
 const TARGET_MINUTES_BEFORE_CLOSE = 14  // start monitoring 14 min before close (1 min into each 15-min window)
 const MIN_MINUTES_LEFT       = 2         // safety floor: don't trade with < 2 min left
 const POST_WINDOW_BUFFER_MS  = 5_000
-const MIN_FAST_ENTRY_PRICE   = 78   // ¢ — sweet spot is 78-99¢ (94-100% win rate)
-const MAX_FAST_ENTRY_PRICE   = 99   // ¢ — no hard upper cap; high prices = high win rate
+const MIN_FAST_ENTRY_PRICE     = 55   // ¢ — matches risk manager floor
+const MAX_FAST_ENTRY_PRICE_YES = 72   // ¢ — YES: all buckets ≤72¢ are +EV in live data
+const MAX_FAST_ENTRY_PRICE_NO  = 65   // ¢ — NO: 65¢+ is -EV (consensus-following, bad payout ratio)
 
 // Kalshi maker fee: ceil(0.0175 × C × P × (1-P)) — agent places resting limit orders
 const MAKER_FEE_RATE = 0.0175
@@ -424,8 +425,9 @@ class ServerAgent extends EventEmitter {
       if (!market) return
 
       const askPrice = side === 'yes' ? market.yes_ask : market.no_ask
-      if (askPrice < MIN_FAST_ENTRY_PRICE || askPrice > MAX_FAST_ENTRY_PRICE) {
-        console.log(`[ServerAgent] Fast-path: ask=${askPrice}¢ outside [${MIN_FAST_ENTRY_PRICE}, ${MAX_FAST_ENTRY_PRICE}]¢ window — skip`)
+      const maxFastPrice = side === 'yes' ? MAX_FAST_ENTRY_PRICE_YES : MAX_FAST_ENTRY_PRICE_NO
+      if (askPrice < MIN_FAST_ENTRY_PRICE || askPrice > maxFastPrice) {
+        console.log(`[ServerAgent] Fast-path: ${side}_ask=${askPrice}¢ outside [${MIN_FAST_ENTRY_PRICE}, ${maxFastPrice}]¢ — skip`)
         return
       }
 
@@ -916,6 +918,11 @@ class ServerAgent extends EventEmitter {
           const liveMarket = normalizeKalshiMarket(quoteData.market ?? quoteData)
           const freshPrice = exec.side === 'yes' ? liveMarket.yes_ask : liveMarket.no_ask
           if (freshPrice > 0) {
+            const maxFreshPrice = exec.side === 'yes' ? MAX_FAST_ENTRY_PRICE_YES : MAX_FAST_ENTRY_PRICE_NO
+            if (freshPrice > maxFreshPrice) {
+              console.log(`[ServerAgent] Fresh quote: ${exec.side}_ask=${freshPrice}¢ > ${maxFreshPrice}¢ cap — SKIP (price moved after pipeline approval)`)
+              return
+            }
             console.log(`[ServerAgent] Fresh quote: ${exec.side}_ask=${freshPrice}¢ (was ${exec.limitPrice}¢)`)
             liveLimitPrice = freshPrice
           }

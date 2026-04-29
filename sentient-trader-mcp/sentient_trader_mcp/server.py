@@ -50,13 +50,15 @@ def _kalshi_pem() -> str:
 # ── Strategy constants (overridable via env) ───────────────────────────────────
 MARKOV_MIN_GAP  = float(os.environ.get("MARKOV_MIN_GAP",  "0.11"))
 MIN_PERSIST     = float(os.environ.get("MIN_PERSIST",     "0.82"))
-MAX_ENTRY_PRICE = int(  os.environ.get("MAX_ENTRY_PRICE", "72"))
+MAX_ENTRY_PRICE_YES = int(os.environ.get("MAX_ENTRY_PRICE_YES", "72"))  # YES ≤72¢: all +EV in live data
+MAX_ENTRY_PRICE_NO  = int(os.environ.get("MAX_ENTRY_PRICE_NO",  "65"))  # NO 65¢+: -$7.71/trade (53% WR vs 69% needed)
+MAX_ENTRY_PRICE     = MAX_ENTRY_PRICE_YES   # kept for legacy callers
 MAX_VOL_MULT    = float(os.environ.get("MAX_VOL_MULT",    "1.25"))
 MIN_HURST       = float(os.environ.get("MIN_HURST",       "0.50"))
 MAKER_FEE_RATE  = 0.0175
 MAX_TRADE_PCT   = 0.20
 KELLY_FRACTION  = 0.18
-BLOCKED_HOURS   = {11, 18}
+BLOCKED_HOURS   = {8, 11, 16, 18, 21}  # live data: 8=44%WR, 16=36%WR, 21=40%WR
 REF_VOL_15M     = 0.002
 
 # ── Markov chain internals ─────────────────────────────────────────────────────
@@ -364,10 +366,12 @@ async def _analyze(market: dict, bankroll: float) -> dict:
     vol_ok    = gk is None or gk <= REF_VOL_15M * MAX_VOL_MULT
     hurst_ok  = hurst is None or hurst >= MIN_HURST
     markov_ok = has_history and gap >= MARKOV_MIN_GAP and persist >= MIN_PERSIST
-    limit_price = round(yes_ask if p_yes > 0.5 else no_ask)  # actual trade price
-    is_golden = 65 <= limit_price <= 73   # use trade price, not always yes_ask
+    side_is_yes = p_yes > 0.5
+    limit_price = round(yes_ask if side_is_yes else no_ask)
+    price_cap   = MAX_ENTRY_PRICE_YES if side_is_yes else MAX_ENTRY_PRICE_NO
+    is_golden = 65 <= limit_price <= 73 and side_is_yes  # golden zone only relevant for YES
     time_ok   = (3 <= minutes_left <= 12) if is_golden else (6 <= minutes_left <= 9)
-    price_ok  = limit_price <= MAX_ENTRY_PRICE
+    price_ok  = limit_price <= price_cap
     dist_ok   = abs(dist_pct) >= 0.05    # 0.05 sweet spot: 336 trades @76.8% WR vs 0.10 @85% with only 173 trades
 
     reasons: list[str] = []
@@ -377,7 +381,7 @@ async def _analyze(market: dict, bankroll: float) -> dict:
     if not vol_ok:       reasons.append(f"high vol GK={gk:.5f}" if gk else "vol unavailable")
     if not hurst_ok:     reasons.append(f"mean-reverting Hurst={hurst:.2f}" if hurst else "hurst unavailable")
     if not time_ok:      reasons.append(f"{minutes_left:.1f}min outside {'3-12' if is_golden else '6-9'}min window")
-    if not price_ok:     reasons.append(f"price {limit_price}¢ > {MAX_ENTRY_PRICE}¢ cap")
+    if not price_ok:     reasons.append(f"price {limit_price}¢ > {'YES' if side_is_yes else 'NO'} cap {price_cap}¢")
     if not dist_ok:      reasons.append(f"near-strike noise dist={dist_pct:.4f}%")
 
     all_ok = markov_ok and not blocked and vol_ok and hurst_ok and time_ok and price_ok and dist_ok
@@ -527,8 +531,9 @@ async def _dispatch(name: str, args: dict) -> Any:
             return {"error": "contracts must be > 0"}
         if not (1 <= limit_price <= 99):
             return {"error": "limit_price must be 1–99 cents"}
-        if limit_price > MAX_ENTRY_PRICE:
-            return {"error": f"BLOCKED: {limit_price}¢ > MAX_ENTRY_PRICE {MAX_ENTRY_PRICE}¢ — run analyze_signal first and only place if approved=true"}
+        side_cap = MAX_ENTRY_PRICE_YES if side == "yes" else MAX_ENTRY_PRICE_NO
+        if limit_price > side_cap:
+            return {"error": f"BLOCKED: {limit_price}¢ > {'YES' if side == 'yes' else 'NO'} cap {side_cap}¢ — run analyze_signal first and only place if approved=true"}
         body = {
             "ticker": ticker, "action": "buy", "side": side, "type": "limit",
             "count": contracts,

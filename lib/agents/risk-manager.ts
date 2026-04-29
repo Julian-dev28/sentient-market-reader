@@ -38,7 +38,8 @@ const RISK_PARAMS = {
   maxMinutesLeft:    9,    // live fills: 9-12min window is 69.5% wr (signal not settled)
   minDistancePct:   0.05,  // skip near-ATM trades — backtest: 0.05 gives 336 trades @76.8% WR vs 0.10 gives 173 @85% (more volume, better absolute return)
   minEntryPrice:     0,    // no floor — 62¢ and 71¢ zones both profitable
-  maxEntryPrice:    72,    // ¢ — market efficiency cap: 71¢ zone (d>2.0) = 91.5% WR; 73¢+ zone = 66% WR (losing)
+  maxEntryPriceYes: 72,    // ¢ — YES: live data shows YES 55-72¢ all +EV; YES 72¢+ = -$9.34/trade
+  maxEntryPriceNo:  65,    // ¢ — NO cap lower: NO 65-72¢ = -$7.71/trade (53% WR vs 69% needed). Above 65¢ NO is consensus-following with bad payout.
   maxTradePct:      15,    // % of portfolio per trade
 }
 // Computed giveback limit: how far (in $) today's P&L can fall from its peak before we stop.
@@ -93,10 +94,10 @@ export function runRiskManager(
   let rejectionReason: string | undefined
 
   // ── Time-of-day gate (UTC) ────────────────────────────────────────────────
-  // Empirical analysis of 2,690 live fills: hours 11 and 18 UTC are catastrophically
-  // bad even within the confirmed d∈[1.0,1.2] edge zone (-57pp and -40pp margin).
-  // 11:00 UTC = pre-market US / Asian session close. 18:00 UTC = US afternoon news flow.
-  const BLOCKED_UTC_HOURS = new Set([11, 18])
+  // Hours 11, 18: catastrophically bad from 2,690 live fills (-57pp/-40pp margin).
+  // Hours 8, 16, 21: added from 147-fill Apr 19-22 dataset — 44%/36%/40% WR vs 68% overall.
+  // 8 UTC = EU open noise; 16 UTC = US pre-close turbulence; 21 UTC = thin late-US liquidity.
+  const BLOCKED_UTC_HOURS = new Set([8, 11, 16, 18, 21])
   const utcHour = new Date().getUTCHours()
 
   // Time gate params differ by market type
@@ -127,9 +128,12 @@ export function runRiskManager(
   } else if (limitPrice < RISK_PARAMS.minEntryPrice) {
     approved = false
     rejectionReason = `BUY ${recommendation} entry price ${limitPrice}¢ below min ${RISK_PARAMS.minEntryPrice}¢ — model has no edge at near-50/50 prices`
-  } else if (limitPrice > (maxEntryPriceOverride ?? RISK_PARAMS.maxEntryPrice)) {
+  } else if (recommendation === 'YES' && limitPrice > (maxEntryPriceOverride ?? RISK_PARAMS.maxEntryPriceYes)) {
     approved = false
-    rejectionReason = `BUY ${recommendation} entry price ${limitPrice}¢ above max ${maxEntryPriceOverride ?? RISK_PARAMS.maxEntryPrice}¢ — fee eats >12% of gross margin at this price`
+    rejectionReason = `BUY YES entry price ${limitPrice}¢ above max ${maxEntryPriceOverride ?? RISK_PARAMS.maxEntryPriceYes}¢ — YES 72¢+ = -$9.34/trade in live data (67% WR vs 76% needed)`
+  } else if (recommendation === 'NO' && limitPrice > (maxEntryPriceOverride ?? RISK_PARAMS.maxEntryPriceNo)) {
+    approved = false
+    rejectionReason = `BUY NO entry price ${limitPrice}¢ above max ${maxEntryPriceOverride ?? RISK_PARAMS.maxEntryPriceNo}¢ — NO 65¢+ is consensus-following with bad payout (53% WR vs 69% needed in live data)`
   } else if (edgePct < RISK_PARAMS.minEdgePct) {
     approved = false
     rejectionReason = `After-fee EV ${edgePct.toFixed(2)}% < minimum ${RISK_PARAMS.minEdgePct}% — insufficient edge to overcome variance`

@@ -652,11 +652,19 @@ def _extract_llm_inputs(mkt: dict, candles_oldest_first: list[dict]) -> Optional
 
 # ── P&L simulation helper ─────────────────────────────────────────────────────
 
-def _build_result(records: list[dict], starting_cash: float, days: int) -> dict:
+def _build_result(records: list[dict], starting_cash: float, days: int,
+                  kelly_fraction_override: Optional[float] = None) -> dict:
     """Simulate half-Kelly compounding on the backtest records and return summary."""
     cash = starting_cash
     for r in records:
         half_k   = r.get('halfKelly', 0.0)
+        # Rescale to a flat Kelly fraction if override is given.
+        # Records are priced at 50¢ (≤73¢ tier → tiered frac = 0.35) so
+        # full_kelly = halfKelly / 0.35; new_half_k = full_kelly * override.
+        if kelly_fraction_override is not None:
+            lp = r.get('limitPrice', 50)
+            old_frac = 0.35 if lp <= 73 else 0.12 if lp <= 79 else 0.08 if lp <= 85 else 0.05
+            half_k = half_k / old_frac * kelly_fraction_override if old_frac > 0 else 0.0
         limit_p  = r['limitPrice'] / 100.0
         bet      = min(cash * half_k, cash * 0.10)  # cap at 10% of bankroll
         bet      = max(0.0, bet)
@@ -707,6 +715,7 @@ def run_backtest(
     limit: Optional[int] = None,
     model_override: Optional[str] = None,
     starting_cash: float = 100.0,
+    kelly_fraction_override: Optional[float] = None,
 ) -> dict:
     """
     Run historical backtest for the last `days_back` days.
@@ -732,7 +741,7 @@ def run_backtest(
         markets = markets[:limit]
     if not markets:
         logger.warning("[BACKTEST] No settled markets found")
-        return _build_result([], starting_cash, days_back)
+        return _build_result([], starting_cash, days_back, kelly_fraction_override)
 
     # 2. Date range for BTC candles
     close_times = []
@@ -754,7 +763,7 @@ def run_backtest(
     candles = fetch_btc_candles_bulk(earliest, latest)
     if len(candles) < 10:
         logger.warning(f"[BACKTEST] Only {len(candles)} candles fetched — aborting")
-        return _build_result([], starting_cash, days_back)
+        return _build_result([], starting_cash, days_back, kelly_fraction_override)
 
     # 4. Quant pass — compute all records without LLM
     quant_records: list[dict] = []
@@ -775,7 +784,7 @@ def run_backtest(
             f"[BACKTEST] Done — {len(quant_records)} records produced, "
             f"{skipped} skipped (of {len(markets)} total markets)"
         )
-        return _build_result(quant_records, starting_cash, days_back)
+        return _build_result(quant_records, starting_cash, days_back, kelly_fraction_override)
 
     # 5. LLM enrichment pass — parallel ROMA calls for a sample of markets
     from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -853,4 +862,4 @@ def run_backtest(
         f"({llm_enriched} LLM-enriched, {len(final_records) - llm_enriched} quant-only), "
         f"{skipped} skipped"
     )
-    return _build_result(final_records, starting_cash, days_back)
+    return _build_result(final_records, starting_cash, days_back, kelly_fraction_override)

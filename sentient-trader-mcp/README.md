@@ -2,9 +2,7 @@
 
 > Autonomous Kalshi BTC prediction market trader — MCP server for Claude Code
 
-Give Claude Code full authority to analyze Kalshi BTC options markets and place real trades on your behalf. The engine uses a Markov chain momentum signal with empirically-tuned gates (timing, vol regime, Hurst exponent, price cap) to identify high-probability entries.
-
-**Backtest (30 days, $200 start):** +397% return · 82% win rate · 5% max drawdown
+Give Claude Code full authority to analyze Kalshi BTC options markets and place real trades on your behalf. The engine uses a Markov chain momentum signal with empirically-tuned gates (timing, vol regime, Hurst exponent, side-specific price caps) to identify high-probability entries.
 
 ---
 
@@ -68,38 +66,47 @@ Or ask directly:
 **Markov chain momentum** — a 9-state model of 5-min BTC price changes. Chapman-Kolmogorov propagation over T steps gives P(BTC above strike at expiry).
 
 **Gates (all must pass to trade):**
-- Markov gap ≥ 11pp from 50% — model must be ≥61% confident
-- Markov persistence ≥ 82% — momentum state must be self-reinforcing
-- Garman-Klass vol ≤ 1.25× reference — skip chaotic windows
-- Hurst exponent ≥ 0.50 — trending regime only, not mean-reverting
-- Timing: 6–9 min (standard) or 3–12 min (65–73¢ golden zone)
-- Entry price ≤ 72¢ — above this the market is efficiently priced
+- Markov gap ≥ 11pp from 50% — model must be ≥61% directionally confident
+- Markov persistence ≥ 82% — dominant state must self-reinforce
+- Minimum 20 transitions before the matrix is trusted
+- GK vol ≤ 1.25× baseline — skip chaotic high-vol regimes
+- Hurst exponent ≥ 0.50 — skip mean-reverting markets
+- Distance from strike ≥ 0.05% — skip near-ATM noise
+- Entry 6–9 min before close (3–12 min for YES in 65–73¢ golden zone)
 
-**Kelly sizing (tiered by price zone):**
-- 65–73¢: 35% Kelly · 73–79¢: 12% Kelly · 79–85¢: 8% Kelly
+**Risk rules (hardcoded — not configurable):**
+| Parameter | Value |
+|---|---|
+| Entry price cap — YES | ≤ 72¢ |
+| Entry price cap — NO | ≤ 65¢ |
+| Blocked UTC hours | 8, 11, 16, 18, 21 |
+| Max Kelly fraction | 18% |
+| Max position size | 20% of bankroll |
 
-**Blocked UTC hours:** 11:00 and 18:00 (empirically -40pp to -57pp margin)
+**Why split price caps?**  
+Live data analysis (147 fills): NO trades at 65–72¢ return −$7.71/trade (53% WR vs 69% break-even needed). Above 65¢, NO is a consensus-following bet with terrible payout. YES up to 72¢ is profitable across all buckets; 72¢+ loses −$9.34/trade.
+
+**Blocked hours** — empirically catastrophic from live fills:
+- 11 UTC: EU/US handover (−57pp margin); 18 UTC: US afternoon news (−40pp)
+- 8 UTC: EU open noise (44% WR); 16 UTC: US pre-close (36% WR); 21 UTC: thin liquidity (40% WR)
 
 ---
 
-## Overridable Parameters
+## Environment Variables
 
-Set via environment variables:
-
-```env
-MARKOV_MIN_GAP=0.11
-MIN_PERSIST=0.82
-MAX_ENTRY_PRICE=72
-MAX_VOL_MULT=1.25
-MIN_HURST=0.50
-```
+| Variable | Default | Description |
+|---|---|---|
+| `KALSHI_API_KEY` | — | Kalshi API key ID (required) |
+| `KALSHI_PRIVATE_KEY_PATH` | — | Path to RSA private key PEM (required) |
+| `MARKOV_MIN_GAP` | `0.11` | Minimum Markov directional gap |
+| `MIN_PERSIST` | `0.82` | Minimum Markov persistence |
+| `MAX_ENTRY_PRICE_YES` | `72` | YES price cap in cents |
+| `MAX_ENTRY_PRICE_NO` | `65` | NO price cap in cents |
+| `MAX_VOL_MULT` | `1.25` | Max vol multiplier vs 0.2%/candle baseline |
+| `MIN_HURST` | `0.50` | Min Hurst exponent (trend filter) |
 
 ---
 
 ## Disclaimer
 
-This places **real orders with real money** on a regulated prediction market exchange. Use at your own risk. Nothing here is financial advice. Start with `analyze_signal` in read-only mode before enabling live trading.
-
-## License
-
-MIT
+Places real orders with real money on a regulated prediction market exchange. Always run `analyze_signal` first — never call `place_trade` unless `approved: true`. Use at your own risk. Nothing here is financial advice.
